@@ -1,0 +1,6 @@
+[workspace]
+members = [
+  "core",
+  "modules/test",
+]
+default-members = [ "core" ]

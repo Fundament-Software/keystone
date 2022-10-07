@@ -57,6 +57,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "async-trait"
+version = "0.1.57"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "76464446b8bc32758d7e88ee1a804d9914cd9b1cb264c029899680b0be29826f"
+dependencies = [
+ "proc-macro2 1.0.39",
+ "quote 1.0.18",
+ "syn 1.0.100",
+]
+
+[[package]]
+name = "atomic-counter"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "62f447d68cfa5a9ab0c1c862a703da2a65b5ed1b7ce1153c9eb0169506d56019"
+
+[[package]]
 name = "atty"
 version = "0.2.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -171,6 +188,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ddf2d33bdc66ac282c34d34ecc9f8d8f1d82d1540994c5f8ed1c36dd0f95aaf3"
 
 [[package]]
+name = "capnp_import"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "capnpc",
+ "cmake",
+ "reqwest",
+ "zip-extract",
+]
+
+[[package]]
 name = "capnpc"
 version = "0.14.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -199,6 +227,15 @@ checksum = "158b0bd7d75cbb6bf9c25967a48a2e9f77da95876b858eadfabaa99cd069de6e"
 dependencies = [
  "num",
  "time",
+]
+
+[[package]]
+name = "cmake"
+version = "0.1.48"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e8ad8cef104ac57b68b89df3208164d228503abbdce70f6880ffa3d970e7443a"
+dependencies = [
+ "cc",
 ]
 
 [[package]]
@@ -728,9 +765,11 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "assert_fs",
+ "async-trait",
+ "atomic-counter",
  "cap-std",
  "capnp",
- "capnpc",
+ "capnp_import",
  "chrono",
  "couch_rs",
  "dlopen",
@@ -738,9 +777,9 @@ dependencies = [
  "log",
  "predicates",
  "pretty_env_logger",
- "reqwest",
+ "serde",
+ "serde_json",
  "tokio",
- "zip-extract",
 ]
 
 [[package]]

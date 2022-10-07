@@ -1,5 +1,8 @@
-use couch_rs::types::find::FindQuery;
-use log::{error, info, warn, LevelFilter};
+#![allow(dead_code)]
+mod couchdb;
+mod database;
+mod node;
+
 use std::env;
 use std::error::Error;
 extern crate pretty_env_logger;
@@ -8,11 +11,11 @@ use hyper::{Body, Request, Response, Server};
 use std::convert::Infallible;
 use std::net::SocketAddr;
 
+// H+oF9JVyf=aR2=D7jCRk
 const DB_HOST: &str = "http://localhost:5984";
 const TEST_DB: &str = "test_db";
-mod example_capnp {
-    include!(concat!(env!("OUT_DIR"), "/schema/example_capnp.rs"));
-}
+
+include!(concat!(env!("OUT_DIR"), "/capnp_include.rs"));
 
 async fn hello_world(_req: Request<Body>) -> Result<Response<Body>, Infallible> {
     Ok(Response::new("Hello, World".into()))
@@ -32,11 +35,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .target(pretty_env_logger::env_logger::fmt::Target::Stdout)
         .init();
 
-    /*let client = couch_rs::Client::new(DB_HOST, "admin", "password")?;
+    let b = std::time::SystemTime::now();
 
-    let db = client.db(TEST_DB).await?;
-    let find_all = FindQuery::find_all();
-    let docs = db.find_raw(&find_all).await?;*/
+    let db: couchdb::CouchDB =
+        couchdb::CouchDB::new(DB_HOST, "fundament", "hunter2", "SYSLOG").await?;
+    let node = node::Node::new(0, &db, &db, "KEYSTONE");
 
     let addr = SocketAddr::from(([127, 0, 0, 1], 8080));
 

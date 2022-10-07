@@ -190,6 +190,7 @@ checksum = "ddf2d33bdc66ac282c34d34ecc9f8d8f1d82d1540994c5f8ed1c36dd0f95aaf3"
 [[package]]
 name = "capnp_import"
 version = "0.1.0"
+source = "git+https://github.com/Fundament-Software/capnp_import#b79bcd86786b701ee069ff47089d52d50b0b0f78"
 dependencies = [
  "anyhow",
  "capnpc",

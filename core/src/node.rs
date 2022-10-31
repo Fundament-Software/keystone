@@ -1,22 +1,19 @@
+use crate::database::DocumentStore;
+
 use super::database;
 use anyhow::Result;
 use std::collections::HashMap;
 
-pub struct Node<'a> {
+pub struct Node<'a, T: database::DocumentStore, U: database::LogStore> {
     id: u64,
-    db: &'a dyn database::DocumentStore,
-    log: &'a dyn database::LogStore,
-    coredb: Box<dyn database::Database>,
+    db: &'a T,
+    log: &'a U,
+    coredb: T::DB,
     modules: HashMap<u64, u64>,
 }
 
-impl<'a> Node<'a> {
-    pub async fn new(
-        id: u64,
-        db: &'a dyn database::DocumentStore,
-        log: &'a dyn database::LogStore,
-        coredb: &str,
-    ) -> Result<Node<'a>> {
+impl<'a, T: database::DocumentStore, U: database::LogStore> Node<'a, T, U> {
+    pub async fn new(id: u64, db: &'a T, log: &'a U, coredb: &str) -> Result<Node<'a, T, U>> {
         let coredb = db.create_database(coredb).await?;
 
         // Load module metadata

@@ -2,9 +2,13 @@ use super::database;
 use anyhow::Result;
 use async_trait::async_trait;
 use atomic_counter::{AtomicCounter, RelaxedCounter};
+use capnp::capability::Promise;
+use capnp::Error;
+use capnp_rpc::pry;
 use couch_rs::document::TypedCouchDocument;
 use couch_rs::types::document::DocumentId;
 use couch_rs::CouchDocument;
+use futures::{AsyncReadExt, FutureExt, StreamExt, TryFutureExt};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -30,16 +34,73 @@ impl CouchDB {
     }
 }
 
+impl crate::database_capnp::connection::Server for CouchDB {
+    fn create_database(
+        &mut self,
+        params: crate::database_capnp::connection::CreateDatabaseParams,
+        results: crate::database_capnp::connection::CreateDatabaseResults,
+    ) -> capnp::capability::Promise<(), capnp::Error> {
+        let args = pry!(params.get());
+        let name = args.get_name().unwrap();
+
+        /*Promise::from_future(
+            async move {
+                let db = match self.client.make_db(name).await {
+                    Ok(db) => db,
+                    Err(x) => self.client.db(name).await?,
+                };
+                //results.get().set_database(db);
+                Ok(())
+            }
+            .map_err(|e: Box<dyn std::error::Error>| Error::failed(format!("{:?}", e))),
+        )*/
+        capnp::capability::Promise::err(capnp::Error::unimplemented(
+            "method connection::Server::create_database not implemented".to_string(),
+        ))
+    }
+
+    fn get_database(
+        &mut self,
+        _: crate::database_capnp::connection::GetDatabaseParams,
+        _: crate::database_capnp::connection::GetDatabaseResults,
+    ) -> capnp::capability::Promise<(), capnp::Error> {
+        capnp::capability::Promise::err(capnp::Error::unimplemented(
+            "method connection::Server::get_database not implemented".to_string(),
+        ))
+    }
+
+    fn destroy_database(
+        &mut self,
+        _: crate::database_capnp::connection::DestroyDatabaseParams,
+        _: crate::database_capnp::connection::DestroyDatabaseResults,
+    ) -> capnp::capability::Promise<(), capnp::Error> {
+        capnp::capability::Promise::err(capnp::Error::unimplemented(
+            "method connection::Server::destroy_database not implemented".to_string(),
+        ))
+    }
+}
+
 #[async_trait]
 impl database::Database for couch_rs::database::Database {
     async fn store_document(&self, schema: u64, payload: &[u8]) -> Result<()> {
+        //self.upsert()
+        Ok(())
+    }
+    async fn store_struct<T: std::marker::Send>(&self, data: T) -> Result<()> {
         Ok(())
     }
     async fn get_document(&self, name: &str) -> Result<Vec<u8>> {
+        //let doc = self.get::<CouchDocument>(name).await?;
+
         Ok(Vec::new())
     }
+    async fn get_struct<T: Default>(&self, id: &str) -> Result<T> {
+        //self.upsert()
+        let a = T::default();
+        Ok(a)
+    }
     async fn delete_document(&self, name: &str) -> Result<bool> {
-        let doc = self.get::<Value>(name).await?;
+        let doc: Value = self.get(name).await?;
         Ok(self.remove(&doc).await)
     }
     async fn create_view(&self, name: &str, query: &str) -> Result<()> {
@@ -55,17 +116,17 @@ impl database::Database for couch_rs::database::Database {
 
 #[async_trait]
 impl database::DocumentStore for CouchDB {
-    async fn create_database(&self, name: &str) -> Result<Box<dyn database::Database>> {
-        let db = match self.client.make_db(name).await {
-            Ok(db) => db,
-            Err(x) => self.client.db(name).await?,
-        };
-        Ok(Box::new(db))
+    type DB = couch_rs::database::Database;
+
+    async fn create_database(&self, name: &str) -> Result<Self::DB> {
+        let db = self.client.make_db(name).await?;
+
+        Ok(db)
     }
-    async fn use_database(&self, name: &str) -> Result<Box<dyn database::Database>> {
+    async fn use_database(&self, name: &str) -> Result<Self::DB> {
         let db = self.client.db(name).await?;
 
-        Ok(Box::new(db))
+        Ok(db)
     }
     async fn destroy_database(&self, name: &str) -> Result<bool> {
         Ok(self.client.destroy_db(name).await?)

@@ -4,8 +4,10 @@ use serde::{Deserialize, Serialize};
 
 #[async_trait]
 pub trait Database {
-    async fn store_document(&self, schema: u64, payload: &[u8]) -> Result<()>;
+    async fn store_document(&self, schema: u64, message: &[u8]) -> Result<()>;
+    async fn store_struct<T: std::marker::Send>(&self, data: T) -> Result<()>;
     async fn get_document(&self, id: &str) -> Result<Vec<u8>>;
+    async fn get_struct<T: Default>(&self, id: &str) -> Result<T>;
     async fn delete_document(&self, id: &str) -> Result<bool>;
     async fn create_view(&self, name: &str, query: &str) -> Result<()>;
     async fn query_view(&self, name: &str) -> Result<String>;
@@ -14,8 +16,10 @@ pub trait Database {
 
 #[async_trait]
 pub trait DocumentStore {
-    async fn create_database(&self, name: &str) -> Result<Box<dyn Database>>;
-    async fn use_database(&self, name: &str) -> Result<Box<dyn Database>>;
+    type DB: Database;
+
+    async fn create_database(&self, name: &str) -> Result<Self::DB>;
+    async fn use_database(&self, name: &str) -> Result<Self::DB>;
     async fn destroy_database(&self, name: &str) -> Result<bool>;
 }
 

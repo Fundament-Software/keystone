@@ -4,3 +4,9 @@ members = [
   "modules/test",
 ]
 default-members = [ "core" ]
+
+[patch.crates-io]
+capnp = { path = "../capnproto-rust/capnp" }
+capnp-rpc = { path = "../capnproto-rust/capnp-rpc" }
+capnp-futures = { path = "../capnproto-rust/capnp-futures" }
+capnpc = { path = "../capnproto-rust/capnpc" }

@@ -12,7 +12,6 @@ repository = "https://github.com/Fundament-Software/keystone/tree/master/core"
 readme = "README.md"
 keywords = ["backend", "infrastructure", "management", "enterprise", "distributed"]
 license = "Apache-2.0"
-build = "build.rs"
 
 [dependencies]
 anyhow = "1.0.65"
@@ -25,7 +24,7 @@ log = { version = "0.4", features = ["kv_unstable"] }
 pretty_env_logger = "0.4.0"
 hyper = { version = "0.14", features = ["full"] }
 couch_rs = "0.9"
-chrono = "0.3"
+chrono = "0.4"
 dlopen = "0.1.8"
 async-trait = "0.1.57"
 serde = "1.0"

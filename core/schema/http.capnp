@@ -2,7 +2,7 @@
 
 interface Https {
   domain @0 () -> (domain :Domain);
-  # Might need some argument or I need to lookup if there's special syntax for none - on that note interfaces might be structs?
+  # Might need some argument or I need to lookup if there's special syntax for none
 }
 
 interface Domain {
@@ -13,12 +13,13 @@ interface Domain {
 interface Path {
   query @0 (key :Text, value :Text) -> (path :Path);
   path @1 (name :Text) -> (path :Path);
-  # Is this just a getter? It might be artefact from Domain - ask about this
+  # Probably constructor
   subpath @2 () -> (path :Path);
-  get @3 () -> (response :Response);
+  getHttp @3 () -> (response :Response);
+  # renamed temporarily to avoid name clashes
 }
 
-struct Response {
-# This surely is a struct - Https probably as well, but leave it at this for now
-  content @0 :Text;
+interface Response {
+# Struct is implicit
+  content @0 () -> (content :Text);
 }

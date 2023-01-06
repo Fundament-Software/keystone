@@ -3,11 +3,15 @@ use crate::http_capnp::https as Https;
 use capnp::capability::Promise;
 pub struct DomainImpl {
     https_cap: Https::Client,
+    domain_name: String,
 }
 
 impl DomainImpl {
-    pub fn new(https_cap: Https::Client) -> Self {
-        DomainImpl { https_cap }
+    pub fn new(https_cap: Https::Client, domain_name: &str) -> Self {
+        DomainImpl {
+            https_cap,
+            domain_name: domain_name.to_string(),
+        }
     }
 }
 

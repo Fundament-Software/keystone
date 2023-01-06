@@ -9,9 +9,9 @@ pub struct PathImpl {
 }
 
 impl PathImpl {
-    pub fn new(path_name: String, https_cap: Https::Client, domain_cap: Domain::Client) {
+    pub fn new(path_name: String, https_cap: Https::Client, domain_cap: Domain::Client) -> Self {
         // TODO String should be something that coerces to String
-        PathImpl { query: todo!() }
+        return PathImpl { query: todo!() };
     }
 }
 

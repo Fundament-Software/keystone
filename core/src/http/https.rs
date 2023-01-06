@@ -5,6 +5,7 @@ use capnp_rpc::pry;
 use hyper::client::HttpConnector;
 use hyper_tls::HttpsConnector;
 
+#[derive(Clone)]
 struct HttpsImpl {
     https_client: hyper::Client<HttpsConnector<HttpConnector>>,
 }
@@ -24,7 +25,7 @@ impl Https::Server for HttpsImpl {
         mut results: Https::DomainResults,
     ) -> Promise<(), capnp::Error> {
         let domain_name = pry!(pry!(params.get()).get_name());
-        let https_client: Https::Client = capnp_rpc::new_client(HttpsImpl::new()); // TODO figure out how to pass its own cap
+        let https_client: Https::Client = capnp_rpc::new_client(self.clone());
         let domain: Domain::Client = capnp_rpc::new_client(crate::http::domain::DomainImpl::new(
             https_client,
             domain_name,

@@ -1,9 +1,18 @@
+use crate::http_capnp::domain as Domain;
+use crate::http_capnp::https as Https;
 use crate::http_capnp::path as Path;
 use capnp::capability::Promise;
 use capnp_rpc::pry;
 
-struct PathImpl {
+pub struct PathImpl {
     query: Vec<(String, String)>,
+}
+
+impl PathImpl {
+    pub fn new(path_name: String, https_cap: Https::Client, domain_cap: Domain::Client) {
+        // TODO String should be something that coerces to String
+        PathImpl { query: todo!() }
+    }
 }
 
 impl Path::Server for PathImpl {

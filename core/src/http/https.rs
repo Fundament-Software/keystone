@@ -2,21 +2,8 @@ use crate::http_capnp::domain as Domain;
 use crate::http_capnp::https as Https;
 use capnp::capability::Promise;
 use capnp_rpc::pry;
-use hyper::client::HttpConnector;
-use hyper_tls::HttpsConnector;
 
-#[derive(Clone)]
-struct HttpsImpl {
-    https_client: hyper::Client<HttpsConnector<HttpConnector>>,
-}
-
-impl HttpsImpl {
-    fn new() -> Self {
-        let connector = HttpsConnector::new();
-        let https_client = hyper::Client::builder().build::<_, hyper::Body>(connector);
-        HttpsImpl { https_client }
-    }
-}
+struct HttpsImpl;
 
 impl Https::Server for HttpsImpl {
     fn domain(
@@ -25,11 +12,8 @@ impl Https::Server for HttpsImpl {
         mut results: Https::DomainResults,
     ) -> Promise<(), capnp::Error> {
         let domain_name = pry!(pry!(params.get()).get_name());
-        let https_client: Https::Client = capnp_rpc::new_client(self.clone());
-        let domain: Domain::Client = capnp_rpc::new_client(crate::http::domain::DomainImpl::new(
-            https_client,
-            domain_name,
-        ));
+        let domain: Domain::Client =
+            capnp_rpc::new_client(crate::http::domain::DomainImpl::new(domain_name));
         results.get().set_result(domain);
         Promise::ok(())
     }
@@ -42,7 +26,7 @@ mod tests {
     #[test]
     fn test_session() {
         let url = "https://www.example.com";
-        let https: Https::Client = capnp_rpc::new_client(HttpsImpl::new());
+        let https: Https::Client = capnp_rpc::new_client(HttpsImpl {});
         let mut request = https.domain_request();
         request.get().set_name(url);
         let domain = request.send().pipeline.get_result();

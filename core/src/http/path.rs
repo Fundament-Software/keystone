@@ -1,13 +1,13 @@
-use crate::http_capnp::domain as Domain;
-use crate::http_capnp::https as Https;
 use crate::http_capnp::path as Path;
 use capnp::capability::Promise;
 use capnp_rpc::pry;
+use hyper::client::HttpConnector;
+use hyper_tls::HttpsConnector;
 
 pub struct PathImpl {
-    // TODO Technically https_cap can be obtained indirectly from domain_cap - should it? Also, there is capability_list, so they can be combined?
-    https_cap: Https::Client,
-    domain_cap: Domain::Client,
+    // TODO Client is cheap to clone and cloning is the recommended way to share a Client. The underlying connection pool will be reused.
+    // We're not doing that - should we? And if so, does it trickle down?
+    https_client: hyper::Client<HttpsConnector<HttpConnector>>,
     query_modifiable: bool,
     path_modifiable: bool,
     headers_modifiable: bool,
@@ -15,15 +15,16 @@ pub struct PathImpl {
 }
 
 impl PathImpl {
-    pub fn new(path_name: String, https_cap: Https::Client, domain_cap: Domain::Client) -> Self {
+    pub fn new(path_name: String) -> Self {
         // TODO String should be something that coerces to String
+        let connector = HttpsConnector::new();
+        let https_client = hyper::Client::builder().build::<_, hyper::Body>(connector);
         return PathImpl {
             query: vec![],
-            https_cap,
-            domain_cap,
             path_modifiable: true,
             query_modifiable: true,
             headers_modifiable: true,
+            https_client,
         };
     }
 
@@ -54,10 +55,14 @@ impl Path::Server for PathImpl {
 }
     // START OF IMPLEMENTATIONS THAT RETURN HTTP RESULT
     fn get_http(&mut self,_:Path::GetHttpParams<>, mut results: Path::GetHttpResults<>) ->  Promise<(), capnp::Error>{
-        // CURRENT TODO - figure out how to get underlying hyper::Client object
-        self.https_cap.;
-        results.get().set_result(value);
-        Promise::ok(())
+        let future = self.https_client.get(uri);
+        let results_builder = results.get().init_result();
+        results_builder.set_body(value);
+        results_builder.set_headers(value);
+        results_builder.set_status_code(value);
+        Promise::from_future(f) // some async block inside based on https://github.com/capnproto/capnproto-rust/tree/master/capnp-rpc#async-methods
+                                // that handles the future
+        //Promise::ok(())
 }
 
     fn head(&mut self,_:Path::HeadParams<>, mut results: Path::HeadResults<>) ->  Promise<(), capnp::Error>{

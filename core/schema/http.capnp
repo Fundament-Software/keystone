@@ -1,7 +1,7 @@
 @0x855e374bb4054d72;
 
-interface HTTPS {
-  domain @0 (name :Text) -> (result :Domain)
+interface Https {
+  domain @0 (name :Text) -> (result :Domain);
 }
 
 interface Domain {
@@ -11,13 +11,13 @@ interface Domain {
 
 interface Path {
   enum HttpVerb {
-    GET @0;
-    HEAD @1;
-    POST @2;
-    PUT @3;
-    DELETE @4;
-    OPTIONS @5;
-    PATCH @6;
+    get @0;
+    head @1;
+    post @2;
+    put @3;
+    delete @4;
+    options @5;
+    patch @6;
   }
 
   struct KeyValue {
@@ -26,7 +26,7 @@ interface Path {
   }
 
   struct HttpResult {
-    statusCode @0 :Int;
+    statusCode @0 :UInt16;
     headers @1 :List(KeyValue);
     body @2 :Text;
   }
@@ -41,9 +41,9 @@ interface Path {
   delete @6 (body :Text) -> (result :HttpResult);
   options @7 () -> (result :HttpResult);
   patch @8 (body :Text) -> (result :HttpResult);
-  finalize_query @9 -> (result :Path);
-  finalize_path @10 -> (result :Path);
-  whitelist_verbs @11 (verbs :List(HttpVerb)) -> (result :Path);
+  finalizeQuery @9 () -> (result :Path);
+  finalizePath @10 () -> (result :Path);
+  whitelistVerbs @11 (verbs :List(HttpVerb)) -> (result :Path);
   headers @12 (headers: List(KeyValue)) -> (result :Path);
-  finalize_headers @13 -> (result :Path);
+  finalizeHeaders @13 () -> (result :Path);
 }

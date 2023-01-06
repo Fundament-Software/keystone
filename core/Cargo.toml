@@ -23,6 +23,7 @@ tokio = { version = "1.18", features = ["full"] }
 log = { version = "0.4", features = ["kv_unstable"] }
 pretty_env_logger = "0.4.0"
 hyper = { version = "0.14", features = ["full"] }
+hyper-tls = "0.5"
 couch_rs = "0.9"
 chrono = "0.4"
 dlopen = "0.1.8"

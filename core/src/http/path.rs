@@ -1,4 +1,5 @@
 use crate::http_capnp::path as Path;
+use capnp::capability::Promise;
 use capnp_rpc::pry;
 
 struct PathImpl {
@@ -10,21 +11,17 @@ impl Path::Server for PathImpl {
         &mut self,
         params: Path::QueryParams,
         mut results: Path::QueryResults,
-    ) -> capnp::capability::Promise<(), capnp::Error> {
+    ) -> Promise<(), capnp::Error> {
         let reader = pry!(params.get());
         let key = pry!(reader.get_key());
         let value = pry!(reader.get_value());
         self.query.push((String::from(key), String::from(value)));
         //results.get().set_path(self);
-        capnp::capability::Promise::ok(())
+        Promise::ok(())
     }
 
-    fn path(
-        &mut self,
-        _: Path::PathParams,
-        _: Path::PathResults,
-    ) -> capnp::capability::Promise<(), capnp::Error> {
-        capnp::capability::Promise::err(capnp::Error::unimplemented(
+    fn path(&mut self, _: Path::PathParams, _: Path::PathResults) -> Promise<(), capnp::Error> {
+        Promise::err(capnp::Error::unimplemented(
             "method path::Server::path not implemented".to_string(),
         ))
     }
@@ -33,8 +30,8 @@ impl Path::Server for PathImpl {
         &mut self,
         _: Path::SubpathParams,
         _: Path::SubpathResults,
-    ) -> capnp::capability::Promise<(), capnp::Error> {
-        capnp::capability::Promise::err(capnp::Error::unimplemented(
+    ) -> Promise<(), capnp::Error> {
+        Promise::err(capnp::Error::unimplemented(
             "method path::Server::subpath not implemented".to_string(),
         ))
     }
@@ -43,8 +40,8 @@ impl Path::Server for PathImpl {
         &mut self,
         _: Path::GetHttpParams,
         _: Path::GetHttpResults,
-    ) -> capnp::capability::Promise<(), capnp::Error> {
-        capnp::capability::Promise::err(capnp::Error::unimplemented(
+    ) -> Promise<(), capnp::Error> {
+        Promise::err(capnp::Error::unimplemented(
             "method path::Server::get not implemented".to_string(),
         ))
     }

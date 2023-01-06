@@ -921,6 +921,7 @@ dependencies = [
  "dlopen",
  "futures",
  "hyper",
+ "hyper-tls",
  "log",
  "predicates",
  "pretty_env_logger",
@@ -2058,3 +2059,19 @@ dependencies = [
  "thiserror",
  "zip",
 ]
+
+[[patch.unused]]
+name = "capnp"
+version = "0.15.0"
+
+[[patch.unused]]
+name = "capnp-futures"
+version = "0.15.0"
+
+[[patch.unused]]
+name = "capnp-rpc"
+version = "0.15.0"
+
+[[patch.unused]]
+name = "capnpc"
+version = "0.15.0"

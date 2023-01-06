@@ -5,4 +5,3 @@ pub mod http_capnp {
 mod domain;
 mod https;
 mod path;
-//mod response;

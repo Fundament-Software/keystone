@@ -15,6 +15,7 @@ fn get_uri(authority: Authority) -> hyper::Uri {
     let mut parts = Parts::default();
     parts.scheme = Some("https".parse().unwrap());
     parts.authority = Some(authority);
+    parts.path_and_query = Some("".parse().unwrap());
     // TODO parts.path_and_query
     hyper::Uri::from_parts(parts).unwrap() // TODO unwrap
 }
@@ -77,24 +78,24 @@ impl Path::Server for PathImpl {
     // START OF IMPLEMENTATIONS THAT RETURN HTTP RESULT
     fn get_http(&mut self,_:Path::GetHttpParams<>, mut results: Path::GetHttpResults<>) ->  Promise<(), capnp::Error>{
         let future = self.https_client.get(get_uri(self.authority.clone())); // TODO pass headers, probably don't clone authority and make it use reference instead
-        let mut results_builder = results.get().init_result();
-        Promise::from_future(future.and_then(move |response| {
+        Promise::<_, capnp::Error>::from_future(async move {
+            let mut results_builder = results.get().init_result();
+            let response = future.await.map_err(|err| capnp::Error::failed(err.to_string()))?;
             results_builder.set_status_code(response.status().as_u16());
             let len_response_headers: u32 = response.headers().len() as u32;
             let header_iter = response.headers().iter().enumerate();
-            let mut results_headers = results_builder.init_headers(len_response_headers);
+            let mut results_headers = results_builder.reborrow().init_headers(len_response_headers);
             for (i, (key, value)) in header_iter {
-                let mut pair = results_headers.get(i as u32);
+                let mut pair = results_headers.reborrow().get(i as u32);
                 pair.set_key(key.as_str());
-                pair.set_value(value.to_str().unwrap()); // TODO Another risky unwrap, CURRENT: reborrow?
+                pair.set_value(value.to_str().unwrap()); // TODO Another risky unwrap
             }
-            //results_builder.set_headers(response.headers()); // TODO we need to get headers
-            hyper::body::to_bytes(*response.body())
-        }).and_then(move |body_bytes| {
+            let body_bytes = hyper::body::to_bytes(response.into_body()).await.map_err(|err| capnp::Error::failed(err.to_string()))?;
             let body = String::from_utf8(body_bytes.to_vec()).unwrap(); // TODO unwrapping not what we want
-            results_builder.set_body(body.as_str());
-            Promise::ok(())
-        }).map_err(|err| anyhow::anyhow!(err).downcast::<capnp::Error>().unwrap() )) // TODO Not sure it's right - converts hyper::Error to capnp::Error
+            results_builder.reborrow().set_body(body.as_str());
+            Ok(())
+        })
+        //.map_err(|err| anyhow::anyhow!(err).downcast::<capnp::Error>().unwrap() ) // TODO Not sure it's right - converts hyper::Error to capnp::Error
     }
 
     fn head(&mut self,_:Path::HeadParams<>, mut results: Path::HeadResults<>) ->  Promise<(), capnp::Error>{
@@ -193,7 +194,8 @@ mod tests {
         let body = res.get_body().unwrap();
         let headers = res.get_headers().unwrap();
         let status = res.get_status_code();
-        println!("{}", status);
+        println!("Status: {}", status);
+        println!("Body: {}", body);
         //TODO display query
     }
 }

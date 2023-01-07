@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use crate::http_capnp::path as Path;
 use capnp::capability::Promise;
 use capnp_rpc::pry;
@@ -41,7 +43,7 @@ impl PathImpl {
             query_modifiable: true,
             headers_modifiable: true,
             https_client,
-            authority: Authority::from_static(path_name.as_str()),
+            authority: Authority::from_str(path_name.as_str()).unwrap(), // TODO unwrap
         }
     }
 
@@ -62,26 +64,29 @@ impl PathImpl {
 #[rustfmt::skip]
 impl Path::Server for PathImpl {
     fn query(&mut self, params: Path::QueryParams<>, mut results: Path::QueryResults<>) ->  Promise<(), capnp::Error>{
+        let value = todo!();
         results.get().set_result(value);
         Promise::ok(())
 }
 
     fn path(&mut self, params: Path::PathParams<>, mut results: Path::PathResults<>) ->  Promise<(), capnp::Error>{
+        let value = todo!();
         results.get().set_result(value);
         Promise::ok(())
 }
     // START OF IMPLEMENTATIONS THAT RETURN HTTP RESULT
     fn get_http(&mut self,_:Path::GetHttpParams<>, mut results: Path::GetHttpResults<>) ->  Promise<(), capnp::Error>{
-        let future = self.https_client.get(get_uri(self.authority)); // TODO pass headers
-        let results_builder = results.get().init_result();
+        let future = self.https_client.get(get_uri(self.authority.clone())); // TODO pass headers, probably don't clone authority and make it use reference instead
+        let mut results_builder = results.get().init_result();
         Promise::from_future(future.and_then(move |response| {
             results_builder.set_status_code(response.status().as_u16());
             let len_response_headers: u32 = response.headers().len() as u32;
             let header_iter = response.headers().iter().enumerate();
             let mut results_headers = results_builder.init_headers(len_response_headers);
             for (i, (key, value)) in header_iter {
-                results_headers.get(i as u32).set_key(key.as_str());
-                results_headers.get(i as u32).set_value(value.to_str().unwrap()); // TODO Another risky unwrap
+                let mut pair = results_headers.get(i as u32);
+                pair.set_key(key.as_str());
+                pair.set_value(value.to_str().unwrap()); // TODO Another risky unwrap, CURRENT: reborrow?
             }
             //results_builder.set_headers(response.headers()); // TODO we need to get headers
             hyper::body::to_bytes(*response.body())
@@ -93,56 +98,67 @@ impl Path::Server for PathImpl {
     }
 
     fn head(&mut self,_:Path::HeadParams<>, mut results: Path::HeadResults<>) ->  Promise<(), capnp::Error>{
+        let value = todo!();
         results.get().set_result(value);
         Promise::ok(())
 }
 
     fn post(&mut self, params: Path::PostParams<>, mut results: Path::PostResults<>) ->  Promise<(), capnp::Error>{
+        let value = todo!();
         results.get().set_result(value);
         Promise::ok(())
 }
 
     fn put(&mut self, params: Path::PutParams<>, mut results: Path::PutResults<>) ->  Promise<(), capnp::Error>{
+        let value = todo!();
         results.get().set_result(value);
         Promise::ok(())
 }
 
     fn delete(&mut self, params: Path::DeleteParams<>, mut results: Path::DeleteResults<>) ->  Promise<(), capnp::Error>{
+        let value = todo!();
         results.get().set_result(value);
         Promise::ok(())
 }
 
     fn options(&mut self,_:Path::OptionsParams<>, mut results: Path::OptionsResults<>) ->  Promise<(), capnp::Error>{
+        let value = todo!();
         results.get().set_result(value);
         Promise::ok(())
 }
 
     fn patch(&mut self, params: Path::PatchParams<>, mut results: Path::PatchResults<>) ->  Promise<(), capnp::Error>{
+        let value = todo!();
         results.get().set_result(value);
         Promise::ok(())
 }
     // END OF IMPLEMENTATIONS THAT RETURN HTTP RESULT
     fn finalize_query(&mut self,_:Path::FinalizeQueryParams<>, mut results: Path::FinalizeQueryResults<>) ->  Promise<(), capnp::Error>{
+        let value = todo!();
         results.get().set_result(value);
         Promise::ok(())
 }
 
     fn finalize_path(&mut self,_:Path::FinalizePathParams<>, mut results: Path::FinalizePathResults<>) ->  Promise<(), capnp::Error>{
+        let value = todo!();
         results.get().set_result(value);
         Promise::ok(())
 }
 
     fn whitelist_verbs(&mut self,_:Path::WhitelistVerbsParams<>, mut results: Path::WhitelistVerbsResults<>) ->  Promise<(), capnp::Error>{
+        let value = todo!();
         results.get().set_result(value);
         Promise::ok(())
 }
 
     fn headers(&mut self, params: Path::HeadersParams<>, mut results: Path::HeadersResults<>) ->  Promise<(), capnp::Error>{
+        let value = todo!();
         results.get().set_result(value);
         Promise::ok(())
 }
 
     fn finalize_headers(&mut self,_:Path::FinalizeHeadersParams<>, mut results: Path::FinalizeHeadersResults<>) ->  Promise<(), capnp::Error>{
+        let value = todo!();
         results.get().set_result(value);
         Promise::ok(())
 

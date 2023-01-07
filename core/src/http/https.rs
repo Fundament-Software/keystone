@@ -13,7 +13,7 @@ impl Https::Server for HttpsImpl {
     ) -> Promise<(), capnp::Error> {
         let domain_name = pry!(pry!(params.get()).get_name());
         let domain: Domain::Client =
-            capnp_rpc::new_client(crate::http::domain::DomainImpl::new(domain_name));
+            capnp_rpc::new_client(super::domain::DomainImpl::new(domain_name));
         results.get().set_result(domain);
         Promise::ok(())
     }

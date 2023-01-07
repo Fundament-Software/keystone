@@ -43,7 +43,7 @@ impl Domain::Server for DomainImpl {
         let name = pry!(pry!(params.get()).get_name());
         let domain_cap: Domain::Client = capnp_rpc::new_client(self.clone());
         let path: Path::Client =
-            capnp_rpc::new_client(crate::http::path::PathImpl::new(name.to_string()));
+            capnp_rpc::new_client(super::path::PathImpl::new(name.to_string()));
         results.get().set_result(path);
         Promise::ok(())
     }

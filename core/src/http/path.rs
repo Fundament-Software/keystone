@@ -1,17 +1,32 @@
 use crate::http_capnp::path as Path;
 use capnp::capability::Promise;
 use capnp_rpc::pry;
-use hyper::client::HttpConnector;
+use futures::TryFutureExt;
+use hyper::{
+    client::HttpConnector,
+    http::uri::{Authority, Parts},
+    HeaderMap,
+};
 use hyper_tls::HttpsConnector;
+
+fn get_uri(authority: Authority) -> hyper::Uri {
+    let mut parts = Parts::default();
+    parts.scheme = Some("https".parse().unwrap());
+    parts.authority = Some(authority);
+    // TODO parts.path_and_query
+    hyper::Uri::from_parts(parts).unwrap() // TODO unwrap
+}
 
 pub struct PathImpl {
     // TODO Client is cheap to clone and cloning is the recommended way to share a Client. The underlying connection pool will be reused.
     // We're not doing that - should we? And if so, does it trickle down?
     https_client: hyper::Client<HttpsConnector<HttpConnector>>,
+    query: Vec<(String, String)>,
+    headers: HeaderMap,
     query_modifiable: bool,
     path_modifiable: bool,
     headers_modifiable: bool,
-    query: Vec<(String, String)>,
+    authority: Authority,
 }
 
 impl PathImpl {
@@ -19,13 +34,15 @@ impl PathImpl {
         // TODO String should be something that coerces to String
         let connector = HttpsConnector::new();
         let https_client = hyper::Client::builder().build::<_, hyper::Body>(connector);
-        return PathImpl {
+        PathImpl {
             query: vec![],
+            headers: HeaderMap::new(),
             path_modifiable: true,
             query_modifiable: true,
             headers_modifiable: true,
             https_client,
-        };
+            authority: Authority::from_static(path_name.as_str()),
+        }
     }
 
     // Such function isn't part of specification, but I think it'd simplify interface
@@ -55,15 +72,25 @@ impl Path::Server for PathImpl {
 }
     // START OF IMPLEMENTATIONS THAT RETURN HTTP RESULT
     fn get_http(&mut self,_:Path::GetHttpParams<>, mut results: Path::GetHttpResults<>) ->  Promise<(), capnp::Error>{
-        let future = self.https_client.get(uri);
+        let future = self.https_client.get(get_uri(self.authority)); // TODO pass headers
         let results_builder = results.get().init_result();
-        results_builder.set_body(value);
-        results_builder.set_headers(value);
-        results_builder.set_status_code(value);
-        Promise::from_future(f) // some async block inside based on https://github.com/capnproto/capnproto-rust/tree/master/capnp-rpc#async-methods
-                                // that handles the future
-        //Promise::ok(())
-}
+        Promise::from_future(future.and_then(move |response| {
+            results_builder.set_status_code(response.status().as_u16());
+            let len_response_headers: u32 = response.headers().len() as u32;
+            let header_iter = response.headers().iter().enumerate();
+            let mut results_headers = results_builder.init_headers(len_response_headers);
+            for (i, (key, value)) in header_iter {
+                results_headers.get(i as u32).set_key(key.as_str());
+                results_headers.get(i as u32).set_value(value.to_str().unwrap()); // TODO Another risky unwrap
+            }
+            //results_builder.set_headers(response.headers()); // TODO we need to get headers
+            hyper::body::to_bytes(*response.body())
+        }).and_then(move |body_bytes| {
+            let body = String::from_utf8(body_bytes.to_vec()).unwrap(); // TODO unwrapping not what we want
+            results_builder.set_body(body.as_str());
+            Promise::ok(())
+        }).map_err(|err| anyhow::anyhow!(err).downcast::<capnp::Error>().unwrap() )) // TODO Not sure it's right - converts hyper::Error to capnp::Error
+    }
 
     fn head(&mut self,_:Path::HeadParams<>, mut results: Path::HeadResults<>) ->  Promise<(), capnp::Error>{
         results.get().set_result(value);
@@ -136,43 +163,21 @@ impl Path::Server for PathImpl {
 //         Promise::ok(())
 //     }
 
-//     fn path(&mut self, _: Path::PathParams, _: Path::PathResults) -> Promise<(), capnp::Error> {
-//         Promise::err(capnp::Error::unimplemented(
-//             "method path::Server::path not implemented".to_string(),
-//         ))
-//     }
-
-//     fn subpath(
-//         &mut self,
-//         _: Path::SubpathParams,
-//         _: Path::SubpathResults,
-//     ) -> Promise<(), capnp::Error> {
-//         Promise::err(capnp::Error::unimplemented(
-//             "method path::Server::subpath not implemented".to_string(),
-//         ))
-//     }
-
-//     fn get_http(
-//         &mut self,
-//         _: Path::GetHttpParams,
-//         _: Path::GetHttpResults,
-//     ) -> Promise<(), capnp::Error> {
-//         Promise::err(capnp::Error::unimplemented(
-//             "method path::Server::get not implemented".to_string(),
-//         ))
-//     }
-// }
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn query_test() {
-        let path_client: Path::Client = capnp_rpc::new_client(PathImpl { query: vec![] });
-        let mut request = path_client.query_request();
-        request.get().set_values("apple");
-        let path = request.send().pipeline.get_path();
+    #[tokio::test]
+    async fn get_test() {
+        let path_client: Path::Client =
+            capnp_rpc::new_client(PathImpl::new("www.example.org".to_string()));
+        let mut request = path_client.get_http_request();
+        let result = request.send().promise.await.unwrap();
+        let res = result.get().unwrap().get_result().unwrap();
+        let body = res.get_body().unwrap();
+        let headers = res.get_headers().unwrap();
+        let status = res.get_status_code();
+        println!("{}", status);
         //TODO display query
     }
 }

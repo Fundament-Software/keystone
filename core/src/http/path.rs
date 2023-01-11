@@ -6,7 +6,7 @@ use capnp_rpc::pry;
 use futures::TryFutureExt;
 use hyper::{
     client::{HttpConnector, ResponseFuture},
-    http::uri::{Authority, Parts},
+    http::uri::{Authority, Parts, PathAndQuery},
     HeaderMap,
 };
 use hyper_tls::HttpsConnector;
@@ -77,13 +77,35 @@ impl PathImpl {
         let mut parts = Parts::default();
         parts.scheme = Some("https".parse().unwrap());
         parts.authority = Some(self.authority.clone()); // TODO Clone?
-        parts.path_and_query = Some("".parse().unwrap());
-        // TODO parts.path_and_query
+        parts.path_and_query = Some(self.path_and_query());
         hyper::Uri::from_parts(parts).unwrap() // TODO unwrap
     }
 
+    fn path_and_query(&self) -> PathAndQuery {
+        let mut path = String::from("");
+        for i in self.path_list.iter() {
+            path.push('/');
+            path.push_str(i);
+        }
+        let mut query = String::from("");
+        if !self.query.is_empty() {
+            query.push('?');
+        }
+        for (k, v) in self.query.iter() {
+            if !query.ends_with('?') {
+                query.push('&');
+            }
+            query.push_str(format!("{k}={v}").as_str());
+        }
+        PathAndQuery::try_from(path + query.as_str()).unwrap()
+    }
+
     // Such function isn't part of specification, but I think it'd simplify interface
-    fn http_request(&self, verb: Path::HttpVerb, body: Option<String>) -> ResponseFuture {
+    fn http_request(
+        &self,
+        verb: Path::HttpVerb,
+        body: Option<String>,
+    ) -> Result<ResponseFuture, capnp::Error> {
         let method = match verb {
             Path::HttpVerb::Get => "GET",
             Path::HttpVerb::Head => "HEAD",
@@ -93,12 +115,11 @@ impl PathImpl {
             Path::HttpVerb::Options => "OPTIONS",
             Path::HttpVerb::Patch => "PATCH",
         };
-        // TODO Change type signature and contents of all methods *sigh*
-        // if !self.verb_whitelist.is_empty() && self.verb_whitelist.contains(&verb) {
-        //     return Promise::err(capnp::Error::failed(format!(
-        //         "{method} is not on a whitelist and can't be executed."
-        //     )));
-        // }
+        if !self.verb_whitelist.is_empty() && self.verb_whitelist.contains(&verb) {
+            return Err(capnp::Error::failed(format!(
+                "{method} is not on a whitelist and can't be executed."
+            )));
+        }
         let has_empty_body = [
             Path::HttpVerb::Get,
             Path::HttpVerb::Head,
@@ -112,10 +133,10 @@ impl PathImpl {
         }
         if has_empty_body || body.is_none() {
             let request = request_builder.body(hyper::Body::empty()).unwrap();
-            self.https_client.request(request)
+            Ok(self.https_client.request(request))
         } else {
             let request = request_builder.body(body.unwrap().into()).unwrap(); //TODO Unwrap here and 3 above and no verification that body isn't malicious
-            self.https_client.request(request)
+            Ok(self.https_client.request(request))
         }
     }
 }
@@ -170,7 +191,10 @@ impl Path::Server for PathImpl {
         mut results: Path::GetHttpResults,
     ) -> Promise<(), capnp::Error> {
         let future = self.http_request(Path::HttpVerb::Get, None);
-        http_request_promise!(results, future)
+        match future {
+            Ok(f) => http_request_promise!(results, f),
+            Err(e) => Promise::err(e),
+        }
     }
 
     fn head(
@@ -179,7 +203,10 @@ impl Path::Server for PathImpl {
         mut results: Path::HeadResults,
     ) -> Promise<(), capnp::Error> {
         let future = self.http_request(Path::HttpVerb::Head, None);
-        http_request_promise!(results, future)
+        match future {
+            Ok(f) => http_request_promise!(results, f),
+            Err(e) => Promise::err(e),
+        }
     }
 
     fn post(
@@ -189,7 +216,10 @@ impl Path::Server for PathImpl {
     ) -> Promise<(), capnp::Error> {
         let body = pry!(pry!(params.get()).get_body());
         let future = self.http_request(Path::HttpVerb::Post, Some(body.to_string())); //TODO to_string should not be needed in all those methods
-        http_request_promise!(results, future)
+        match future {
+            Ok(f) => http_request_promise!(results, f),
+            Err(e) => Promise::err(e),
+        }
     }
 
     fn put(
@@ -199,7 +229,10 @@ impl Path::Server for PathImpl {
     ) -> Promise<(), capnp::Error> {
         let body = pry!(pry!(params.get()).get_body());
         let future = self.http_request(Path::HttpVerb::Put, Some(body.to_string()));
-        http_request_promise!(results, future)
+        match future {
+            Ok(f) => http_request_promise!(results, f),
+            Err(e) => Promise::err(e),
+        }
     }
 
     fn delete(
@@ -209,7 +242,10 @@ impl Path::Server for PathImpl {
     ) -> Promise<(), capnp::Error> {
         let body = pry!(pry!(params.get()).get_body());
         let future = self.http_request(Path::HttpVerb::Delete, Some(body.to_string()));
-        http_request_promise!(results, future)
+        match future {
+            Ok(f) => http_request_promise!(results, f),
+            Err(e) => Promise::err(e),
+        }
     }
 
     fn options(
@@ -218,7 +254,10 @@ impl Path::Server for PathImpl {
         mut results: Path::OptionsResults,
     ) -> Promise<(), capnp::Error> {
         let future = self.http_request(Path::HttpVerb::Options, None);
-        http_request_promise!(results, future)
+        match future {
+            Ok(f) => http_request_promise!(results, f),
+            Err(e) => Promise::err(e),
+        }
     }
 
     fn patch(
@@ -228,7 +267,10 @@ impl Path::Server for PathImpl {
     ) -> Promise<(), capnp::Error> {
         let body = pry!(pry!(params.get()).get_body());
         let future = self.http_request(Path::HttpVerb::Patch, Some(body.to_string()));
-        http_request_promise!(results, future)
+        match future {
+            Ok(f) => http_request_promise!(results, f),
+            Err(e) => Promise::err(e),
+        }
     }
     // END OF IMPLEMENTATIONS THAT RETURN HTTP RESULT
     fn finalize_query(
@@ -325,7 +367,13 @@ mod tests {
         let result = request.send().promise.await.unwrap();
         let res = result.get().unwrap().get_result().unwrap();
         let body = res.get_body().unwrap();
-        let headers = res.get_headers().unwrap();
+        let response_headers = res.get_headers().unwrap();
+        println!("Headers:");
+        for response_header in response_headers.iter() {
+            let key = response_header.get_key().unwrap();
+            let value = response_header.get_value().unwrap();
+            println!("\tKey: {key}\n\tValue: {value}\n----------------")
+        }
         let status = res.get_status_code();
         assert_eq!(status, 200); // 200 OK
         println!("Body: {}", body);

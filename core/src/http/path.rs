@@ -185,10 +185,10 @@ impl Path::Server for PathImpl {
         Promise::ok(())
     }
     // START OF IMPLEMENTATIONS THAT RETURN HTTP RESULT
-    fn get_http(
+    fn get(
         &mut self,
-        _: Path::GetHttpParams,
-        mut results: Path::GetHttpResults,
+        _: Path::GetParams,
+        mut results: Path::GetResults,
     ) -> Promise<(), capnp::Error> {
         let future = self.http_request(Path::HttpVerb::Get, None);
         match future {
@@ -360,7 +360,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn head_test() -> capnp::Result<()> {
+    async fn get_test() -> capnp::Result<()> {
         // Current way to run it and see results: cargo test -- --nocapture
         let mut path_client: Path::Client = capnp_rpc::new_client(PathImpl::new("httpbin.org"));
 
@@ -381,7 +381,7 @@ mod tests {
             query_params.reborrow().get(2).set_value("value3");
         }
         path_client = request.send().promise.await?.get()?.get_result()?;
-        let request = path_client.get_http_request();
+        let request = path_client.get_request();
         let result = request.send().promise.await?;
         let result = result.get()?.get_result()?;
 

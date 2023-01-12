@@ -3,7 +3,6 @@ use std::str::FromStr;
 use crate::http_capnp::path as Path;
 use capnp::capability::Promise;
 use capnp_rpc::pry;
-use futures::TryFutureExt;
 use hyper::{
     client::{HttpConnector, ResponseFuture},
     http::uri::{Authority, Parts, PathAndQuery},
@@ -56,8 +55,8 @@ pub struct PathImpl {
 }
 
 impl PathImpl {
-    pub fn new(path_name: String) -> Self {
-        // TODO String should be something that coerces to String
+    pub fn new<S: Into<String>>(path_name: S) -> Self {
+        //TODO instead of something that's into String, it can be something that gets Authority
         let connector = HttpsConnector::new();
         let https_client = hyper::Client::builder().build::<_, hyper::Body>(connector);
         PathImpl {
@@ -69,11 +68,12 @@ impl PathImpl {
             query_modifiable: true,
             headers_modifiable: true,
             verb_whitelist: vec![],
-            authority: Authority::from_str(path_name.as_str()).unwrap(), // TODO unwrap
+            authority: Authority::from_str(&path_name.into()).unwrap(), // TODO unwrap
         }
     }
 
     fn get_uri(&self) -> hyper::Uri {
+        // TODO Use something well-established, like https://docs.rs/url/latest/url/ - apply to other places
         let mut parts = Parts::default();
         parts.scheme = Some("https".parse().unwrap());
         parts.authority = Some(self.authority.clone()); // TODO Clone?
@@ -360,23 +360,42 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn get_test() {
-        let path_client: Path::Client =
-            capnp_rpc::new_client(PathImpl::new("www.example.org".to_string()));
-        let request = path_client.head_request();
-        let result = request.send().promise.await.unwrap();
-        let res = result.get().unwrap().get_result().unwrap();
-        let body = res.get_body().unwrap();
-        let response_headers = res.get_headers().unwrap();
+    async fn head_test() -> capnp::Result<()> {
+        // Current way to run it and see results: cargo test -- --nocapture
+        let mut path_client: Path::Client = capnp_rpc::new_client(PathImpl::new("httpbin.org"));
+
+        let mut request = path_client.path_request();
+        {
+            let mut path_params = request.get().init_values(1); //one element
+            path_params.set(0, "get");
+        }
+        path_client = request.send().promise.await?.get()?.get_result()?;
+        let mut request = path_client.query_request();
+        {
+            let mut query_params = request.get().init_values(3);
+            query_params.reborrow().get(0).set_key("key1");
+            query_params.reborrow().get(0).set_value("value1");
+            query_params.reborrow().get(1).set_key("key2");
+            query_params.reborrow().get(1).set_value("value2");
+            query_params.reborrow().get(2).set_key("key3");
+            query_params.reborrow().get(2).set_value("value3");
+        }
+        path_client = request.send().promise.await?.get()?.get_result()?;
+        let request = path_client.get_http_request();
+        let result = request.send().promise.await?;
+        let result = result.get()?.get_result()?;
+
+        let body = result.get_body()?;
+        let response_headers = result.get_headers()?;
         println!("Headers:");
         for response_header in response_headers.iter() {
-            let key = response_header.get_key().unwrap();
-            let value = response_header.get_value().unwrap();
+            let key = response_header.get_key()?;
+            let value = response_header.get_value()?;
             println!("\tKey: {key}\n\tValue: {value}\n----------------")
         }
-        let status = res.get_status_code();
+        let status = result.get_status_code();
         assert_eq!(status, 200); // 200 OK
         println!("Body: {}", body);
-        //TODO display query
+        Ok(())
     }
 }

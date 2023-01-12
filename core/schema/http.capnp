@@ -34,7 +34,6 @@ interface Path {
   query @0 (values :List(KeyValue)) -> (result :Path);
   path @1 (values :List(Text)) -> (result :Path);
   getHttp @2 () -> (result :HttpResult);
-  # renamed temporarily to avoid name clashes
   head @3 () -> (result :HttpResult);
   post @4 (body :Text) -> (result :HttpResult);
   put @5 (body :Text) -> (result :HttpResult);

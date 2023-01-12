@@ -398,4 +398,49 @@ mod tests {
         println!("Body: {}", body);
         Ok(())
     }
+
+    #[tokio::test]
+    async fn post_test() -> capnp::Result<()> {
+        // Current way to run it and see results: cargo test -- --nocapture
+        let mut path_client: Path::Client = capnp_rpc::new_client(PathImpl::new("httpbin.org"));
+
+        let mut request = path_client.path_request();
+        {
+            let mut path_params = request.get().init_values(1); //one element
+            path_params.set(0, "post");
+        }
+        path_client = request.send().promise.await?.get()?.get_result()?;
+        let mut request = path_client.query_request();
+        {
+            let mut query_params = request.get().init_values(3);
+            query_params.reborrow().get(0).set_key("key1");
+            query_params.reborrow().get(0).set_value("value1");
+            query_params.reborrow().get(1).set_key("key2");
+            query_params.reborrow().get(1).set_value("value2");
+            query_params.reborrow().get(2).set_key("key3");
+            query_params.reborrow().get(2).set_value("value3");
+        }
+        path_client = request.send().promise.await?.get()?.get_result()?;
+        let mut request = path_client.post_request();
+        {
+            request
+                .get()
+                .set_body("Here's something I post. It should be returned to me");
+        }
+        let result = request.send().promise.await?;
+        let result = result.get()?.get_result()?;
+
+        let body = result.get_body()?;
+        let response_headers = result.get_headers()?;
+        println!("Headers:");
+        for response_header in response_headers.iter() {
+            let key = response_header.get_key()?;
+            let value = response_header.get_value()?;
+            println!("\tKey: {key}\n\tValue: {value}\n----------------")
+        }
+        let status = result.get_status_code();
+        assert_eq!(status, 200); // 200 OK
+        println!("Body: {}", body);
+        Ok(())
+    }
 }

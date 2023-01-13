@@ -9,38 +9,6 @@ use hyper::{
 use hyper_tls::HttpsConnector;
 use Path::HttpVerb;
 
-macro_rules! http_request_promise {
-    ($results:expr, $future:expr) => {
-        Promise::<_, capnp::Error>::from_future(async move {
-            let mut results_builder = $results.get().init_result();
-            let response = $future
-                .await
-                .map_err(|err| capnp::Error::failed(err.to_string()))?;
-            results_builder.set_status_code(response.status().as_u16());
-            let len_response_headers: u32 = response.headers().len() as u32;
-            let header_iter = response.headers().iter().enumerate();
-            let mut results_headers = results_builder
-                .reborrow()
-                .init_headers(len_response_headers);
-            for (i, (key, value)) in header_iter {
-                let mut pair = results_headers.reborrow().get(i as u32);
-                pair.set_key(key.as_str());
-                pair.set_value(value.to_str().map_err(|_| {
-                    capnp::Error::failed("Response Header contains invalid character".to_string())
-                })?);
-            }
-            let body_bytes = hyper::body::to_bytes(response.into_body())
-                .await
-                .map_err(|err| capnp::Error::failed(err.to_string()))?;
-            let body = String::from_utf8(body_bytes.to_vec()).map_err(|_| {
-                capnp::Error::failed("Couldn't convert response body to utf8 String".to_string())
-            })?;
-            results_builder.reborrow().set_body(body.as_str());
-            Ok(())
-        })
-    };
-}
-
 #[derive(Clone)]
 pub struct PathImpl {
     https_client: hyper::Client<HttpsConnector<HttpConnector>>,
@@ -84,10 +52,10 @@ impl PathImpl {
     }
 
     fn get_uri(&self) -> capnp::Result<hyper::Uri> {
-        // TODO Use something well-established, like https://docs.rs/url/latest/url/ - apply to other places
+        // TODO Use something well-established, like https://docs.rs/url/latest/url  >/ - apply to other places
         let mut parts = Parts::default();
         parts.scheme = Some("https".parse().unwrap()); // Ok to unwrap - will always parse. TODO - should we allow http too?
-        parts.authority = Some(self.authority.clone()); // TODO Clone?
+        parts.authority = Some(self.authority.clone());
         parts.path_and_query = Some(self.path_and_query()?);
         hyper::Uri::from_parts(parts).map_err(|_| capnp::Error::failed("Invalid URL".to_string()))
     }
@@ -112,7 +80,7 @@ impl PathImpl {
             .map_err(|_| capnp::Error::failed("Couldn't construct PathAndQuery".to_string()))
     }
 
-    // Such function isn't part of specification, but I think it'd simplify interface
+    // Function isn't part of specification, but I think it simplifies things
     fn http_request(
         &self,
         verb: HttpVerb,
@@ -127,10 +95,10 @@ impl PathImpl {
             HttpVerb::Options => "OPTIONS",
             HttpVerb::Patch => "PATCH",
         };
-        if !self.verb_whitelist.is_empty() && self.verb_whitelist.contains(&verb) {
-            return Err(capnp::Error::failed(
-                "{method} is not on a whitelist and can't be executed.".to_string(),
-            ));
+        if !self.verb_whitelist.is_empty() && !self.verb_whitelist.contains(&verb) {
+            return Err(capnp::Error::failed(format!(
+                "{method} is not on a whitelist and can't be executed."
+            )));
         }
         let has_empty_body = [HttpVerb::Get, HttpVerb::Head, HttpVerb::Options].contains(&verb);
 
@@ -152,6 +120,39 @@ impl PathImpl {
             .map_err(|_| capnp::Error::failed("Couldn't construct https request".to_string()))?;
         Ok(self.https_client.request(request))
     }
+}
+
+// Could maybe be part of http_request, but so far couldn't get it to work
+macro_rules! http_request_promise {
+    ($results:expr, $future:expr) => {
+        Promise::<_, capnp::Error>::from_future(async move {
+            let mut results_builder = $results.get().init_result();
+            let response = $future
+                .await
+                .map_err(|err| capnp::Error::failed(err.to_string()))?;
+            results_builder.set_status_code(response.status().as_u16());
+            let len_response_headers: u32 = response.headers().len() as u32;
+            let header_iter = response.headers().iter().enumerate();
+            let mut results_headers = results_builder
+                .reborrow()
+                .init_headers(len_response_headers);
+            for (i, (key, value)) in header_iter {
+                let mut pair = results_headers.reborrow().get(i as u32);
+                pair.set_key(key.as_str());
+                pair.set_value(value.to_str().map_err(|_| {
+                    capnp::Error::failed("Response Header contains invalid character".to_string())
+                })?);
+            }
+            let body_bytes = hyper::body::to_bytes(response.into_body())
+                .await
+                .map_err(|err| capnp::Error::failed(err.to_string()))?;
+            let body = String::from_utf8(body_bytes.to_vec()).map_err(|_| {
+                capnp::Error::failed("Couldn't convert response body to utf8 String".to_string())
+            })?;
+            results_builder.reborrow().set_body(body.as_str());
+            Ok(())
+        })
+    };
 }
 
 impl Path::Server for PathImpl {
@@ -228,7 +229,7 @@ impl Path::Server for PathImpl {
         mut results: Path::PostResults,
     ) -> Promise<(), capnp::Error> {
         let body = pry!(pry!(params.get()).get_body());
-        let future = self.http_request(HttpVerb::Post, Some(body.to_string())); //TODO to_string should not be needed in all those methods
+        let future = self.http_request(HttpVerb::Post, Some(body.to_string()));
         match future {
             Ok(f) => http_request_promise!(results, f),
             Err(e) => Promise::err(e),
@@ -396,23 +397,22 @@ mod tests {
             path_params.set(0, "get");
         }
         path_client = request.send().promise.await?.get()?.get_result()?;
-        let mut request = path_client.query_request();
+
+        let mut request = path_client.whitelist_verbs_request();
         {
-            let mut query_params = request.get().init_values(3);
-            query_params.reborrow().get(0).set_key("key1");
-            query_params.reborrow().get(0).set_value("value1");
-            query_params.reborrow().get(1).set_key("key2");
-            query_params.reborrow().get(1).set_value("value2");
-            query_params.reborrow().get(2).set_key("key3");
-            query_params.reborrow().get(2).set_value("value3");
+            let mut whitelist = request.get().init_verbs(1);
+            whitelist.set(0, HttpVerb::Delete);
         }
-        path_client = request.send().promise.await?.get()?.get_result()?;
+        // Next line would throw an error about not being on whitelist
+        // path_client = request.send().promise.await?.get()?.get_result()?;
+
         let request = path_client.get_request();
         let result = request.send().promise.await?;
         let result = result.get()?.get_result()?;
 
         let body = result.get_body()?;
         let response_headers = result.get_headers()?;
+        println!("GET test");
         println!("Headers:");
         for response_header in response_headers.iter() {
             let key = response_header.get_key()?;
@@ -453,6 +453,56 @@ mod tests {
 
         let body = result.get_body()?;
         let response_headers = result.get_headers()?;
+        println!("POST test");
+        println!("Headers:");
+        for response_header in response_headers.iter() {
+            let key = response_header.get_key()?;
+            let value = response_header.get_value()?;
+            println!("\tKey: {key}\n\tValue: {value}\n----------------")
+        }
+        let status = result.get_status_code();
+        assert_eq!(status, 200); // 200 OK
+        println!("Body: {}", body);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn header_test() -> capnp::Result<()> {
+        // Current way to run it and see results: cargo test -- --nocapture
+        let mut path_client: Path::Client =
+            capnp_rpc::new_client(PathImpl::new("httpbin.org", "headers")?);
+
+        // Set headers
+        let mut request = path_client.headers_request();
+        {
+            let mut headers = request.get().init_headers(2);
+            headers.reborrow().get(0).set_key("Header1");
+            headers.reborrow().get(0).set_value("Value1");
+            headers.reborrow().get(1).set_key("Header2");
+            headers.reborrow().get(1).set_value("Value2");
+        }
+        path_client = request.send().promise.await?.get()?.get_result()?;
+
+        // Finalize headers
+        let request = path_client.finalize_headers_request();
+        path_client = request.send().promise.await?.get()?.get_result()?;
+
+        let mut request = path_client.headers_request();
+        {
+            let mut headers = request.get().init_headers(1);
+            headers.reborrow().get(0).set_key("IllegalHeader");
+            headers.reborrow().get(0).set_value("IllegalValue");
+        }
+        // Next line throws error as intended
+        // path_client = request.send().promise.await?.get()?.get_result()?;
+
+        let request = path_client.get_request();
+        let result = request.send().promise.await?;
+        let result = result.get()?.get_result()?;
+
+        let body = result.get_body()?;
+        let response_headers = result.get_headers()?;
+        println!("Headers test");
         println!("Headers:");
         for response_header in response_headers.iter() {
             let key = response_header.get_key()?;

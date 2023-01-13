@@ -2,7 +2,7 @@ pub mod http_capnp {
     include!(concat!(env!("OUT_DIR"), "/capnp_include.rs"));
 }
 
-pub use crate::http_capnp::{domain as Domain, https as Https, path as Path};
+pub use crate::http_capnp::{domain as Domain, https as Https, path as Path, path::HttpVerb};
 
 mod https;
 pub fn https_client() -> Https::Client {

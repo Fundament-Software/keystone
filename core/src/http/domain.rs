@@ -1,5 +1,5 @@
-use crate::http_capnp::domain as Domain;
-use crate::http_capnp::path as Path;
+use super::path::PathImpl;
+use super::{Domain, Path};
 use capnp::capability::Promise;
 use capnp_rpc::pry;
 
@@ -7,6 +7,7 @@ pub struct DomainImpl {
     domain_name: String, // TODO Should be some sort of URI type that only gets domain
                          // In hyper: `use hyper::http::uri::Authority;`
                          // Quite possibly a list of domains that will be combined in path
+                         // TODO The full domain name may not exceed a total length of 253 ASCII characters
 }
 
 impl DomainImpl {
@@ -37,7 +38,12 @@ impl Domain::Server for DomainImpl {
         mut results: Domain::PathResults,
     ) -> Promise<(), capnp::Error> {
         let name = pry!(pry!(params.get()).get_name());
-        let path: Path::Client = capnp_rpc::new_client(super::path::PathImpl::new(name));
+        let path_impl = PathImpl::new(self.domain_name.as_str(), name);
+        if let Err(e) = path_impl {
+            return Promise::err(e);
+        }
+        let path_impl = path_impl.unwrap();
+        let path: Path::Client = capnp_rpc::new_client(path_impl);
         results.get().set_result(path);
         Promise::ok(())
     }

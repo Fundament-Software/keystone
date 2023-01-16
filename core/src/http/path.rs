@@ -36,6 +36,15 @@ impl PathImpl {
         if !path_item.is_empty() {
             path_list.push(path_item);
         }
+        let verb_whitelist = vec![
+            HttpVerb::Get,
+            HttpVerb::Head,
+            HttpVerb::Post,
+            HttpVerb::Put,
+            HttpVerb::Delete,
+            HttpVerb::Options,
+            HttpVerb::Patch,
+        ];
         Ok(PathImpl {
             https_client,
             query: vec![],
@@ -44,7 +53,7 @@ impl PathImpl {
             path_modifiable: true,
             query_modifiable: true,
             headers_modifiable: true,
-            verb_whitelist: vec![],
+            verb_whitelist,
             authority: authority.try_into().map_err(|_| {
                 capnp::Error::failed("Couldn't create path - invalid authority".to_string())
             })?,
@@ -95,7 +104,7 @@ impl PathImpl {
             HttpVerb::Options => "OPTIONS",
             HttpVerb::Patch => "PATCH",
         };
-        if !self.verb_whitelist.is_empty() && !self.verb_whitelist.contains(&verb) {
+        if !self.verb_whitelist.contains(&verb) {
             return Err(capnp::Error::failed(format!(
                 "{method} is not on a whitelist and can't be executed."
             )));
@@ -316,17 +325,16 @@ impl Path::Server for PathImpl {
         params: Path::WhitelistVerbsParams,
         mut results: Path::WhitelistVerbsResults,
     ) -> Promise<(), capnp::Error> {
-        // TODO No pry!
         let verbs = pry!(pry!(params.get()).get_verbs());
-        let mut return_path = self.clone();
+        let mut verbs_vec = vec![];
         for verb in verbs.iter() {
             let v = pry!(verb);
-            // Check uniqueness - would use HashSet, but enums aren't Hash by default.
-            // TODO Make sure behavior we want is extending whitelist, not overriding it
-            if !return_path.verb_whitelist.contains(&v) {
-                return_path.verb_whitelist.push(v);
-            }
+            verbs_vec.push(v);
         }
+        let mut return_path = self.clone();
+        return_path
+            .verb_whitelist
+            .retain(|&x| verbs_vec.contains(&x));
         let client = capnp_rpc::new_client(return_path);
         results.get().set_result(client);
         Promise::ok(())

@@ -1,7 +1,6 @@
 #![allow(dead_code)]
 mod couchdb;
 mod database;
-mod http;
 mod node;
 
 include!(concat!(env!("OUT_DIR"), "/capnp_include.rs"));

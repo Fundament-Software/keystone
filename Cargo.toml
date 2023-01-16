@@ -2,6 +2,7 @@
 members = [
   "core",
   "modules/test",
+  "modules/http_test",
 ]
 default-members = [ "core" ]
 

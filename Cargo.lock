@@ -931,6 +931,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "keystone-http-test-module"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "assert_fs",
+ "cap-std",
+ "keystone",
+ "log",
+ "reqwest",
+ "tokio",
+]
+
+[[package]]
 name = "keystone-test-module"
 version = "0.1.0"
 dependencies = [

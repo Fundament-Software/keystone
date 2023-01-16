@@ -26,11 +26,8 @@ impl PathImpl {
     pub fn new<A: TryInto<Authority>, S: Into<String>>(
         authority: A,
         initial_path: S,
+        https_client: hyper::Client<HttpsConnector<HttpConnector>>,
     ) -> Result<Self, capnp::Error> {
-        let connector = HttpsConnector::new();
-        // TODO Client is cheap to clone and cloning is the recommended way to share a Client. The underlying connection pool will be reused.
-        // We're not doing that - should we? And if so, does it trickle down?
-        let https_client = hyper::Client::builder().build::<_, hyper::Body>(connector);
         let path_item: String = initial_path.into();
         let mut path_list = vec![];
         if !path_item.is_empty() {
@@ -396,8 +393,10 @@ mod tests {
     #[tokio::test]
     async fn get_test() -> capnp::Result<()> {
         // Current way to run it and see results: cargo test -- --nocapture
+        let connector = HttpsConnector::new();
+        let https_client = hyper::Client::builder().build::<_, hyper::Body>(connector);
         let mut path_client: Path::Client =
-            capnp_rpc::new_client(PathImpl::new("httpbin.org", "")?);
+            capnp_rpc::new_client(PathImpl::new("httpbin.org", "", https_client)?);
 
         let mut request = path_client.path_request();
         {
@@ -436,8 +435,10 @@ mod tests {
     #[tokio::test]
     async fn post_test() -> capnp::Result<()> {
         // Current way to run it and see results: cargo test -- --nocapture
+        let connector = HttpsConnector::new();
+        let https_client = hyper::Client::builder().build::<_, hyper::Body>(connector);
         let mut path_client: Path::Client =
-            capnp_rpc::new_client(PathImpl::new("httpbin.org", "post")?);
+            capnp_rpc::new_client(PathImpl::new("httpbin.org", "post", https_client)?);
 
         let mut request = path_client.query_request();
         {
@@ -477,8 +478,10 @@ mod tests {
     #[tokio::test]
     async fn header_test() -> capnp::Result<()> {
         // Current way to run it and see results: cargo test -- --nocapture
+        let connector = HttpsConnector::new();
+        let https_client = hyper::Client::builder().build::<_, hyper::Body>(connector);
         let mut path_client: Path::Client =
-            capnp_rpc::new_client(PathImpl::new("httpbin.org", "headers")?);
+            capnp_rpc::new_client(PathImpl::new("httpbin.org", "headers", https_client)?);
 
         // Set headers
         let mut request = path_client.headers_request();

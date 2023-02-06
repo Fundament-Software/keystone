@@ -33,14 +33,30 @@ async fn main() -> anyhow::Result<()> {
     let mut request = path_client.get_request();
     let response = request.send().promise.await?; // We'd get "temporary value dropped while borrowed" if we didn't split it
     let response = response.get()?.get_result()?;
+
+    // Validating results - httpbin returns json as its body
     let body = response.get_body()?;
+    let body_json: serde_json::Value = serde_json::from_str(body)?;
+    assert_eq!(
+        body_json["args"],
+        serde_json::json!({"key1": "val1", "key2": "val2"})
+    );
+    assert_eq!(body_json["headers"]["Host"], "httpbin.org");
+    assert_eq!(
+        body_json["url"],
+        "https://httpbin.org/get?key1=val1&key2=val2"
+    );
+
     let status = response.get_status_code();
+    assert_eq!(status, 200);
+
+    // Response headers
+    /*
     let headers = response.get_headers()?;
     for header in headers.iter() {
         let key = header.get_key()?;
         let value = header.get_value()?;
-    }
-    println!("{}", body);
-
+        println!("{}: {}", key, value);
+    }*/
     Ok(())
 }

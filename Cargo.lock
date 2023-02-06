@@ -940,6 +940,7 @@ dependencies = [
  "keystone",
  "log",
  "reqwest",
+ "serde_json",
  "tokio",
 ]
 

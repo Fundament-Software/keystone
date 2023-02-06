@@ -9,6 +9,21 @@ use hyper::{
 use hyper_tls::HttpsConnector;
 use Path::HttpVerb;
 
+impl std::fmt::Display for Path::HttpVerb {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let verb = match self {
+            HttpVerb::Get => "GET",
+            HttpVerb::Head => "HEAD",
+            HttpVerb::Post => "POST",
+            HttpVerb::Put => "PUT",
+            HttpVerb::Delete => "DELETE",
+            HttpVerb::Options => "OPTIONS",
+            HttpVerb::Patch => "PATCH",
+        };
+        write!(f, "{}", verb)
+    }
+}
+
 #[derive(Clone)]
 pub struct PathImpl {
     https_client: hyper::Client<HttpsConnector<HttpConnector>>,
@@ -92,24 +107,16 @@ impl PathImpl {
         verb: HttpVerb,
         body: Option<String>,
     ) -> Result<ResponseFuture, capnp::Error> {
-        let method = match verb {
-            HttpVerb::Get => "GET",
-            HttpVerb::Head => "HEAD",
-            HttpVerb::Post => "POST",
-            HttpVerb::Put => "PUT",
-            HttpVerb::Delete => "DELETE",
-            HttpVerb::Options => "OPTIONS",
-            HttpVerb::Patch => "PATCH",
-        };
+        let method = verb.to_string();
         if !self.verb_whitelist.contains(&verb) {
             return Err(capnp::Error::failed(format!(
-                "{method} is not on a whitelist and can't be executed."
+                "{method} is not on a whitelist and can't be executed"
             )));
         }
-        let has_empty_body = [HttpVerb::Get, HttpVerb::Head, HttpVerb::Options].contains(&verb);
+        let has_empty_body = matches!(verb, HttpVerb::Get | HttpVerb::Head | HttpVerb::Options);
 
         let mut request_builder = hyper::Request::builder()
-            .method(method)
+            .method(method.as_str())
             .uri(self.get_uri()?);
         for (key, value) in self.headers.iter() {
             request_builder = request_builder.header(key, value);
@@ -169,7 +176,7 @@ impl Path::Server for PathImpl {
     ) -> Promise<(), capnp::Error> {
         if !self.query_modifiable {
             return Promise::err(capnp::Error::failed(
-                "can't add to query, because it was finalized".to_string(),
+                "Can't add to query, because it was finalized".to_string(),
             ));
         }
         let values = pry!(pry!(params.get()).get_values());
@@ -191,7 +198,7 @@ impl Path::Server for PathImpl {
     ) -> Promise<(), capnp::Error> {
         if !self.path_modifiable {
             return Promise::err(capnp::Error::failed(format!(
-                "can't add to path, because it was finalized"
+                "Can't add to path, because it was finalized"
             )));
         }
         let values = pry!(pry!(params.get()).get_values());
@@ -326,6 +333,12 @@ impl Path::Server for PathImpl {
         let mut verbs_vec = vec![];
         for verb in verbs.iter() {
             let v = pry!(verb);
+            if !self.verb_whitelist.contains(&v) {
+                return Promise::err(capnp::Error::failed(format!(
+                    "Can't include {} in verb whitelist, because it's not in the original one",
+                    v
+                )));
+            }
             verbs_vec.push(v);
         }
         let mut return_path = self.clone();
@@ -392,7 +405,6 @@ mod tests {
 
     #[tokio::test]
     async fn get_test() -> capnp::Result<()> {
-        // Current way to run it and see results: cargo test -- --nocapture
         let connector = HttpsConnector::new();
         let https_client = hyper::Client::builder().build::<_, hyper::Body>(connector);
         let mut path_client: Path::Client =
@@ -404,14 +416,6 @@ mod tests {
             path_params.set(0, "get");
         }
         path_client = request.send().promise.await?.get()?.get_result()?;
-
-        let mut request = path_client.whitelist_verbs_request();
-        {
-            let mut whitelist = request.get().init_verbs(1);
-            whitelist.set(0, HttpVerb::Delete);
-        }
-        // Next line would throw an error about not being on whitelist
-        // path_client = request.send().promise.await?.get()?.get_result()?;
 
         let request = path_client.get_request();
         let result = request.send().promise.await?;
@@ -429,6 +433,51 @@ mod tests {
         let status = result.get_status_code();
         assert_eq!(status, 200); // 200 OK
         println!("Body: {}", body);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn whitelist_test() -> capnp::Result<()> {
+        // Set url as example.org
+        let connector = HttpsConnector::new();
+        let https_client = hyper::Client::builder().build::<_, hyper::Body>(connector);
+        let mut path_client: Path::Client =
+            capnp_rpc::new_client(PathImpl::new("example.org", "", https_client)?);
+
+        // Allow only DELETE request
+        let mut request = path_client.whitelist_verbs_request();
+        {
+            let mut whitelist = request.get().init_verbs(1);
+            whitelist.set(0, HttpVerb::Delete);
+        }
+        path_client = request.send().promise.await?.get()?.get_result()?;
+
+        // Test that adding GET results in an error
+        let mut request = path_client.whitelist_verbs_request();
+        {
+            let mut whitelist = request.get().init_verbs(2);
+            whitelist.set(0, HttpVerb::Delete);
+            whitelist.set(1, HttpVerb::Get);
+        }
+        assert_eq!(
+            request.send().promise.await.err().map(|e| e.description),
+            Some(
+                "Can't include GET in verb whitelist, because it's not in the original one"
+                    .to_string()
+            )
+        );
+
+        // Test that GET request fails
+        let request = path_client.get_request();
+        assert_eq!(
+            request.send().promise.await.err().map(|e| e.description),
+            Some("GET is not on a whitelist and can't be executed".to_string())
+        );
+
+        // DELETE request still works
+        let request = path_client.delete_request();
+        assert!(request.send().promise.await.is_ok());
+
         Ok(())
     }
 

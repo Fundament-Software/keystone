@@ -422,17 +422,13 @@ mod tests {
         let result = result.get()?.get_result()?;
 
         let body = result.get_body()?;
-        let response_headers = result.get_headers()?;
-        println!("GET test");
-        println!("Headers:");
-        for response_header in response_headers.iter() {
-            let key = response_header.get_key()?;
-            let value = response_header.get_value()?;
-            println!("\tKey: {key}\n\tValue: {value}\n----------------")
-        }
+
+        let body_json: serde_json::Value = serde_json::from_str(body).unwrap();
+        assert_eq!(body_json["headers"]["Host"], "httpbin.org");
+        assert_eq!(body_json["url"], "https://httpbin.org/get");
+
         let status = result.get_status_code();
         assert_eq!(status, 200); // 200 OK
-        println!("Body: {}", body);
         Ok(())
     }
 
@@ -483,7 +479,6 @@ mod tests {
 
     #[tokio::test]
     async fn post_test() -> capnp::Result<()> {
-        // Current way to run it and see results: cargo test -- --nocapture
         let connector = HttpsConnector::new();
         let https_client = hyper::Client::builder().build::<_, hyper::Body>(connector);
         let mut path_client: Path::Client =
@@ -510,17 +505,30 @@ mod tests {
         let result = result.get()?.get_result()?;
 
         let body = result.get_body()?;
+        let body_json: serde_json::Value = serde_json::from_str(body).unwrap();
+        assert_eq!(
+            body_json["args"],
+            serde_json::json!({"key1": "value1", "key2": "value2", "key3": "value3"})
+        );
+        assert_eq!(body_json["headers"]["Host"], "httpbin.org");
+        assert_eq!(
+            body_json["data"],
+            "Here's something I post. It should be returned to me"
+        );
+        assert_eq!(
+            body_json["url"],
+            "https://httpbin.org/post?key1=value1&key2=value2&key3=value3"
+        );
+        /*
         let response_headers = result.get_headers()?;
-        println!("POST test");
-        println!("Headers:");
         for response_header in response_headers.iter() {
             let key = response_header.get_key()?;
             let value = response_header.get_value()?;
             println!("\tKey: {key}\n\tValue: {value}\n----------------")
         }
+        */
         let status = result.get_status_code();
         assert_eq!(status, 200); // 200 OK
-        println!("Body: {}", body);
         Ok(())
     }
 
@@ -547,31 +555,26 @@ mod tests {
         let request = path_client.finalize_headers_request();
         path_client = request.send().promise.await?.get()?.get_result()?;
 
+        // Test that we can't add any more
         let mut request = path_client.headers_request();
         {
             let mut headers = request.get().init_headers(1);
             headers.reborrow().get(0).set_key("IllegalHeader");
             headers.reborrow().get(0).set_value("IllegalValue");
         }
-        // Next line throws error as intended
-        // path_client = request.send().promise.await?.get()?.get_result()?;
+        assert!(request.send().promise.await.is_err());
 
         let request = path_client.get_request();
         let result = request.send().promise.await?;
         let result = result.get()?.get_result()?;
 
         let body = result.get_body()?;
-        let response_headers = result.get_headers()?;
-        println!("Headers test");
-        println!("Headers:");
-        for response_header in response_headers.iter() {
-            let key = response_header.get_key()?;
-            let value = response_header.get_value()?;
-            println!("\tKey: {key}\n\tValue: {value}\n----------------")
-        }
+
+        let body_json: serde_json::Value = serde_json::from_str(body).unwrap();
+        assert_eq!(body_json["headers"]["Header1"], "Value1");
+        assert_eq!(body_json["headers"].get("IllegalHeader"), None);
         let status = result.get_status_code();
         assert_eq!(status, 200); // 200 OK
-        println!("Body: {}", body);
         Ok(())
     }
 }

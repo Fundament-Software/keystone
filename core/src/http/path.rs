@@ -197,9 +197,9 @@ impl Path::Server for PathImpl {
         mut results: Path::PathResults,
     ) -> Promise<(), capnp::Error> {
         if !self.path_modifiable {
-            return Promise::err(capnp::Error::failed(format!(
-                "Can't add to path, because it was finalized"
-            )));
+            return Promise::err(capnp::Error::failed(
+                "Can't add to path, because it was finalized".to_string(),
+            ));
         }
         let values = pry!(pry!(params.get()).get_values());
         let mut return_path = self.clone();
@@ -365,7 +365,7 @@ impl Path::Server for PathImpl {
         for header in headers.iter() {
             let key = pry!(header.get_key());
             let key = hyper::header::HeaderName::try_from(key);
-            if let Err(_) = key {
+            if key.is_err() {
                 return Promise::err(capnp::Error::failed(
                     "Can't add header, key is invalid".to_string(),
                 ));
@@ -373,7 +373,7 @@ impl Path::Server for PathImpl {
             let key = key.unwrap();
             let value = pry!(header.get_value());
             let value = hyper::http::HeaderValue::try_from(value);
-            if let Err(_) = value {
+            if value.is_err() {
                 return Promise::err(capnp::Error::failed(
                     "Can't add header, value is invalid".to_string(),
                 ));

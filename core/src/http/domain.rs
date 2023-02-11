@@ -48,7 +48,7 @@ impl Domain::Server for DomainImpl {
         params: Domain::PathParams,
         mut results: Domain::PathResults,
     ) -> Promise<(), capnp::Error> {
-        let name = pry!(pry!(params.get()).get_name());
+        let name = pry!(pry!(params.get()).get_value());
         let path_impl = PathImpl::new(self.domain_name.as_str(), name, self.https_client.clone());
         if let Err(e) = path_impl {
             return Promise::err(e);

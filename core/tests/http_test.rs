@@ -1,6 +1,6 @@
 use keystone::http::https_client;
 
-#[tokio::main]
+#[tokio::test]
 async fn main() -> anyhow::Result<()> {
     let client = https_client();
 
@@ -14,7 +14,7 @@ async fn main() -> anyhow::Result<()> {
     // Requesting path
     let mut request = domain_client.path_request();
     {
-        request.get().set_name("get");
+        request.get().set_value("get");
     }
     let path_client = request.send().promise.await?.get()?.get_result()?;
 

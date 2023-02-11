@@ -135,37 +135,34 @@ impl PathImpl {
     }
 }
 
-// Could maybe be part of http_request, but so far couldn't get it to work
-macro_rules! http_request_promise {
-    ($results:expr, $future:expr) => {
-        Promise::<_, capnp::Error>::from_future(async move {
-            let mut results_builder = $results.get().init_result();
-            let response = $future
-                .await
-                .map_err(|err| capnp::Error::failed(err.to_string()))?;
-            results_builder.set_status_code(response.status().as_u16());
-            let len_response_headers: u32 = response.headers().len() as u32;
-            let header_iter = response.headers().iter().enumerate();
-            let mut results_headers = results_builder
-                .reborrow()
-                .init_headers(len_response_headers);
-            for (i, (key, value)) in header_iter {
-                let mut pair = results_headers.reborrow().get(i as u32);
-                pair.set_key(key.as_str());
-                pair.set_value(value.to_str().map_err(|_| {
-                    capnp::Error::failed("Response Header contains invalid character".to_string())
-                })?);
-            }
-            let body_bytes = hyper::body::to_bytes(response.into_body())
-                .await
-                .map_err(|err| capnp::Error::failed(err.to_string()))?;
-            let body = String::from_utf8(body_bytes.to_vec()).map_err(|_| {
-                capnp::Error::failed("Couldn't convert response body to utf8 String".to_string())
-            })?;
-            results_builder.reborrow().set_body(body.as_str());
-            Ok(())
-        })
-    };
+async fn http_request_promise(
+    mut results_builder: crate::http_capnp::path::http_result::Builder<'_>,
+    future: ResponseFuture,
+) -> core::result::Result<(), capnp::Error> {
+    let response = future
+        .await
+        .map_err(|err| capnp::Error::failed(err.to_string()))?;
+    results_builder.set_status_code(response.status().as_u16());
+    let len_response_headers: u32 = response.headers().len() as u32;
+    let header_iter = response.headers().iter().enumerate();
+    let mut results_headers = results_builder
+        .reborrow()
+        .init_headers(len_response_headers);
+    for (i, (key, value)) in header_iter {
+        let mut pair = results_headers.reborrow().get(i as u32);
+        pair.set_key(key.as_str());
+        pair.set_value(value.to_str().map_err(|_| {
+            capnp::Error::failed("Response Header contains invalid character".to_string())
+        })?);
+    }
+    let body_bytes = hyper::body::to_bytes(response.into_body())
+        .await
+        .map_err(|err| capnp::Error::failed(err.to_string()))?;
+    let body = String::from_utf8(body_bytes.to_vec()).map_err(|_| {
+        capnp::Error::failed("Couldn't convert response body to utf8 String".to_string())
+    })?;
+    results_builder.reborrow().set_body(body.as_str());
+    Ok(())
 }
 
 impl Path::Server for PathImpl {
@@ -219,7 +216,9 @@ impl Path::Server for PathImpl {
     ) -> Promise<(), capnp::Error> {
         let future = self.http_request(HttpVerb::Get, None);
         match future {
-            Ok(f) => http_request_promise!(results, f),
+            Ok(f) => Promise::<_, capnp::Error>::from_future(async move {
+                http_request_promise(results.get().init_result(), f).await
+            }),
             Err(e) => Promise::err(e),
         }
     }
@@ -231,7 +230,9 @@ impl Path::Server for PathImpl {
     ) -> Promise<(), capnp::Error> {
         let future = self.http_request(HttpVerb::Head, None);
         match future {
-            Ok(f) => http_request_promise!(results, f),
+            Ok(f) => Promise::<_, capnp::Error>::from_future(async move {
+                http_request_promise(results.get().init_result(), f).await
+            }),
             Err(e) => Promise::err(e),
         }
     }
@@ -244,7 +245,9 @@ impl Path::Server for PathImpl {
         let body = pry!(pry!(params.get()).get_body());
         let future = self.http_request(HttpVerb::Post, Some(body.to_string()));
         match future {
-            Ok(f) => http_request_promise!(results, f),
+            Ok(f) => Promise::<_, capnp::Error>::from_future(async move {
+                http_request_promise(results.get().init_result(), f).await
+            }),
             Err(e) => Promise::err(e),
         }
     }
@@ -257,7 +260,9 @@ impl Path::Server for PathImpl {
         let body = pry!(pry!(params.get()).get_body());
         let future = self.http_request(HttpVerb::Put, Some(body.to_string()));
         match future {
-            Ok(f) => http_request_promise!(results, f),
+            Ok(f) => Promise::<_, capnp::Error>::from_future(async move {
+                http_request_promise(results.get().init_result(), f).await
+            }),
             Err(e) => Promise::err(e),
         }
     }
@@ -270,7 +275,9 @@ impl Path::Server for PathImpl {
         let body = pry!(pry!(params.get()).get_body());
         let future = self.http_request(HttpVerb::Delete, Some(body.to_string()));
         match future {
-            Ok(f) => http_request_promise!(results, f),
+            Ok(f) => Promise::<_, capnp::Error>::from_future(async move {
+                http_request_promise(results.get().init_result(), f).await
+            }),
             Err(e) => Promise::err(e),
         }
     }
@@ -282,7 +289,9 @@ impl Path::Server for PathImpl {
     ) -> Promise<(), capnp::Error> {
         let future = self.http_request(HttpVerb::Options, None);
         match future {
-            Ok(f) => http_request_promise!(results, f),
+            Ok(f) => Promise::<_, capnp::Error>::from_future(async move {
+                http_request_promise(results.get().init_result(), f).await
+            }),
             Err(e) => Promise::err(e),
         }
     }
@@ -295,7 +304,9 @@ impl Path::Server for PathImpl {
         let body = pry!(pry!(params.get()).get_body());
         let future = self.http_request(HttpVerb::Patch, Some(body.to_string()));
         match future {
-            Ok(f) => http_request_promise!(results, f),
+            Ok(f) => Promise::<_, capnp::Error>::from_future(async move {
+                http_request_promise(results.get().init_result(), f).await
+            }),
             Err(e) => Promise::err(e),
         }
     }

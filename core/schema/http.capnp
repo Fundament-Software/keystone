@@ -6,7 +6,7 @@ interface Https {
 
 interface Domain {
   subdomain @0 (name :Text) -> (result :Domain);
-  path @1 (value :Text) -> (result :Path);
+  path @1 (values :List(Text)) -> (result :Path);
 }
 
 interface Path {

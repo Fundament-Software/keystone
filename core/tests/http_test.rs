@@ -16,7 +16,8 @@ async fn basic_test() -> anyhow::Result<()> {
     // Requesting path
     let mut request = domain_client.path_request();
     {
-        request.get().set_value("get");
+        let mut values_builder = request.get().init_values(1);
+        values_builder.reborrow().set(0, "get");
     }
     let path_client = request.send().promise.await?.get()?.get_result()?;
 
@@ -85,7 +86,8 @@ async fn domains() -> anyhow::Result<()> {
 
     let mut request = subdomain_client.path_request();
     {
-        request.get().set_value("get");
+        let mut values_builder = request.get().init_values(1);
+        values_builder.reborrow().set(0, "get");
     }
     let path_client = request.send().promise.await?.get()?.get_result()?;
 
@@ -125,7 +127,8 @@ async fn subdomains() -> anyhow::Result<()> {
 
     let mut request = subdomain_client.path_request();
     {
-        request.get().set_value("get");
+        let mut values_builder = request.get().init_values(1);
+        values_builder.reborrow().set(0, "get");
     }
     let path_client = request.send().promise.await?.get()?.get_result()?;
 
@@ -176,7 +179,8 @@ async fn finalize_paths() -> anyhow::Result<(), capnp::Error> {
 
     let mut request = domain_client.path_request();
     {
-        request.get().set_value("get");
+        let mut values_builder = request.get().init_values(1);
+        values_builder.reborrow().set(0, "get");
     }
     let path_client = request.send().promise.await?.get()?.get_result()?;
 
@@ -210,7 +214,8 @@ async fn finalize_query() -> anyhow::Result<(), capnp::Error> {
     // Requesting path
     let mut request = domain_client.path_request();
     {
-        request.get().set_value("get");
+        let mut values_builder = request.get().init_values(1);
+        values_builder.reborrow().set(0, "get");
     }
     let path_client = request.send().promise.await?.get()?.get_result()?;
 
@@ -254,7 +259,8 @@ async fn retrieve_query() -> anyhow::Result<(), capnp::Error> {
     // Requesting path
     let mut request = domain_client.path_request();
     {
-        request.get().set_value("get");
+        let mut values_builder = request.get().init_values(1);
+        values_builder.reborrow().set(0, "get");
     }
     let path_client = request.send().promise.await?.get()?.get_result()?;
 
@@ -294,7 +300,8 @@ async fn allowlist_test() -> anyhow::Result<(), capnp::Error> {
     // Requesting path
     let mut request = domain_client.path_request();
     {
-        request.get().set_value("get");
+        let mut values_builder = request.get().init_values(1);
+        values_builder.reborrow().set(0, "get");
     }
     let path_client = request.send().promise.await?.get()?.get_result()?;
 
@@ -348,7 +355,8 @@ async fn retrieve_path() -> anyhow::Result<(), capnp::Error> {
     // Requesting path
     let mut request = domain_client.path_request();
     {
-        request.get().set_value("get");
+        let mut values_builder = request.get().init_values(1);
+        values_builder.reborrow().set(0, "get");
     }
     let path_client = request.send().promise.await?.get()?.get_result()?;
 

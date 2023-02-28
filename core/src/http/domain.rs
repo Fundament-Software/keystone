@@ -48,8 +48,16 @@ impl Domain::Server for DomainImpl {
         params: Domain::PathParams,
         mut results: Domain::PathResults,
     ) -> Promise<(), capnp::Error> {
-        let name = pry!(pry!(params.get()).get_value());
-        let path_impl = PathImpl::new(self.domain_name.as_str(), name, self.https_client.clone());
+        let path_list: Vec<String> = pry!(pry!(params.get()).get_values())
+            .iter()
+            .filter(|i| i.is_ok()) // TODO Not sure what the errors would be, we should probably report them instead of skipping
+            .map(|i| i.unwrap().to_string())
+            .collect();
+        let path_impl = PathImpl::new(
+            self.domain_name.as_str(),
+            path_list,
+            self.https_client.clone(),
+        );
         if let Err(e) = path_impl {
             return Promise::err(e);
         }

@@ -38,16 +38,11 @@ pub struct PathImpl {
 }
 
 impl PathImpl {
-    pub fn new<A: TryInto<Authority>, S: Into<String>>(
+    pub fn new<A: TryInto<Authority>, S: Into<Vec<String>>>(
         authority: A,
-        initial_path: S,
+        path_list: S,
         https_client: hyper::Client<HttpsConnector<HttpConnector>>,
     ) -> Result<Self, capnp::Error> {
-        let path_item: String = initial_path.into();
-        let mut path_list = vec![];
-        if !path_item.is_empty() {
-            path_list.push(path_item);
-        }
         let verb_whitelist = vec![
             HttpVerb::Get,
             HttpVerb::Head,
@@ -60,7 +55,7 @@ impl PathImpl {
         Ok(PathImpl {
             https_client,
             query: vec![],
-            path_list,
+            path_list: path_list.into(),
             headers: HeaderMap::new(),
             path_modifiable: true,
             query_modifiable: true,
@@ -419,7 +414,7 @@ mod tests {
         let connector = HttpsConnector::new();
         let https_client = hyper::Client::builder().build::<_, hyper::Body>(connector);
         let mut path_client: Path::Client =
-            capnp_rpc::new_client(PathImpl::new("httpbin.org", "", https_client)?);
+            capnp_rpc::new_client(PathImpl::new("httpbin.org", vec!["".into()], https_client)?);
 
         let mut request = path_client.path_request();
         {
@@ -449,7 +444,7 @@ mod tests {
         let connector = HttpsConnector::new();
         let https_client = hyper::Client::builder().build::<_, hyper::Body>(connector);
         let mut path_client: Path::Client =
-            capnp_rpc::new_client(PathImpl::new("example.org", "", https_client)?);
+            capnp_rpc::new_client(PathImpl::new("example.org", vec!["".into()], https_client)?);
 
         // Allow only DELETE request
         let mut request = path_client.whitelist_verbs_request();
@@ -492,8 +487,11 @@ mod tests {
     async fn post_test() -> capnp::Result<()> {
         let connector = HttpsConnector::new();
         let https_client = hyper::Client::builder().build::<_, hyper::Body>(connector);
-        let mut path_client: Path::Client =
-            capnp_rpc::new_client(PathImpl::new("httpbin.org", "post", https_client)?);
+        let mut path_client: Path::Client = capnp_rpc::new_client(PathImpl::new(
+            "httpbin.org",
+            vec!["post".into()],
+            https_client,
+        )?);
 
         let mut request = path_client.query_request();
         {
@@ -548,8 +546,11 @@ mod tests {
         // Current way to run it and see results: cargo test -- --nocapture
         let connector = HttpsConnector::new();
         let https_client = hyper::Client::builder().build::<_, hyper::Body>(connector);
-        let mut path_client: Path::Client =
-            capnp_rpc::new_client(PathImpl::new("httpbin.org", "headers", https_client)?);
+        let mut path_client: Path::Client = capnp_rpc::new_client(PathImpl::new(
+            "httpbin.org",
+            vec!["headers".into()],
+            https_client,
+        )?);
 
         // Set headers
         let mut request = path_client.headers_request();

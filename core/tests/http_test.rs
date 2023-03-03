@@ -158,11 +158,18 @@ async fn finalize_domains() -> anyhow::Result<(), capnp::Error> {
     {
         request.get().set_name("httpbin.org");
     }
-    let _ = request.send().promise.await?.get()?.get_result()?;
+    let domain_client = request.send().promise.await?.get()?.get_result()?;
 
-    ::core::result::Result::Err(::capnp::Error::unimplemented(
-        "domain_finalize() not implemented!".to_string(),
-    ))
+    let request = domain_client.finalize_domain_request();
+    let finalized_client = request.send().promise.await?.get()?.get_result()?;
+
+    let mut request = finalized_client.subdomain_request();
+    {
+        request.get().set_name("www");
+    }
+    let err = request.send().promise.await;
+    assert!(err.is_err());
+    Ok(())
 }
 
 // after a path is finalized, you can't add more paths.
@@ -191,7 +198,7 @@ async fn finalize_paths() -> anyhow::Result<(), capnp::Error> {
     {
         let mut text_list = request.get().init_values(2);
         text_list.set(0, "foo");
-        text_list.set(0, "bar");
+        text_list.set(1, "bar");
     }
     let err = request.send().promise.await;
     assert!(err.is_err());

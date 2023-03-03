@@ -6,9 +6,11 @@ use hyper::client::HttpConnector;
 use hyper::http::uri::Authority;
 use hyper_tls::HttpsConnector;
 
+#[derive(Clone)]
 pub struct DomainImpl {
     domain_name: Authority,
     https_client: hyper::Client<HttpsConnector<HttpConnector>>,
+    modifiable: bool,
 }
 
 impl DomainImpl {
@@ -21,16 +23,23 @@ impl DomainImpl {
             domain_name: domain_name.try_into().map_err(|_| {
                 capnp::Error::failed("Can't create domain - invalid authority".to_string())
             })?,
+            modifiable: true,
         })
     }
 }
 
+// TODO Rewrite utilizing clone
 impl Domain::Server for DomainImpl {
     fn subdomain(
         &mut self,
         params: Domain::SubdomainParams,
         mut results: Domain::SubdomainResults,
     ) -> Promise<(), capnp::Error> {
+        if !self.modifiable {
+            return Promise::err(capnp::Error::failed(
+                "Can't add subdomain, because domain was finalized".to_string(),
+            ));
+        }
         let original_domain_name = self.domain_name.clone();
         let name = pry!(pry!(params.get()).get_name());
         let new_domain_name = name.to_string() + "." + original_domain_name.as_str();
@@ -63,6 +72,18 @@ impl Domain::Server for DomainImpl {
         }
         let path: Path::Client = capnp_rpc::new_client(path_impl.unwrap());
         results.get().set_result(path);
+        Promise::ok(())
+    }
+
+    fn finalize_domain(
+        &mut self,
+        _: Domain::FinalizeDomainParams,
+        mut results: Domain::FinalizeDomainResults,
+    ) -> Promise<(), capnp::Error> {
+        let mut return_domain = self.clone();
+        return_domain.modifiable = false;
+        let client = capnp_rpc::new_client(return_domain);
+        results.get().set_result(client);
         Promise::ok(())
     }
 }

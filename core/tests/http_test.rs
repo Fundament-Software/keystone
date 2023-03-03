@@ -378,6 +378,127 @@ async fn retrieve_path() -> anyhow::Result<(), capnp::Error> {
 }
 
 // when given a path, putting .. on the parent directory doesn't work
+#[tokio::test]
+async fn parent_directory_path() -> anyhow::Result<()> {
+    let client = https_client();
+
+    // Requesting domain
+    let mut request = client.domain_request();
+    {
+        request.get().set_name("httpbin.org");
+    }
+    let domain_client = request.send().promise.await?.get()?.get_result()?;
+
+    // Requesting path
+    let mut request = domain_client.path_request();
+    {
+        let mut values_builder = request.get().init_values(1);
+        values_builder.reborrow().set(0, "anything");
+    }
+    let path_client = request.send().promise.await?.get()?.get_result()?;
+
+    // Attempting to get parent path
+    let mut request = path_client.path_request();
+    {
+        let mut values_builder = request.get().init_values(1);
+        values_builder.reborrow().set(0, "..");
+    }
+    let path_client = request.send().promise.await?.get()?.get_result()?;
+
+    let request = path_client.get_request();
+    let response = request.send().promise.await?; // We'd get "temporary value dropped while borrowed" if we didn't split it
+    let response = response.get()?.get_result()?;
+
+    // Checking that we didn't get parent
+    let body = response.get_body()?;
+    let body_json: serde_json::Value = serde_json::from_str(body)?;
+    assert_eq!(body_json["url"], "https://httpbin.org/anything/..");
+    Ok(())
+}
+
 // when given a path, putting / on the path to go to root doesn't work
+#[tokio::test]
+async fn root_directory_path() -> anyhow::Result<(), capnp::Error> {
+    let client = https_client();
+
+    // Requesting domain
+    let mut request = client.domain_request();
+    {
+        request.get().set_name("httpbin.org");
+    }
+    let domain_client = request.send().promise.await?.get()?.get_result()?;
+
+    // Requesting path
+    let mut request = domain_client.path_request();
+    {
+        let mut values_builder = request.get().init_values(1);
+        values_builder.reborrow().set(0, "get");
+    }
+    let path_client = request.send().promise.await?.get()?.get_result()?;
+
+    // Attempting to get root path
+    let mut request = path_client.path_request();
+    {
+        let mut values_builder = request.get().init_values(1);
+        values_builder.reborrow().set(0, "/");
+    }
+    let err = request.send().promise.await;
+    assert!(err.is_err()); // TODO Just make sure it doesn't return root
+
+    Ok(())
+}
+
 // None of the previous are possible using HTTP escapes
+#[tokio::test]
+async fn escapes_path() -> anyhow::Result<()> {
+    let client = https_client();
+
+    // Requesting domain
+    let mut request = client.domain_request();
+    {
+        request.get().set_name("httpbin.org");
+    }
+    let domain_client = request.send().promise.await?.get()?.get_result()?;
+
+    // Requesting path
+    let mut request = domain_client.path_request();
+    {
+        let mut values_builder = request.get().init_values(1);
+        values_builder.reborrow().set(0, "anything");
+    }
+    let path_client = request.send().promise.await?.get()?.get_result()?;
+
+    // Attempting to get parent path
+    let mut request = path_client.path_request();
+    {
+        let mut values_builder = request.get().init_values(1);
+        values_builder.reborrow().set(0, "&period;&period;");
+    }
+
+    let parent_path_client = request.send().promise.await?.get()?.get_result()?;
+
+    let request = parent_path_client.get_request();
+    let response = request.send().promise.await?; // We'd get "temporary value dropped while borrowed" if we didn't split it
+    let response = response.get()?.get_result()?;
+
+    // Checking that we didn't get parent
+    let body = response.get_body()?;
+    let body_json: serde_json::Value = serde_json::from_str(body)?;
+    assert_eq!(body_json["url"], "https://httpbin.org/anything/..");
+
+    //let err = request.send().promise.await;
+    //assert!(err.is_err());
+
+    // Attempting to get root
+    let mut request = path_client.path_request();
+    {
+        let mut values_builder = request.get().init_values(1);
+        values_builder.reborrow().set(0, "&sol;");
+    }
+    let err = request.send().promise.await;
+    //assert!(err.is_err());
+
+    Ok(())
+}
+
 // When given a path, using a protocol relative URL to escape confinement doesn't work

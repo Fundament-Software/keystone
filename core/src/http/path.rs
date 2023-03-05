@@ -68,7 +68,6 @@ impl PathImpl {
     }
 
     fn get_uri(&self) -> capnp::Result<hyper::Uri> {
-        // TODO Use something well-established, like https://docs.rs/url/latest/url  >/ - apply to other places
         let mut parts = Parts::default();
         parts.scheme = Some("https".parse().unwrap()); // Ok to unwrap - will always parse. TODO - should we allow http too?
         parts.authority = Some(self.authority.clone());

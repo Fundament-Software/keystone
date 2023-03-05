@@ -28,7 +28,6 @@ impl DomainImpl {
     }
 }
 
-// TODO Rewrite utilizing clone
 impl Domain::Server for DomainImpl {
     fn subdomain(
         &mut self,

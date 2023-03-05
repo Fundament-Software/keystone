@@ -533,7 +533,7 @@ async fn protocol_relative_url_path() -> anyhow::Result<()> {
     let mut request = path_client.path_request();
     {
         let mut values_builder = request.get().init_values(1);
-        values_builder.reborrow().set(0, "/post");
+        values_builder.reborrow().set(0, "/httpbin.org/post");
     }
     let path_client = request.send().promise.await?.get()?.get_result()?;
 

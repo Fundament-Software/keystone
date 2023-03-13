@@ -9,9 +9,9 @@ interface Process(API, ProcessError) {
 
 # Generic definition of a capability that lets you spawn another. Most modules will implement this.
 # What a program is, it's API, and what arguments it takes is ultimately implementation-defined.
-interface ServiceSpawn(Program, API, Args) {
+interface ServiceSpawn(Program, Args, API, ProcessError) {
     # Process should have a relevant error relating to why the process was not spawned - if this is not possible, it could be a null capability. 
-    spawn @0 (program: Program, args: Args) -> (result :Process(API));
+    spawn @0 (program: Program, args: Args) -> (result :Process(API, ProcessError));
 }
 
 

@@ -31,6 +31,12 @@
               ];
         });
 
+        patched-capnp = pkgs.capnproto.override {
+          patches = [
+            ./patches/http-over-capnp.patch 
+          ];
+        };
+
       in rec {
         devShell = pkgs.mkShell {
           buildInputs = with pkgs; [
@@ -44,7 +50,7 @@
 
             cargo-edit
 
-            capnproto
+            patched-capnp
 
             cmake
           ];

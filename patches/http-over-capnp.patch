@@ -1,0 +1,35 @@
+diff --git a/c++/src/capnp/CMakeLists.txt b/c++/src/capnp/CMakeLists.txt
+index 9980fde6..03c97634 100644
+--- a/c++/src/capnp/CMakeLists.txt
++++ b/c++/src/capnp/CMakeLists.txt
+@@ -154,6 +154,30 @@ if(NOT CAPNP_LITE)
+   install(FILES ${capnp-websocket_headers} DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/capnp/compat")
+ endif()
+ 
++# http-over-capnp ==============================================================
++
++set(http-over-capnp_sources
++	compat/byte-stream.c++
++	compat/http-over-capnp.c++
++)
++set(http-over-capnp_headers
++	compat/byte-stream.h
++	compat/http-over-capnp.h 
++)
++set(http-over-capnp_schemas
++	compat/byte-stream.capnp
++	compat/http-over-capnp.capnp 
++)
++
++if(NOT CAPNP_LITE)
++	add_library(http-over-capnp ${capnp-http-over-capnp_sources})
++	add_library(CapnProto::http-over-capnp ALIAS http-over-capnp)
++	target_link_libraries(http-over-capnp PUBLIC capnp kj-http)
++	set_target_properties(http-over-capnp PROPERTIES VERSION ${VERSION})
++	install(TARGETS http-over-capnp ${INSTALL_TARGETS_DEFAULT_ARGS})
++	install(FILES ${http-over-capnp_headers} ${http-over-capnp_schemas} DESTINATION "#{CMAKE_INSTALL_INCLUDEDIR}/capnp/compat")
++endif()
++
+ # Tools/Compilers ==============================================================
+ 
+ set(capnpc_sources

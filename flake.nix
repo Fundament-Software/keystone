@@ -19,17 +19,7 @@
     , advisory-db, ... }:
     flake-utils.lib.eachSystem [ flake-utils.lib.system.x86_64-linux ] (system:
       let
-        overlays = [ 
-          (import rust-overlay)
-          (self: super: 
-          {
-            capnproto = super.capnproto.overrideAttrs (old: {
-              patches = (old.patches or []) ++ [
-                ./patches/http-over-capnp.patch
-              ];
-            });
-          })
-        ];
+        overlays = [ (import rust-overlay) ];
         pkgs = import nixpkgs { inherit system overlays; };
 
         rust-custom-toolchain = (pkgs.rust-bin.stable.latest.default.override {
@@ -40,6 +30,12 @@
                 "rust-analyzer-preview"
               ];
         });
+
+        patched-capnp = pkgs.capnproto.override {
+          patches = [
+            ./patches/http-over-capnp.patch 
+          ];
+        };
 
       in rec {
         devShell = pkgs.mkShell {
@@ -54,7 +50,7 @@
 
             cargo-edit
 
-            capnproto
+            patched-capnp
 
             cmake
           ];

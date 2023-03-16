@@ -2,6 +2,7 @@
 mod couchdb;
 mod database;
 mod node;
+mod byte_stream;
 
 include!(concat!(env!("OUT_DIR"), "/capnp_include.rs"));
 

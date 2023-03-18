@@ -418,7 +418,7 @@ async fn parent_directory_path() -> anyhow::Result<()> {
 
 // when given a path, putting / on the path to go to root doesn't work
 #[tokio::test]
-async fn root_directory_path() -> anyhow::Result<(), capnp::Error> {
+async fn root_directory_path() -> anyhow::Result<()> {
     let client = https_client();
 
     // Requesting domain
@@ -442,8 +442,13 @@ async fn root_directory_path() -> anyhow::Result<(), capnp::Error> {
         let mut values_builder = request.get().init_values(1);
         values_builder.reborrow().set(0, "/");
     }
-    let err = request.send().promise.await;
+    let path_client = request.send().promise.await?.get()?.get_result()?;
 
+    let request = path_client.get_request();
+    let response = request.send().promise.await?; // We'd get "temporary value dropped while borrowed" if we didn't split it
+    let response = response.get()?.get_result()?;
+    let status = response.get_status_code();
+    assert_eq!(status, 404);
     Ok(())
 }
 
@@ -471,7 +476,7 @@ async fn escapes_path() -> anyhow::Result<()> {
     let mut request = path_client.path_request();
     {
         let mut values_builder = request.get().init_values(1);
-        values_builder.reborrow().set(0, "&period;&period;");
+        values_builder.reborrow().set(0, "%2E%2E");
     }
     let parent_path_client = request.send().promise.await?.get()?.get_result()?;
 
@@ -483,16 +488,13 @@ async fn escapes_path() -> anyhow::Result<()> {
     let body = response.get_body()?;
     let body_json: serde_json::Value = serde_json::from_str(body)?;
     // TODO Not sure what the expected path in such cases is
-    assert_eq!(
-        body_json["url"],
-        "https://httpbin.org/anything/&period%3B&period%3B"
-    );
+    assert_eq!(body_json["url"], "https://httpbin.org/anything/..");
 
     // Attempting to get root
     let mut request = path_client.path_request();
     {
         let mut values_builder = request.get().init_values(1);
-        values_builder.reborrow().set(0, "&sol;");
+        values_builder.reborrow().set(0, "%2F");
     }
     let root_path_client = request.send().promise.await?.get()?.get_result()?;
 
@@ -501,11 +503,8 @@ async fn escapes_path() -> anyhow::Result<()> {
     let response = response.get()?.get_result()?;
 
     // Checking that we didn't get root
-    let body = response.get_body()?;
-    let body_json: serde_json::Value = serde_json::from_str(body)?;
-    // TODO Not sure what the expected path in such cases is
-    assert_eq!(body_json["url"], "https://httpbin.org/anything/&sol%3B");
-
+    let status = response.get_status_code();
+    assert_eq!(status, 404);
     Ok(())
 }
 

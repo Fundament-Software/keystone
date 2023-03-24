@@ -33,7 +33,9 @@ interface Path {
   }
 
   query @0 (values :List(KeyValue)) -> (result :Path);
+  # Appends query to path. Doesn't allow modification or access to existing query data.
   path @1 (values :List(Text)) -> (result :Path);
+  # Appends data to path. Doesn't allow access to existing data, so that it can't be exfiltrated.
   get @2 () -> (result :HttpResult);
   head @3 () -> (result :HttpResult);
   post @4 (body :Text) -> (result :HttpResult);

@@ -251,47 +251,6 @@ async fn finalize_query() -> anyhow::Result<(), capnp::Error> {
     Ok(())
 }
 
-// When query strings are finalized it isn't possible to overwrite existing query bindings or retrieve them
-#[tokio::test]
-async fn retrieve_query() -> anyhow::Result<(), capnp::Error> {
-    let client = https_client();
-
-    // Requesting domain
-    let mut request = client.domain_request();
-    {
-        request.get().set_name("httpbin.org");
-    }
-    let domain_client = request.send().promise.await?.get()?.get_result()?;
-
-    // Requesting path
-    let mut request = domain_client.path_request();
-    {
-        let mut values_builder = request.get().init_values(1);
-        values_builder.reborrow().set(0, "get");
-    }
-    let path_client = request.send().promise.await?.get()?.get_result()?;
-
-    // Setting query
-    let mut request = path_client.query_request();
-    {
-        let mut values_builder = request.get().init_values(2);
-        values_builder.reborrow().get(0).set_key("key1");
-        values_builder.reborrow().get(0).set_value("val1");
-    }
-    let path_client = request.send().promise.await?.get()?.get_result()?;
-    let request = path_client.finalize_query_request();
-    let finalized_client = request.send().promise.await?.get()?.get_result()?;
-
-    // Attempting to get query
-    let mut request = finalized_client.query_request();
-    {
-        let values = request.get().get_values()?;
-        assert_eq!(values.len(), 0);
-    }
-
-    Ok(())
-}
-
 // When an allowlist of verbs is set, it isn't possible to expand the allowlist with the set allowlist function
 #[tokio::test]
 async fn allowlist_test() -> anyhow::Result<(), capnp::Error> {
@@ -347,36 +306,6 @@ async fn allowlist_test() -> anyhow::Result<(), capnp::Error> {
     Ok(())
 }
 
-// when given a path it isn't possible to retrieve previous components
-#[tokio::test]
-async fn retrieve_path() -> anyhow::Result<(), capnp::Error> {
-    let client = https_client();
-
-    // Requesting domain
-    let mut request = client.domain_request();
-    {
-        request.get().set_name("httpbin.org");
-    }
-    let domain_client = request.send().promise.await?.get()?.get_result()?;
-
-    // Requesting path
-    let mut request = domain_client.path_request();
-    {
-        let mut values_builder = request.get().init_values(1);
-        values_builder.reborrow().set(0, "get");
-    }
-    let path_client = request.send().promise.await?.get()?.get_result()?;
-
-    // Attempting to get path
-    let mut request = path_client.path_request();
-    {
-        let values = request.get().get_values()?;
-        assert_eq!(values.len(), 0);
-    }
-
-    Ok(())
-}
-
 // when given a path, putting .. on the parent directory doesn't work
 #[tokio::test]
 async fn parent_directory_path() -> anyhow::Result<()> {
@@ -389,30 +318,38 @@ async fn parent_directory_path() -> anyhow::Result<()> {
     }
     let domain_client = request.send().promise.await?.get()?.get_result()?;
 
-    // Requesting path
+    // 1. Getting contents of root path
     let mut request = domain_client.path_request();
     {
         let mut values_builder = request.get().init_values(1);
-        values_builder.reborrow().set(0, "anything");
+        values_builder.reborrow().set(0, "");
+    }
+    let root_path_client = request.send().promise.await?.get()?.get_result()?;
+    let request = root_path_client.get_request();
+    let root_response = request.send().promise.await?;
+    let root_response = root_response.get()?.get_result()?;
+    let root_body = root_response.get_body()?;
+
+    // 2. Trying to get parent from existing path
+    let mut request = domain_client.path_request();
+    {
+        let mut values_builder = request.get().init_values(1);
+        values_builder.reborrow().set(0, "get");
     }
     let path_client = request.send().promise.await?.get()?.get_result()?;
-
-    // Attempting to get parent path
     let mut request = path_client.path_request();
     {
         let mut values_builder = request.get().init_values(1);
         values_builder.reborrow().set(0, "..");
     }
     let path_client = request.send().promise.await?.get()?.get_result()?;
-
     let request = path_client.get_request();
-    let response = request.send().promise.await?; // We'd get "temporary value dropped while borrowed" if we didn't split it
-    let response = response.get()?.get_result()?;
+    let other_response = request.send().promise.await?;
+    let other_response = other_response.get()?.get_result()?;
+    let other_body = other_response.get_body()?;
 
-    // Checking that we didn't get parent
-    let body = response.get_body()?;
-    let body_json: serde_json::Value = serde_json::from_str(body)?;
-    assert_eq!(body_json["url"], "https://httpbin.org/anything/..");
+    // 3. Response bodies differ
+    assert_ne!(root_body, other_body);
     Ok(())
 }
 
@@ -428,27 +365,38 @@ async fn root_directory_path() -> anyhow::Result<()> {
     }
     let domain_client = request.send().promise.await?.get()?.get_result()?;
 
-    // Requesting path
+    // 1. Getting contents of root path
+    let mut request = domain_client.path_request();
+    {
+        let mut values_builder = request.get().init_values(1);
+        values_builder.reborrow().set(0, "");
+    }
+    let root_path_client = request.send().promise.await?.get()?.get_result()?;
+    let request = root_path_client.get_request();
+    let root_response = request.send().promise.await?;
+    let root_response = root_response.get()?.get_result()?;
+    let root_body = root_response.get_body()?;
+
+    // 2. Trying to get to root from existing path
     let mut request = domain_client.path_request();
     {
         let mut values_builder = request.get().init_values(1);
         values_builder.reborrow().set(0, "get");
     }
     let path_client = request.send().promise.await?.get()?.get_result()?;
-
-    // Attempting to get root path
     let mut request = path_client.path_request();
     {
         let mut values_builder = request.get().init_values(1);
         values_builder.reborrow().set(0, "/");
     }
     let path_client = request.send().promise.await?.get()?.get_result()?;
-
     let request = path_client.get_request();
-    let response = request.send().promise.await?; // We'd get "temporary value dropped while borrowed" if we didn't split it
-    let response = response.get()?.get_result()?;
-    let status = response.get_status_code();
-    assert_eq!(status, 404);
+    let other_response = request.send().promise.await?;
+    let other_response = other_response.get()?.get_result()?;
+    let other_body = other_response.get_body()?;
+
+    // 3. Response bodies differ
+    assert_ne!(root_body, other_body);
     Ok(())
 }
 
@@ -464,47 +412,55 @@ async fn escapes_path() -> anyhow::Result<()> {
     }
     let domain_client = request.send().promise.await?.get()?.get_result()?;
 
-    // Requesting path
+    // 1. Getting contents of root path
     let mut request = domain_client.path_request();
     {
         let mut values_builder = request.get().init_values(1);
-        values_builder.reborrow().set(0, "anything");
+        values_builder.reborrow().set(0, "");
+    }
+    let root_path_client = request.send().promise.await?.get()?.get_result()?;
+    let request = root_path_client.get_request();
+    let root_response = request.send().promise.await?;
+    let root_response = root_response.get()?.get_result()?;
+    let root_body = root_response.get_body()?;
+
+    // 2. Appending to path, so that we don't have direct access to root path
+    let mut request = domain_client.path_request();
+    {
+        let mut values_builder = request.get().init_values(1);
+        values_builder.reborrow().set(0, "get");
     }
     let path_client = request.send().promise.await?.get()?.get_result()?;
 
-    // Attempting to get parent path
+    // 3. Trying to get to root via .. using escape codes
     let mut request = path_client.path_request();
     {
         let mut values_builder = request.get().init_values(1);
         values_builder.reborrow().set(0, "%2E%2E");
     }
-    let parent_path_client = request.send().promise.await?.get()?.get_result()?;
+    let other_client = request.send().promise.await?.get()?.get_result()?;
+    let request = other_client.get_request();
+    let other_response = request.send().promise.await?;
+    let other_response = other_response.get()?.get_result()?;
+    let other_body = other_response.get_body()?;
 
-    let request = parent_path_client.get_request();
-    let response = request.send().promise.await?; // We'd get "temporary value dropped while borrowed" if we didn't split it
-    let response = response.get()?.get_result()?;
+    // 4. Response bodies differ
+    assert_ne!(root_body, other_body);
 
-    // Checking that we didn't get parent
-    let body = response.get_body()?;
-    let body_json: serde_json::Value = serde_json::from_str(body)?;
-    // TODO Not sure what the expected path in such cases is
-    assert_eq!(body_json["url"], "https://httpbin.org/anything/..");
-
-    // Attempting to get root
+    // 5. Trying to get to root via / using escape codes
     let mut request = path_client.path_request();
     {
         let mut values_builder = request.get().init_values(1);
         values_builder.reborrow().set(0, "%2F");
     }
-    let root_path_client = request.send().promise.await?.get()?.get_result()?;
+    let other_client = request.send().promise.await?.get()?.get_result()?;
+    let request = other_client.get_request();
+    let other_response = request.send().promise.await?;
+    let other_response = other_response.get()?.get_result()?;
+    let other_body = other_response.get_body()?;
 
-    let request = root_path_client.get_request();
-    let response = request.send().promise.await?; // We'd get "temporary value dropped while borrowed" if we didn't split it
-    let response = response.get()?.get_result()?;
-
-    // Checking that we didn't get root
-    let status = response.get_status_code();
-    assert_eq!(status, 404);
+    // 6. Response bodies differ
+    assert_ne!(root_body, other_body);
     Ok(())
 }
 

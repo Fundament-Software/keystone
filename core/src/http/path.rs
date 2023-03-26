@@ -338,12 +338,6 @@ impl Path::Server for PathImpl {
         let mut verbs_vec = vec![];
         for verb in verbs.iter() {
             let v = pry!(verb);
-            if !self.verb_whitelist.contains(&v) {
-                return Promise::err(capnp::Error::failed(format!(
-                    "Can't include {} in verb whitelist, because it's not in the original one",
-                    v
-                )));
-            }
             verbs_vec.push(v);
         }
         let mut return_path = self.clone();
@@ -453,20 +447,14 @@ mod tests {
         }
         path_client = request.send().promise.await?.get()?.get_result()?;
 
-        // Test that adding GET results in an error
+        // Doesn't actually add GET now.
         let mut request = path_client.whitelist_verbs_request();
         {
             let mut whitelist = request.get().init_verbs(2);
             whitelist.set(0, HttpVerb::Delete);
             whitelist.set(1, HttpVerb::Get);
         }
-        assert_eq!(
-            request.send().promise.await.err().map(|e| e.description),
-            Some(
-                "Can't include GET in verb whitelist, because it's not in the original one"
-                    .to_string()
-            )
-        );
+        path_client = request.send().promise.await?.get()?.get_result()?;
 
         // Test that GET request fails
         let request = path_client.get_request();

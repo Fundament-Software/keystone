@@ -279,29 +279,38 @@ async fn allowlist_test() -> anyhow::Result<(), capnp::Error> {
     }
     let client = request.send().promise.await?.get()?.get_result()?;
 
-    // Try to overwrite with allowing a Get command
-    let mut request = client.whitelist_verbs_request();
-    {
-        let mut whitelist = request.get().init_verbs(1);
-        whitelist.set(0, Path::HttpVerb::Get);
-    }
-    assert_eq!(
-        request.send().promise.await.err().map(|e| e.description),
-        Some(
-            "Can't include GET in verb whitelist, because it's not in the original one".to_string()
-        )
-    );
+    // DELETE is valid
+    let request = client.delete_request();
+    assert!(request.send().promise.await.is_ok());
 
-    // Test that GET request fails
+    // GET request fails
     let request = client.get_request();
     assert_eq!(
         request.send().promise.await.err().map(|e| e.description),
         Some("GET is not on a whitelist and can't be executed".to_string())
     );
 
-    // DELETE request still works
+    // Try to overwrite to allow GET
+    let mut request = client.whitelist_verbs_request();
+    {
+        let mut whitelist = request.get().init_verbs(1);
+        whitelist.set(0, Path::HttpVerb::Get);
+    }
+    let client = request.send().promise.await?.get()?.get_result()?;
+
+    // GET request fails
+    let request = client.get_request();
+    assert_eq!(
+        request.send().promise.await.err().map(|e| e.description),
+        Some("GET is not on a whitelist and can't be executed".to_string())
+    );
+
+    // DELETE request now doesn't work
     let request = client.delete_request();
-    assert!(request.send().promise.await.is_ok());
+    assert_eq!(
+        request.send().promise.await.err().map(|e| e.description),
+        Some("DELETE is not on a whitelist and can't be executed".to_string())
+    );
 
     Ok(())
 }

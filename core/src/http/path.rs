@@ -3,7 +3,7 @@ use capnp::capability::Promise;
 use capnp_rpc::pry;
 use hyper::{
     client::{HttpConnector, ResponseFuture},
-    http::uri::{Authority, Parts, PathAndQuery},
+    http::uri::Authority,
     HeaderMap,
 };
 use hyper_tls::HttpsConnector;
@@ -67,32 +67,16 @@ impl PathImpl {
         })
     }
 
-    fn get_uri(&self) -> capnp::Result<hyper::Uri> {
-        let mut parts = Parts::default();
-        parts.scheme = Some("https".parse().unwrap()); // Ok to unwrap - will always parse. TODO - should we allow http too?
-        parts.authority = Some(self.authority.clone());
-        parts.path_and_query = Some(self.path_and_query()?);
-        hyper::Uri::from_parts(parts).map_err(|_| capnp::Error::failed("Invalid URL".to_string()))
-    }
-
-    fn path_and_query(&self) -> capnp::Result<PathAndQuery> {
-        let mut path = String::from("");
-        for i in self.path_list.iter() {
-            path.push('/');
-            path.push_str(i);
-        }
-        let mut query = String::from("");
-        if !self.query.is_empty() {
-            query.push('?');
-        }
-        for (k, v) in self.query.iter() {
-            if !query.ends_with('?') {
-                query.push('&');
-            }
-            query.push_str(format!("{k}={v}").as_str());
-        }
-        PathAndQuery::try_from(path + query.as_str())
-            .map_err(|_| capnp::Error::failed("Couldn't construct PathAndQuery".to_string()))
+    fn get_uri(&self) -> capnp::Result<String> {
+        let authority = self.authority.to_string();
+        let mut url = format!("https://{}", authority)
+            .parse::<url::Url>()
+            .map_err(|_| capnp::Error::failed("Couldn't create base url".to_string()))?;
+        url.path_segments_mut()
+            .map_err(|_| capnp::Error::failed("Couldn't add path segment to url".to_string()))?
+            .extend(&self.path_list);
+        url.query_pairs_mut().extend_pairs(&self.query);
+        Ok(url.to_string())
     }
 
     // Function isn't part of specification, but I think it simplifies things

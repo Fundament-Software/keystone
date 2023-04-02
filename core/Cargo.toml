@@ -40,4 +40,4 @@ assert_fs = "1.0"
 
 [build-dependencies]
 anyhow = "1.*"
-capnp_import = { git = "https://github.com/Fundament-Software/capnp_import" }
+capnp-import = { git = "https://github.com/Fundament-Software/capnp-import" }

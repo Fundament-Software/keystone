@@ -1128,12 +1128,14 @@ dependencies = [
  "dlopen",
  "futures",
  "hyper",
+ "hyper-tls",
  "log",
  "predicates 2.1.5",
  "pretty_env_logger",
  "serde",
  "serde_json",
  "tokio",
+ "url",
 ]
 
 [[package]]

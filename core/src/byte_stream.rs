@@ -1,7 +1,8 @@
-use capnp::{capability::Promise, ErrorKind};
+use capnp::{capability::{Promise, Response}, ErrorKind};
 use capnp_rpc::pry;
 
-use crate::byte_stream_capnp::byte_stream::{Server, WriteParams, WriteResults, EndParams, EndResults};
+use crate::stream_capnp::stream_result;
+use crate::byte_stream_capnp::byte_stream::{Client, Server, WriteParams, WriteResults, EndParams, EndResults};
 
 /// Server implementation of a ByteStream capability.
 ///
@@ -54,6 +55,15 @@ where
 
     fn get_substream(&mut self, _:crate::byte_stream_capnp::byte_stream::GetSubstreamParams<>,_:crate::byte_stream_capnp::byte_stream::GetSubstreamResults<>) ->  capnp::capability::Promise<(), capnp::Error> {
         Promise::err(capnp::Error { kind: ErrorKind::Unimplemented, description: String::from("Not implemented") })
+    }
+}
+
+impl Client {
+    /// Convinience function to make it easier to send bytes through the ByteStream
+    async fn write_bytes(&self, bytes: &[u8]) -> Result<Response<stream_result::Owned>, capnp::Error> {
+        let mut write_request = self.write_request();
+        write_request.get().set_bytes(bytes);
+        write_request.send().promise.await
     }
 }
 

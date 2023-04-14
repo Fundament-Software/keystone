@@ -13,5 +13,3 @@ interface ServiceSpawn(Program, Args, API, ProcessError) {
     # Process should have a relevant error relating to why the process was not spawned - if this is not possible, it could be a null capability. 
     spawn @0 (program: Program, args: Args) -> (result :Process(API, ProcessError));
 }
-
-

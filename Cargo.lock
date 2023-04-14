@@ -1093,6 +1093,7 @@ dependencies = [
  "assert_fs",
  "async-trait",
  "atomic-counter",
+ "bytes",
  "cap-std",
  "capnp",
  "capnp-futures",

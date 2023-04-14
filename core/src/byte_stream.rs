@@ -1,5 +1,7 @@
+use bytes::BytesMut;
 use capnp::{capability::{Promise, Response}, ErrorKind};
 use capnp_rpc::pry;
+use tokio::io::{AsyncRead, AsyncReadExt};
 
 use crate::stream_capnp::stream_result;
 use crate::byte_stream_capnp::byte_stream::{Client, Server, WriteParams, WriteResults, EndParams, EndResults};
@@ -59,11 +61,39 @@ where
 }
 
 impl Client {
-    /// Convinience function to make it easier to send bytes through the ByteStream
+    /// Convenience function to make it easier to send bytes through the ByteStream
     async fn write_bytes(&self, bytes: &[u8]) -> Result<Response<stream_result::Owned>, capnp::Error> {
         let mut write_request = self.write_request();
         write_request.get().set_bytes(bytes);
         write_request.send().promise.await
+    }
+
+    /// Copies the entire contents of a reader into the byte stream.
+    ///
+    /// This function returns a future that will continiously read data from `reader` and then
+    /// write it to `self` in a streaming fashion until `reader` returns EOF, or an error occurs.
+    ///
+    /// On success, returns the total number of bytes that were copies from `reader` to the byte
+    /// stream.
+    ///
+    /// A copy buffer of 4 KB is created to take data from the reader to the byte stream.
+    async fn copy(&self, reader: &mut (impl AsyncRead + Unpin)) -> anyhow::Result<usize> {
+        let mut total_bytes = 0;
+        let mut buffer = BytesMut::with_capacity(4096);
+        
+        loop {
+            let read_size = reader.read_buf(&mut buffer).await?;
+            // If we read zero bytes then EOF has been reached.
+            if read_size == 0 {
+                break;
+            }
+
+            total_bytes += read_size;
+            self.write_bytes(&buffer[..read_size]).await?;
+            buffer.clear();
+        }
+
+        Ok(total_bytes)
     }
 }
 

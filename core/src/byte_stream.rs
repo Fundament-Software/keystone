@@ -62,7 +62,7 @@ where
 
 impl Client {
     /// Convenience function to make it easier to send bytes through the ByteStream
-    async fn write_bytes(&self, bytes: &[u8]) -> Result<Response<stream_result::Owned>, capnp::Error> {
+    pub async fn write_bytes(&self, bytes: &[u8]) -> Result<Response<stream_result::Owned>, capnp::Error> {
         let mut write_request = self.write_request();
         write_request.get().set_bytes(bytes);
         write_request.send().promise.await
@@ -77,7 +77,7 @@ impl Client {
     /// stream.
     ///
     /// A copy buffer of 4 KB is created to take data from the reader to the byte stream.
-    async fn copy(&self, reader: &mut (impl AsyncRead + Unpin)) -> anyhow::Result<usize> {
+    pub async fn copy(&self, reader: &mut (impl AsyncRead + Unpin)) -> anyhow::Result<usize> {
         let mut total_bytes = 0;
         let mut buffer = BytesMut::with_capacity(4096);
         

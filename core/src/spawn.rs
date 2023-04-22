@@ -20,9 +20,11 @@ pub mod unix_process {
     pub struct UnixProcessImpl {
         pub cancellation_token: CancellationToken,
         stdin: Option<ChildStdin>,
-        pub stdout_task: JoinHandle<anyhow::Result<Option<usize>>>,
-        pub stderr_task: JoinHandle<anyhow::Result<Option<usize>>>,
-        pub process_task: JoinHandle<anyhow::Result<ExitStatus>>,
+        stdout_task: JoinHandle<anyhow::Result<Option<usize>>>,
+        stderr_task: JoinHandle<anyhow::Result<Option<usize>>>,
+        process_task: JoinHandle<std::io::Result<ExitStatus>>,
+        /// ExitStatus of the child process, None until it is requested and the child has exited.
+        process_exitstatus: Option<anyhow::Result<ExitStatus>>
     }
 
     /// Helper function for UnixProcessImpl::spawn_process.
@@ -46,25 +48,34 @@ pub mod unix_process {
     }
 
     /// **Warning**: This function uses [spawn_local] and must be called in a LocalSet context.
-    fn spawn_process_task(mut child: Child, cancellation_token: CancellationToken) -> JoinHandle<anyhow::Result<ExitStatus>> {
+    fn spawn_process_task(mut child: Child, cancellation_token: CancellationToken) -> JoinHandle<std::io::Result<ExitStatus>> {
         spawn_local(async move {
             tokio::select! {
-                child_result = child.wait() => child_result.map_err(anyhow::Error::msg),
+                child_result = child.wait() => child_result,
                 () = cancellation_token.cancelled() => {
-                    let kill_result = child.kill().await;
-                    
-                    if let Err(e) = kill_result {
-                        Err(anyhow::Error::msg(e))
-                    } else {
-                        // Should should return immediately since kill calls it
-                        child.wait().await.map_err(anyhow::Error::msg)
-                    }
+                    child.kill().await?;
+                    child.wait().await
                 }
             }
         })
     }
 
     impl UnixProcessImpl {
+        fn new(cancellation_token: CancellationToken,
+               stdin: Option<ChildStdin>,
+               stdout_task: JoinHandle<anyhow::Result<Option<usize>>>,
+               stderr_task: JoinHandle<anyhow::Result<Option<usize>>>,
+               process_task: JoinHandle<std::io::Result<ExitStatus>>) -> Self {
+            Self {
+                cancellation_token,
+                stdin,
+                stdout_task,
+                stderr_task,
+                process_task,
+                process_exitstatus: None
+            }
+        }
+
         /// Creates a new instance of `UnixProcessImpl` by spawning a child process.
         ///
         /// **Warning**: This function uses [spawn_local] and must be called in a LocalSet context.
@@ -99,7 +110,7 @@ pub mod unix_process {
             // The almighty process task. 
             let process_task = spawn_process_task(child, cancellation_token.child_token());
 
-            anyhow::Ok(UnixProcessImpl { cancellation_token, stdin, stdout_task, stderr_task, process_task })
+            anyhow::Ok(Self::new(cancellation_token, stdin, stdout_task, stderr_task, process_task))
         }
     }
 

@@ -222,14 +222,20 @@ pub mod unix_process {
 
             let e = task::LocalSet::new().run_until(async {
                 // Setting up stuff needed for RPC
-                let stdout_server = ByteStreamImpl::new(|_| {Promise::ok(())});
+                let stdout_server = ByteStreamImpl::new(|bytes| {
+                    println!("remote stdout: {}", std::str::from_utf8(bytes).unwrap());
+                    Promise::ok(())
+                });
                 let stdout_client = capnp_rpc::new_client(stdout_server);
-                let stderr_server = ByteStreamImpl::new(|_| {Promise::ok(())});
+                let stderr_server = ByteStreamImpl::new(|bytes| {
+                    println!("remote stderr: {}", std::str::from_utf8(bytes).unwrap());
+                    Promise::ok(())
+                });
                 let stderr_client = capnp_rpc::new_client(stderr_server);
 
                 let process_client = spawn_process_client.request_spawn_process(
-                    "/bin/sh",
-                    &["-c", r#""sleep 10; exit 2""#],
+                    "sh",
+                    &["-c", r#"set; echo "Hello World!"; wait 10; exit 2"#],
                     stdout_client,
                     stderr_client).await?;
 

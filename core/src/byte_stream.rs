@@ -24,7 +24,7 @@ impl<C> ByteStreamImpl<C>
 where
     C: FnMut(&[u8]) -> Promise<(), capnp::Error>
 {
-    fn new(consumer: C) -> Self {
+    pub fn new(consumer: C) -> Self {
         Self {
             consumer,
             closed: false

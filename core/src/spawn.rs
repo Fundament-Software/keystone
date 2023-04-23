@@ -158,7 +158,94 @@ pub mod unix_process {
                     Promise::ok(())
                 }
             }
+        }
+    }
 
+    pub type UnixProcessServiceSpawnClient = Client<capnp::text::Owned, UnixProcessArgs, UnixProcessApi, UnixProcessError>;
+    pub type SpawnRequest = capnp::capability::Request<
+        service_spawn::spawn_params::Owned<capnp::text::Owned, UnixProcessArgs, UnixProcessApi, UnixProcessError>,
+        service_spawn::spawn_results::Owned<capnp::text::Owned, UnixProcessArgs, UnixProcessApi, UnixProcessError>>;
+    
+    impl UnixProcessServiceSpawnClient {
+        /// Convinience function to create a new request to call `spawn_process` over RPC without
+        /// sending it.
+        pub fn build_spawn_request(&self, program: &str, argv: &[&str], stdout_stream: ByteStreamClient, stderr_stream: ByteStreamClient) -> anyhow::Result<SpawnRequest> {
+            let mut spawn_request = self.spawn_request();
+            
+            let mut params_builder = spawn_request.get();
+
+            params_builder.set_program(program)?;
+
+            let mut args_builder = params_builder.init_args();
+            args_builder.set_stdout(stdout_stream);
+            args_builder.set_stderr(stderr_stream);
+
+            {
+                let mut argv_builder = args_builder.init_argv(argv.len().try_into()?);
+                for (idx, &x) in argv.iter().enumerate() {
+                    argv_builder.reborrow().get(idx.try_into()?)?.push_str(x)
+                }
+            }
+
+            Ok(spawn_request)
+        }
+
+        /// Convinience function to send a `spawn_process` call request over RPC.
+        pub async fn send_spawn_request(spawn_request: SpawnRequest) -> Result<UnixProcessClient, capnp::Error> {
+            let response = spawn_request.send().promise.await?;
+            response.get()?.get_result()
+        }
+
+        /// Convinience function that creates and sends a request to call `spawn_process` over RPC.
+        ///
+        /// Equivalent to the composition of [build_spawn_request] and [send_spawn_request].
+        pub async fn request_spawn_process(&self, 
+                                           program: &str,
+                                           argv: &[&str],
+                                           stdout_stream: ByteStreamClient,
+                                           stderr_stream: ByteStreamClient) -> anyhow::Result<UnixProcessClient> {
+            Ok(UnixProcessServiceSpawnClient::send_spawn_request(self.build_spawn_request(program, argv, stdout_stream, stderr_stream)?).await?)
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use capnp::capability::Promise;
+        use tokio::task;
+        use crate::byte_stream::ByteStreamImpl;
+        use super::{UnixProcessServiceSpawnImpl, UnixProcessServiceSpawnClient};
+
+        #[tokio::test]
+        async fn test_process_creation() {
+            let spawn_process_server = UnixProcessServiceSpawnImpl();
+            let spawn_process_client: UnixProcessServiceSpawnClient = capnp_rpc::new_client(spawn_process_server);
+
+            let e = task::LocalSet::new().run_until(async {
+                // Setting up stuff needed for RPC
+                let stdout_server = ByteStreamImpl::new(|_| {Promise::ok(())});
+                let stdout_client = capnp_rpc::new_client(stdout_server);
+                let stderr_server = ByteStreamImpl::new(|_| {Promise::ok(())});
+                let stderr_client = capnp_rpc::new_client(stderr_server);
+
+                let process_client = spawn_process_client.request_spawn_process(
+                    "/bin/sh",
+                    &["-c", r#""sleep 10; exit 2""#],
+                    stdout_client,
+                    stderr_client).await?;
+
+                let geterror_response = process_client.geterror_request().send().promise.await?;
+                let error_reader = geterror_response.get()?.get_result()?;
+                
+                let error_code = error_reader.get_error_code();
+                assert_eq!(error_code, 2);
+
+                let error_message = error_reader.get_error_message()?;
+                assert!(error_message.is_empty() == true);
+
+                Ok::<(), anyhow::Error>(())
+            }).await;
+
+            e.unwrap();
         }
     }
 }

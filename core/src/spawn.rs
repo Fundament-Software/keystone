@@ -183,7 +183,7 @@ pub mod unix_process {
             {
                 let mut argv_builder = args_builder.init_argv(argv.len().try_into()?);
                 for (idx, &x) in argv.iter().enumerate() {
-                    argv_builder.reborrow().get(idx.try_into()?)?.push_str(x)
+                    argv_builder.reborrow().set(idx.try_into()?, x);
                 }
             }
 

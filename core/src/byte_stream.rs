@@ -1,26 +1,27 @@
 use bytes::BytesMut;
 use capnp::{capability::{Promise, Response}, ErrorKind};
 use capnp_rpc::pry;
-use tokio::io::{AsyncRead, AsyncReadExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use futures::{future::FutureExt, TryFutureExt};
 
 use crate::stream_capnp::stream_result;
 use crate::byte_stream_capnp::byte_stream::{Client, Server, WriteParams, WriteResults, EndParams, EndResults};
 
-/// Server implementation of a ByteStream capability.
+/// Service-side implementation of a ByteStream capability that uses a function consumer.
 ///
 /// In Keystone, bytes streams work through RPC, by providing the client with a capability
 /// which they can call the `write` method on with arbitrary bytes. The server responds with
 /// an empty promise which will be resolved when the server is ready to recieve more bytes.
 ///
-/// ByteStreamImpl is constructed with a Consumer `C` which will consume the bytes recieved by 
+/// ConsumerByteStream is constructed with a consumer function `C` which will consume the bytes recieved by 
 /// rpc `write` calls and return a promise which resolves when the system is ready to process
 /// more bytes.
-pub struct ByteStreamImpl<C> {
+pub struct ConsumerByteStream<C> {
     consumer: C,
     closed: bool
 }
 
-impl<C> ByteStreamImpl<C>
+impl<C> ConsumerByteStream<C>
 where
     C: FnMut(&[u8]) -> Promise<(), capnp::Error>
 {
@@ -32,7 +33,7 @@ where
     }
 }
 
-impl<C> Server for ByteStreamImpl<C>
+impl<C> Server for ConsumerByteStream<C>
 where
     C: FnMut(&[u8]) -> Promise<(), capnp::Error>
 {
@@ -57,6 +58,33 @@ where
 
     fn get_substream(&mut self, _:crate::byte_stream_capnp::byte_stream::GetSubstreamParams<>,_:crate::byte_stream_capnp::byte_stream::GetSubstreamResults<>) ->  capnp::capability::Promise<(), capnp::Error> {
         Promise::err(capnp::Error { kind: ErrorKind::Unimplemented, description: String::from("Not implemented") })
+    }
+}
+
+/// Service-side implementation of a ByteStream capability that uses an [AsyncWrite] consumer.
+pub struct AsyncWriteByteStream<W> (W);
+
+impl<W> AsyncWriteByteStream<W>
+where W: AsyncWrite + Unpin
+{
+    pub fn new(async_write: W) -> Self {
+        Self(async_write)
+    }
+}
+
+impl<W> Server for AsyncWriteByteStream<W>
+where W: AsyncWrite + Unpin
+{
+    fn write(&mut self, params: WriteParams, _: WriteResults) -> Promise<(), capnp::Error> {
+        let byte_reader = pry!(params.get());
+        let bytes = pry!(byte_reader.get_bytes());
+
+        let f = self.0.write_all(bytes).map_err(|e| capnp::Error::failed(e.to_string()));
+        Promise::from_future(f)
+    }
+
+    fn end(&mut self, _: EndParams, _: EndResults) -> Promise<(), capnp::Error> {
+        Promise::from_future(self.0.shutdown().map_err(|e| capnp::Error::failed(e.to_string())))
     }
 }
 
@@ -99,7 +127,7 @@ impl Client {
 
 #[test]
 fn write_test() -> anyhow::Result<()> {
-    let server = ByteStreamImpl::new(|bytes| {
+    let server = ConsumerByteStream::new(|bytes| {
         assert_eq!(bytes, &[73, 22, 66, 91]);
         Promise::ok(())
     });

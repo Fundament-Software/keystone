@@ -1,18 +1,23 @@
 pub mod unix_process {
-    use std::process::{Stdio, ExitStatus};
+    use std::cell::RefCell;
+    use std::convert::TryInto;
+    use std::process::Stdio;
+    use std::rc::Rc;
+    use std::result::Result;
     use capnp::capability::Promise;
     use capnp_rpc::pry;
+    use futures::{FutureExt, TryFutureExt};
     use tokio::io::AsyncRead;
     use tokio::process::Child;
     use tokio::process::ChildStdin;
     use tokio::task::{JoinHandle, spawn_local};
     use tokio_util::sync::CancellationToken;
     use crate::spawn_capnp::process;
-    use crate::spawn_capnp::service_spawn;
+    use crate::spawn_capnp::{service_spawn, service_spawn::Client};
     use crate::unix_process_capnp::{
         unix_process_api::Owned as UnixProcessApi,
         unix_process_args::Owned as UnixProcessArgs,
-        unix_process_error::Owned as UnixProcessError
+        unix_process_error::Owned as UnixProcessError,
     };
     use crate::byte_stream_capnp::byte_stream::Client as ByteStreamClient;
     use tokio::process::Command;
@@ -103,9 +108,28 @@ pub mod unix_process {
     type KillResults = process::KillResults<UnixProcessApi, UnixProcessError>;
     type UnixProcessClient = process::Client<UnixProcessApi, UnixProcessError>;
     
-    impl process::Server<UnixProcessApi, UnixProcessError> for UnixProcessImpl {
-        fn geterror(&mut self, params: GetErrorParams, results: GetErrorResults) -> Promise<(), capnp::Error> {
-            Promise::ok(())
+    // You might ask why this trait is implementated for an `Rc` + `RefCell` of `UnixProcessImpl`
+    // Well thats a very good question
+    impl process::Server<UnixProcessApi, UnixProcessError> for Rc<RefCell<UnixProcessImpl>> {
+        /// In this implementation of `spawn`, the functions returns the exit code of the child
+        /// process.
+        fn geterror(&mut self, _: GetErrorParams, mut results: GetErrorResults) -> Promise<(), capnp::Error> { 
+            let this = self.clone();
+            Promise::from_future(async move {
+                let results_builder = results.get();
+                let mut process_error_builder = results_builder.init_result();
+
+                match this.borrow_mut().child.wait().await {
+                    Ok(exitstatus) => {
+                        let exitcode = exitstatus.code().unwrap_or(i32::MIN);
+                        process_error_builder.set_error_code(exitcode.into());
+                        process_error_builder.set_error_message("");
+
+                        Ok(())
+                    },
+                    Err(e) => Err(capnp::Error::failed(e.to_string()))
+                }
+            })
         }
     }
 
@@ -128,7 +152,8 @@ pub mod unix_process {
             match UnixProcessImpl::spawn_process(program, argv.into_iter(), stdout, stderr) {
                 Err(e) => Promise::err(capnp::Error::failed(e.to_string())),
                 Ok(process_impl) => {
-                    let process_client: UnixProcessClient = capnp_rpc::new_client(process_impl);
+                    let server_pointer = Rc::new(RefCell::new(process_impl));
+                    let process_client: UnixProcessClient = capnp_rpc::new_client(server_pointer);
                     results.get().set_result(process_client);
                     Promise::ok(())
                 }

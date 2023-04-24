@@ -6,12 +6,12 @@ pub mod unix_process {
     use std::result::Result;
     use capnp::capability::Promise;
     use capnp_rpc::pry;
-    use futures::{FutureExt, TryFutureExt};
-    use tokio::io::AsyncRead;
+    use tokio::io::{AsyncRead, AsyncWriteExt};
     use tokio::process::Child;
     use tokio::process::ChildStdin;
     use tokio::task::{JoinHandle, spawn_local};
     use tokio_util::sync::CancellationToken;
+    use crate::byte_stream::ByteStreamImpl;
     use crate::spawn_capnp::process;
     use crate::spawn_capnp::{service_spawn, service_spawn::Client};
     use crate::unix_process_capnp::{
@@ -130,6 +130,41 @@ pub mod unix_process {
                     Err(e) => Err(capnp::Error::failed(e.to_string()))
                 }
             })
+        }
+
+        fn kill(&mut self, _: KillParams, _: KillResults) ->  Promise<(), capnp::Error> {
+            let this = self.clone();
+            Promise::from_future(async move {
+                match this.borrow_mut().child.kill().await {
+                    Ok(_) => Ok(()),
+                    Err(e) => Err(capnp::Error::failed(e.to_string())),
+                }
+            })
+        }
+
+        fn getapi(&mut self, _: GetApiParams, mut results: GetApiResults) ->  Promise<(), capnp::Error> {
+            let this = self.clone();
+            let mut api_builder = results.get().init_api();
+
+            let stdin_stream_server = ByteStreamImpl::new(move |bytes| {
+                let this_inner = this.clone();
+                let owned_bytes = bytes.to_owned();
+                Promise::from_future(async move {
+                    if let Some(mut stdin) = this_inner.borrow_mut().stdin.take() {
+                        match stdin.write_all(&owned_bytes).await {
+                            Ok(_) => Ok(()),
+                            Err(e) => Err(capnp::Error::failed(e.to_string()))
+                        }
+                    } else {
+                        Ok(())
+                    }
+                })
+            });
+
+            let stdin_stream_client: ByteStreamClient = capnp_rpc::new_client(stdin_stream_server);
+            api_builder.set_stdin(stdin_stream_client);
+
+            Promise::ok(())
         }
     }
 

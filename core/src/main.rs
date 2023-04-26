@@ -5,8 +5,8 @@ mod node;
 
 include!(concat!(env!("OUT_DIR"), "/capnp_include.rs"));
 
+use eyre::Result;
 use std::env;
-use std::error::Error;
 extern crate pretty_env_logger;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Request, Response, Server};
@@ -29,7 +29,10 @@ async fn shutdown_signal() {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
+async fn main() -> Result<()> {
+    // Setup eyre
+    color_eyre::install()?;
+
     pretty_env_logger::formatted_builder()
         .format_timestamp(None)
         .target(pretty_env_logger::env_logger::fmt::Target::Stdout)

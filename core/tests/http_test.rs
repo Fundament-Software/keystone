@@ -3,7 +3,7 @@ use keystone::http::https_client;
 use keystone::http::Path;
 
 #[tokio::test]
-async fn basic_test() -> anyhow::Result<()> {
+async fn basic_test() -> eyre::Result<()> {
     let client = https_client();
 
     // Requesting domain
@@ -70,7 +70,7 @@ async fn basic_test() -> anyhow::Result<()> {
 
 // When given a TLD, can retrieve a domain under that TLD.
 #[tokio::test]
-async fn domains() -> anyhow::Result<()> {
+async fn domains() -> eyre::Result<()> {
     let client = https_client();
 
     // Requesting domain
@@ -110,7 +110,7 @@ async fn domains() -> anyhow::Result<()> {
 
 // when given a domain, can retrieve subdomains
 #[tokio::test]
-async fn subdomains() -> anyhow::Result<()> {
+async fn subdomains() -> eyre::Result<()> {
     let client = https_client();
 
     // Requesting domain
@@ -150,7 +150,7 @@ async fn subdomains() -> anyhow::Result<()> {
 
 // when domain is finalized, cannot add subdomains or change domains
 #[tokio::test]
-async fn finalize_domains() -> anyhow::Result<(), capnp::Error> {
+async fn finalize_domains() -> eyre::Result<(), capnp::Error> {
     let client = https_client();
 
     // Requesting domain
@@ -174,7 +174,7 @@ async fn finalize_domains() -> anyhow::Result<(), capnp::Error> {
 
 // after a path is finalized, you can't add more paths.
 #[tokio::test]
-async fn finalize_paths() -> anyhow::Result<(), capnp::Error> {
+async fn finalize_paths() -> eyre::Result<(), capnp::Error> {
     let client = https_client();
 
     // Requesting domain
@@ -208,7 +208,7 @@ async fn finalize_paths() -> anyhow::Result<(), capnp::Error> {
 
 // When query strings are finalized it isn't possible to add more query bindings
 #[tokio::test]
-async fn finalize_query() -> anyhow::Result<(), capnp::Error> {
+async fn finalize_query() -> eyre::Result<(), capnp::Error> {
     let client = https_client();
 
     // Requesting domain
@@ -253,7 +253,7 @@ async fn finalize_query() -> anyhow::Result<(), capnp::Error> {
 
 // When an allowlist of verbs is set, it isn't possible to expand the allowlist with the set allowlist function
 #[tokio::test]
-async fn allowlist_test() -> anyhow::Result<(), capnp::Error> {
+async fn allowlist_test() -> eyre::Result<(), capnp::Error> {
     let client = https_client();
 
     // Requesting domain
@@ -317,7 +317,7 @@ async fn allowlist_test() -> anyhow::Result<(), capnp::Error> {
 
 // when given a path, putting .. on the parent directory doesn't work
 #[tokio::test]
-async fn parent_directory_path() -> anyhow::Result<()> {
+async fn parent_directory_path() -> eyre::Result<()> {
     let client = https_client();
 
     // Requesting domain
@@ -364,7 +364,7 @@ async fn parent_directory_path() -> anyhow::Result<()> {
 
 // when given a path, putting / on the path to go to root doesn't work
 #[tokio::test]
-async fn root_directory_path() -> anyhow::Result<()> {
+async fn root_directory_path() -> eyre::Result<()> {
     let client = https_client();
 
     // Requesting domain
@@ -411,7 +411,7 @@ async fn root_directory_path() -> anyhow::Result<()> {
 
 // None of the previous are possible using HTTP escapes
 #[tokio::test]
-async fn escapes_path() -> anyhow::Result<()> {
+async fn escapes_path() -> eyre::Result<()> {
     let client = https_client();
 
     // Requesting domain
@@ -475,7 +475,7 @@ async fn escapes_path() -> anyhow::Result<()> {
 
 // When given a path, using a protocol relative URL to escape confinement doesn't work
 #[tokio::test]
-async fn protocol_relative_url_path() -> anyhow::Result<()> {
+async fn protocol_relative_url_path() -> eyre::Result<()> {
     let client = https_client();
 
     // Requesting domain

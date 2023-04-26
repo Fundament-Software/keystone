@@ -1,14 +1,11 @@
 use super::database;
-use anyhow::Result;
+use eyre::Result;
 use async_trait::async_trait;
 use atomic_counter::{AtomicCounter, RelaxedCounter};
-use capnp::capability::Promise;
-use capnp::Error;
 use capnp_rpc::pry;
 use couch_rs::document::TypedCouchDocument;
 use couch_rs::types::document::DocumentId;
 use couch_rs::CouchDocument;
-use futures::{AsyncReadExt, FutureExt, StreamExt, TryFutureExt};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 

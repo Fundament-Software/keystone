@@ -202,7 +202,7 @@ pub mod unix_process {
         service_spawn::spawn_results::Owned<capnp::text::Owned, UnixProcessArgs, UnixProcessApi, UnixProcessError>>;
     
     impl UnixProcessServiceSpawnClient {
-        /// Convinience function to create a new request to call `spawn_process` over RPC without
+        /// Convenience function to create a new request to call `spawn_process` over RPC without
         /// sending it.
         pub fn build_spawn_request(&self, program: &str, argv: &[&str], stdout_stream: ByteStreamClient, stderr_stream: ByteStreamClient) -> anyhow::Result<SpawnRequest> {
             let mut spawn_request = self.spawn_request();
@@ -225,13 +225,13 @@ pub mod unix_process {
             Ok(spawn_request)
         }
 
-        /// Convinience function to send a `spawn_process` call request over RPC.
+        /// Convenience function to send a `spawn_process` call request over RPC.
         pub async fn send_spawn_request(spawn_request: SpawnRequest) -> Result<UnixProcessClient, capnp::Error> {
             let response = spawn_request.send().promise.await?;
             response.get()?.get_result()
         }
 
-        /// Convinience function that creates and sends a request to call `spawn_process` over RPC.
+        /// Convenience function that creates and sends a request to call `spawn_process` over RPC.
         ///
         /// Equivalent to the composition of [build_spawn_request] and [send_spawn_request].
         pub async fn request_spawn_process(&self, 

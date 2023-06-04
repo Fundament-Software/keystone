@@ -2,6 +2,8 @@
 mod couchdb;
 mod database;
 mod node;
+mod byte_stream;
+mod spawn;
 
 include!(concat!(env!("OUT_DIR"), "/capnp_include.rs"));
 

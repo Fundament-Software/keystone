@@ -77,7 +77,7 @@ impl Client {
     /// stream.
     ///
     /// A copy buffer of 4 KB is created to take data from the reader to the byte stream.
-    pub async fn copy(&self, reader: &mut (impl AsyncRead + Unpin)) -> anyhow::Result<usize> {
+    pub async fn copy(&self, reader: &mut (impl AsyncRead + Unpin)) -> eyre::Result<usize> {
         let mut total_bytes = 0;
         let mut buffer = BytesMut::with_capacity(4096);
         
@@ -98,7 +98,7 @@ impl Client {
 }
 
 #[test]
-fn write_test() -> anyhow::Result<()> {
+fn write_test() -> eyre::Result<()> {
     let server = ByteStreamImpl::new(|bytes| {
         assert_eq!(bytes, &[73, 22, 66, 91]);
         Promise::ok(())
@@ -111,5 +111,5 @@ fn write_test() -> anyhow::Result<()> {
     let write_result = futures::executor::block_on(write_request.send().promise);
     let _ = write_result.unwrap(); // Ensure that server didn't return an error
 
-    anyhow::Ok(())
+    eyre::Result::Ok(())
 }

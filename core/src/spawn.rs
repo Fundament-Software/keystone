@@ -25,8 +25,8 @@ pub mod unix_process {
     pub struct UnixProcessImpl {
         pub cancellation_token: CancellationToken,
         stdin: Option<ChildStdin>,
-        stdout_task: JoinHandle<anyhow::Result<Option<usize>>>,
-        stderr_task: JoinHandle<anyhow::Result<Option<usize>>>,
+        stdout_task: JoinHandle<eyre::Result<Option<usize>>>,
+        stderr_task: JoinHandle<eyre::Result<Option<usize>>>,
         child: Child
     }
 
@@ -37,7 +37,7 @@ pub mod unix_process {
     /// **Warning**: This function uses [spawn_local] and must be called in a LocalSet context.
     fn spawn_iostream_task(iostream: Option<impl AsyncRead + Unpin + 'static>, // In this case, 'static means an owned type. Also required for spawn_local
                            bytestream: ByteStreamClient,
-                           cancellation_token: CancellationToken) -> JoinHandle<anyhow::Result<Option<usize>>> {
+                           cancellation_token: CancellationToken) -> JoinHandle<eyre::Result<Option<usize>>> {
         spawn_local(async move {
             if let Some(mut stream) = iostream {
                 tokio::select! {
@@ -53,8 +53,8 @@ pub mod unix_process {
     impl UnixProcessImpl {
         fn new(cancellation_token: CancellationToken,
                stdin: Option<ChildStdin>,
-               stdout_task: JoinHandle<anyhow::Result<Option<usize>>>,
-               stderr_task: JoinHandle<anyhow::Result<Option<usize>>>,
+               stdout_task: JoinHandle<eyre::Result<Option<usize>>>,
+               stderr_task: JoinHandle<eyre::Result<Option<usize>>>,
                child: Child) -> Self {
             Self {
                 cancellation_token,
@@ -72,7 +72,7 @@ pub mod unix_process {
                                 args_iter: I,
                                 stdout_stream: ByteStreamClient,
                                 stderr_stream: ByteStreamClient)
-        -> anyhow::Result<UnixProcessImpl>
+        -> eyre::Result<UnixProcessImpl>
         where
             I: IntoIterator<Item = Result<&'i str, capnp::Error>>
         {
@@ -96,7 +96,7 @@ pub mod unix_process {
             let stdout_task = spawn_iostream_task(child.stdout.take(), stdout_stream, cancellation_token.child_token());
             let stderr_task = spawn_iostream_task(child.stderr.take(), stderr_stream, cancellation_token.child_token());
 
-            anyhow::Ok(Self::new(cancellation_token, stdin, stdout_task, stderr_task, child))
+            eyre::Ok(Self::new(cancellation_token, stdin, stdout_task, stderr_task, child))
         }
     }
 
@@ -204,7 +204,7 @@ pub mod unix_process {
     impl UnixProcessServiceSpawnClient {
         /// Convenience function to create a new request to call `spawn_process` over RPC without
         /// sending it.
-        pub fn build_spawn_request(&self, program: &str, argv: &[&str], stdout_stream: ByteStreamClient, stderr_stream: ByteStreamClient) -> anyhow::Result<SpawnRequest> {
+        pub fn build_spawn_request(&self, program: &str, argv: &[&str], stdout_stream: ByteStreamClient, stderr_stream: ByteStreamClient) -> eyre::Result<SpawnRequest> {
             let mut spawn_request = self.spawn_request();
             
             let mut params_builder = spawn_request.get();
@@ -238,7 +238,7 @@ pub mod unix_process {
                                            program: &str,
                                            argv: &[&str],
                                            stdout_stream: ByteStreamClient,
-                                           stderr_stream: ByteStreamClient) -> anyhow::Result<UnixProcessClient> {
+                                           stderr_stream: ByteStreamClient) -> eyre::Result<UnixProcessClient> {
             Ok(UnixProcessServiceSpawnClient::send_spawn_request(self.build_spawn_request(program, argv, stdout_stream, stderr_stream)?).await?)
         }
     }
@@ -283,7 +283,7 @@ pub mod unix_process {
                 let error_message = error_reader.get_error_message()?;
                 assert!(error_message.is_empty() == true);
 
-                Ok::<(), anyhow::Error>(())
+                Ok::<(), eyre::Error>(())
             }).await;
 
             e.unwrap();

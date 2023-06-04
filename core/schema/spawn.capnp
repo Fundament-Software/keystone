@@ -7,7 +7,7 @@ interface Process(API, ProcessError) {
     kill @2 ();
 }
 
-# Generic definition of a capability that lets you spawn another. Most modules will implement this.
+# Generic definition of a capability that lets you spawn a process or another module.
 # What a program is, it's API, and what arguments it takes is ultimately implementation-defined.
 interface ServiceSpawn(Program, Args, API, ProcessError) {
     # Process should have a relevant error relating to why the process was not spawned - if this is not possible, it could be a null capability. 

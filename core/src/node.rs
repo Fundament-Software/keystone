@@ -1,7 +1,7 @@
 use crate::database::DocumentStore;
 
 use super::database;
-use anyhow::Result;
+use eyre::Result;
 use std::collections::HashMap;
 
 pub struct Node<'a, T: database::DocumentStore, U: database::LogStore> {

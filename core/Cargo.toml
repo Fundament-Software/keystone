@@ -14,26 +14,27 @@ keywords = ["backend", "infrastructure", "management", "enterprise", "distribute
 license = "Apache-2.0"
 
 [dependencies]
-anyhow = "1.0.65"
+async-trait = "0.1.57"
+atomic-counter = "1.0"
 bytes = "1.4.0"
 cap-std = "0.26"
 capnp = "0.14.9"
-capnp-rpc = "0.14"
 capnp-futures = "0.14"
-tokio = { version = "1.18", features = ["full"] }
-tokio-util = "0.7"
-log = { version = "0.4", features = ["kv_unstable"] }
-pretty_env_logger = "0.4.0"
+capnp-rpc = "0.14"
+chrono = "0.4"
+color-eyre = "0.6"
+couch_rs = "0.9"
+dlopen = "0.1.8"
+eyre = "0.6"
+futures = "0.3"
 hyper = { version = "0.14", features = ["full"] }
 hyper-tls = "0.5"
-couch_rs = "0.9"
-chrono = "0.4"
-dlopen = "0.1.8"
-async-trait = "0.1.57"
+log = { version = "0.4", features = ["kv_unstable"] }
+pretty_env_logger = "0.4.0"
 serde = "1.0"
 serde_json = "1.0"
-atomic-counter = "1.0"
-futures = "0.3"
+tokio = { version = "1.18", features = ["full"] }
+tokio-util = "0.7"
 url = "2.3.1"
 
 [dev-dependencies]

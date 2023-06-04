@@ -96,7 +96,7 @@ pub mod unix_process {
             let stdout_task = spawn_iostream_task(child.stdout.take(), stdout_stream, cancellation_token.child_token());
             let stderr_task = spawn_iostream_task(child.stderr.take(), stderr_stream, cancellation_token.child_token());
 
-            eyre::Ok(Self::new(cancellation_token, stdin, stdout_task, stderr_task, child))
+            eyre::Result::Ok(Self::new(cancellation_token, stdin, stdout_task, stderr_task, child))
         }
     }
 

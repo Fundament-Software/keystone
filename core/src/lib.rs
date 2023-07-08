@@ -4,4 +4,4 @@ mod database;
 pub mod http;
 mod node;
 
-include!(concat!(env!("OUT_DIR"), "/capnp_include.rs"));
+capnp_import::capnp_import!("core/schema/**/*.capnp");

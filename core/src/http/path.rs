@@ -114,7 +114,7 @@ impl PathImpl {
 }
 
 async fn http_request_promise(
-    mut results_builder: crate::http_capnp::path::http_result::Builder<'_>,
+    mut results_builder: Path::http_result::Builder<'_>,
     future: ResponseFuture,
 ) -> core::result::Result<(), capnp::Error> {
     let response = future

@@ -1,5 +1,15 @@
 @0xd5b73ad4256c863f
 
+interface CapFs {
+  use_ambient_authority @0 () -> (ambient_authority :AmbientAuthority);
+  dir_open @1 (path :Text) -> (dir :Dir);
+  dir_builder_new @2 () -> (builder :DirBuilder);
+  temp_dir_new_in @3 (dir :Dir) -> (temp_dir :TempDir);
+  temp_file_new @4 (dir :Dir) -> (temp_file :TempFile);
+  temp_file_new_anonymous @5 (dir :Dir) -> (file :File);
+}
+
+using Stream = import "byte_stream.capnp".ByteStream;
 
 interface File {
   sync_all @0 () -> ();
@@ -8,52 +18,46 @@ interface File {
   metadata @3 () -> (metadata :Metadata);
   try_clone @4 () -> (cloned :File);
   set_permissions @5 (perm :Permissions) -> ();
-  open_ambient @6 (path :Text, ambient_authority :AmbientAuthority) -> (file :File);
-  create_ambient @7 (path :Text, ambient_authority :AmbientAuthority) -> (file :File);
-  open_ambient_with @8 (path :Text, options :OpenOptions, ambient_authority :AmbientAuthority) -> (file :File);
-  options @9 () -> (options :OpenOptions);
+  options @6 () -> (options :OpenOptions);
+  open @7 () -> (stream :Stream);
 }
 
 inteface Dir {
   open @0 (path :Text) -> (file :File);
   open_with @1 (path :Text, options :OpenOptions) -> (file :File);
-  open_dir @2 (path :Text) -> (dir :Dir);
-  create_dir @3 (path :Text) -> ();
-  create_dir_all @4 (path :Text) -> ();
-  create_dir_with @5 (path :Text, dir_builder :DirBuilder) -> ();
-  create @6 (path :Text) -> (file :File);
-  canonicalize @7 (path :Text) -> (path_buf :Text);
-  copy @8 (path_from :Text, path_to :Text) -> (result: UInt64);
-  hard_link @9 (src_path :Text, dst_path :Text) -> ();
-  metadata @10 (path: Text) -> (metadata :Metadata);
-  dir_metadata @11 () -> (metadata :Metadata);
-  entries @12 () -> (iter :ReadDir);
-  read_dir @13 (path :Text) -> (iter :ReadDir);
-  read @14 (path :Text) -> (result :List(UInt8));
-  read_link @15 (path :Text) -> (result :Text);
-  read_to_string @16 (path :Text) -> (result :Text);
-  remove_dir @17 (path :Text) -> ();
-  remove_dir_all @18 (path :Text) -> ();
-  remove_open_dir @19 () -> ();
-  remove_open_dir_all @20 () -> ();
-  remove_file @21 (path :Text) -> ();
-  rename @22 (from :Text, to :Text) -> ();
-  set_permissions @23 (path :Text, perm :Permissions) -> ();
-  symlink_metadata @24 (path :Text) -> (metadata :Metadata);
-  write @25 (path :Text, contents :List(UInt8)) -> ();
-  symlink @26 (original :Text, link :Text) -> ();
+  create_dir @2 (path :Text) -> ();
+  create_dir_all @3 (path :Text) -> ();
+  create_dir_with @4 (path :Text, dir_builder :DirBuilder) -> ();
+  create @5 (path :Text) -> (file :File);
+  canonicalize @6 (path :Text) -> (path_buf :Text);
+  copy @7 (path_from :Text, path_to :Text) -> (result: UInt64);
+  hard_link @8 (src_path :Text, dst_path :Text) -> ();
+  metadata @9 (path: Text) -> (metadata :Metadata);
+  dir_metadata @10 () -> (metadata :Metadata);
+  entries @11 () -> (iter :ReadDir);
+  read_dir @12 (path :Text) -> (iter :ReadDir);
+  read @13 (path :Text) -> (result :List(UInt8));
+  read_link @14 (path :Text) -> (result :Text);
+  read_to_string @15 (path :Text) -> (result :Text);
+  remove_dir @16 (path :Text) -> ();
+  remove_dir_all @17 (path :Text) -> ();
+  remove_open_dir @18 () -> ();
+  remove_open_dir_all @19 () -> ();
+  remove_file @20 (path :Text) -> ();
+  rename @21 (from :Text, to :Text) -> ();
+  set_permissions @22 (path :Text, perm :Permissions) -> ();
+  symlink_metadata @23 (path :Text) -> (metadata :Metadata);
+  write @24 (path :Text, contents :List(UInt8)) -> ();
+  symlink @25 (original :Text, link :Text) -> ();
 
   #Several unimplemented unix functions in cap std
   
-  try_clone @27 () -> (directory :Directory);
-  exists @28 (path :Text) -> (result :Bool);
-  try_exists @29 (path :Text) -> (result :Bool);
-  is_file @30 (path :Text) -> (result :Bool);
-  is_dir @31 (path :Text) -> (result :Bool);
-  open_ambient_dir @32 (path :Text, ambient_authority :AmbientAuthority) -> (result :Dir);
-  open_parent_dir @33 (ambient_authority :AmbientAuthority) -> (result :Dir);
-  create_ambient_dir_all @34 (path :Text, ambient_authority :AmbientAuthority) -> ();
-  reopen_dir @35 (dir :Filelike) -> (result :Dir); #Filelike = primitive type trait thing
+  try_clone @26 () -> (directory :Directory);
+  exists @27 (path :Text) -> (result :Bool);
+  try_exists @28 (path :Text) -> (result :Bool);
+  is_file @29 (path :Text) -> (result :Bool);
+  is_dir @30 (path :Text) -> (result :Bool);
+  reopen_dir @31 (dir :Filelike) -> (result :Dir); #Filelike = primitive type trait thing
 }
 
 interface Permissions {
@@ -87,21 +91,19 @@ interface Instant {
 }
 
 interface MonotonicClock {
-  new @0 (ambient_authority :AmbientAuthority) -> (clock :MonotonicClock);
-  now @1 () -> (instant :Instant);
-  elapsed @2 (instant :Instant) -> (duration :Duration);
+  now @0 () -> (instant :Instant);
+  elapsed @1 (instant :Instant) -> (duration :Duration);
 }
 
 interface SystemClock {
-  new @0 (ambient_authority :AmbientAuthority) -> (clock :SystemClock);
-  now @1 () -> (time :SystemTime);
+  now @0 () -> (time :SystemTime);
   struct Elapsed_Result {
     union {
       duration @0 :Duration;
       error @1 :SystemTimeError;
     }
   }
-  elapsed @2 (system_time :SystemTime) -> (result :Elapsed_Result);
+  elapsed @1 (system_time :SystemTime) -> (result :Elapsed_Result);
 }
 
 interface SystemTime {
@@ -115,10 +117,9 @@ interface SystemTimeError {
 }
 
 interface DirBuilder {
-  new @0 () -> (builder :DirBuilder);
-  recursive @1 (recursive :Bool) -> (builder :DirBuilder);
-  options @2 () -> (options :DirOptions);
-  is_recursive @3 () -> (result :Bool);
+  recursive @0 (recursive :Bool) -> (builder :DirBuilder);
+  options @1 () -> (options :DirOptions);
+  is_recursive @2 () -> (result :Bool);
 }
 
 interface FileType {
@@ -146,43 +147,47 @@ interface DirEntry {
   file_name @7 () -> (result :Text);
 }
 
-struct AmbientAuthority {
-
+interface AmbientAuthority {
+  file_open_ambient @0 (path :Text) -> (file :File);
+  file_create_ambient @1 (path :Text) -> (file :File);
+  file_open_ambient_with @2 (path :Text, options :OpenOptions) -> (file :File);
+  dir_open_ambient @3 (path :Text) -> (result :Dir);
+  dir_open_parent @4 () -> (result :Dir);
+  dir_create_ambient_all @5 (path :Text) -> ();
+  monotonic_clock_new @6 () -> (clock :MonotonicClock);
+  system_clock_new @7 () -> (clock :SystemClock);
+  project_dirs_from @8 (qualifier :Text, organization :Text, application :Text) -> (project_dirs :ProjectDirs);
+  user_dirs_home_dir @9 () -> (dir :Dir);
+  user_dirs_audio_dir @10 () -> (dir :Dir);
+  user_dirs_desktop_dir @11 () -> (dir :Dir);
+  user_dirs_document_dir @12 () -> (dir :Dir);
+  user_dirs_download_dir @13 () -> (dir :Dir);
+  user_dirs_font_dir @14 () -> (dir :Dir);
+  user_dirs_picture_dir @15 () -> (dir :Dir);
+  user_dirs_public_dir @16 () -> (dir :Dir);
+  user_dirs_template_dir @17 () -> (dir :Dir);
+  user_dirs_video_dir @18 () -> (dir :Dir);
+  temp_dir_new @19 () -> (temp_dir :TempDir);
 }
 
 interface ProjectDirs {
-  from @0 (qualifier :Text, organization :Text, application :Text, ambient_authority :AmbientAuthority) -> (project_dirs :ProjectDirs);
-  cache_dir @1 () -> (dir :Dir);
-  config_dir @2 () -> (dir :Dir);
-  data_dir @3 () -> (dir :Dir);
-  data_local_dir @4 () -> (dir :Dir);
-  runtime_dir @5 () -> (dir :Dir);
+  cache_dir @0 () -> (dir :Dir);
+  config_dir @1 () -> (dir :Dir);
+  data_dir @2 () -> (dir :Dir);
+  data_local_dir @3 () -> (dir :Dir);
+  runtime_dir @4 () -> (dir :Dir);
 }
 
 interface UserDirs {
   new @0 () -> (user_dirs :UserDirs);
-  home_dir @1 (ambient_authority :AmbientAuthority) -> (dir :Dir);
-  audio_dir @2 (ambient_authority :AmbientAuthority) -> (dir :Dir);
-  desktop_dir @3 (ambient_authority :AmbientAuthority) -> (dir :Dir);
-  document_dir @4 (ambient_authority :AmbientAuthority) -> (dir :Dir);
-  download_dir @5 (ambient_authority :AmbientAuthority) -> (dir :Dir);
-  font_dir @6 (ambient_authority :AmbientAuthority) -> (dir :Dir);
-  picture_dir @7 (ambient_authority :AmbientAuthority) -> (dir :Dir);
-  public_dir @8 (ambient_authority :AmbientAuthority) -> (dir :Dir);
-  template_dir @9 (ambient_authority :AmbientAuthority) -> (dir :Dir);
-  video_dir @10 (ambient_authority :AmbientAuthority) -> (dir :Dir);
 }
 
 interface TempDir extends(Dir) {
-  new @0 (ambient_authority :AmbientAuthority) -> (temp_dir :TempDir);
-  new_in @1 (dir :Dir) -> (temp_dir :TempDir);
-  close @2 () -> ();
+  close @0 () -> ();
 }
 
 interface TempFile {
-  new @0 (dir :Dir) -> (temp_file :TempFile);
-  new_anonymous @1 (dir :Dir) -> (file :File);
-  as_file @2 () -> (file :File);
-  as_file_mut @3 () -> (file :File);
-  replace @4 (dest :Text) -> ();
+  as_file @0 () -> (file :File);
+  as_file_mut @1 () -> (file :File);
+  replace @2 (dest :Text) -> ();
 }

@@ -1,11 +1,11 @@
 #![allow(dead_code)]
+mod byte_stream;
 mod couchdb;
 mod database;
 mod node;
-mod byte_stream;
 mod spawn;
 
-include!(concat!(env!("OUT_DIR"), "/capnp_include.rs"));
+capnp_import::capnp_import!("core/schema/**/*.capnp");
 
 use eyre::Result;
 use std::env;

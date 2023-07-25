@@ -4,9 +4,9 @@ interface CapFs {
   useAmbientAuthority @0 () -> (ambientAuthority :AmbientAuthority);
   dirOpen @1 (path :Text) -> (dir :Dir);
   dirBuilderNew @2 () -> (builder :DirBuilder);
-  tempDirNewIn @3 (dir :Dir) -> (tempDir :TempDir);
-  tempFileNew @4 (dir :Dir) -> (tempFile :TempFile);
-  tempFileNewAnonymous @5 (dir :Dir) -> (file :File);
+  #tempDirNewIn @3 (dir :Dir) -> (tempDir :TempDir);
+  #tempFileNew @4 (dir :Dir) -> (tempFile :TempFile);
+  #tempFileNewAnonymous @5 (dir :Dir) -> (file :File);
 }
 
 using Stream = import "std/byte_stream.capnp".ByteStream;
@@ -30,13 +30,13 @@ interface Dir {
   createDirWith @4 (path :Text, dirBuilder :DirBuilder) -> ();
   create @5 (path :Text) -> (file :File);
   canonicalize @6 (path :Text) -> (pathBuf :Text);
-  copy @7 (pathFrom :Text, pathTo :Text) -> (result: UInt64);
+  copy @7 (pathFrom :Text, pathTo :Text) -> (result :UInt64);
   hardLink @8 (srcPath :Text, dstPath :Text) -> ();
-  metadata @9 (path: Text) -> (metadata :Metadata);
+  metadata @9 (path :Text) -> (metadata :Metadata);
   dirMetadata @10 () -> (metadata :Metadata);
   entries @11 () -> (iter :ReadDir);
   readDir @12 (path :Text) -> (iter :ReadDir);
-  read @13 (path :Text) -> (result :List(UInt8));
+  read @13 (path :Text) -> (result :Data);
   readLink @14 (path :Text) -> (result :Text);
   readToString @15 (path :Text) -> (result :Text);
   removeDir @16 (path :Text) -> ();
@@ -47,7 +47,7 @@ interface Dir {
   rename @21 (from :Text, to :Text) -> ();
   setPermissions @22 (path :Text, perm :Permissions) -> ();
   symlinkMetadata @23 (path :Text) -> (metadata :Metadata);
-  write @24 (path :Text, contents :List(UInt8)) -> ();
+  write @24 (path :Text, contents :Data) -> ();
   symlink @25 (original :Text, link :Text) -> ();
 
   #Several unimplemented unix functions in cap std
@@ -57,6 +57,9 @@ interface Dir {
   tryExists @27 (path :Text) -> (result :Bool);
   isFile @28 (path :Text) -> (result :Bool);
   isDir @29 (path :Text) -> (result :Bool);
+  tempDirNewIn @30 () -> (tempDir :TempDir);
+  tempFileNew @31 () -> (tempFile :TempFile);
+  tempFileNewAnonymous @32 () -> (file :File);
   #reopenDir @31 (dir :Filelike) -> (result :Dir); #Filelike = primitive type trait thing
 }
 

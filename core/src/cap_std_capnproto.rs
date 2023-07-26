@@ -1,7 +1,8 @@
-use std::path::Path;
+use std::{path::Path};
 
-use cap_std::fs::{Dir, DirBuilder, File, Metadata, ReadDir, Permissions};
+use cap_std::{fs::{Dir, DirBuilder, File, Metadata, ReadDir, Permissions, OpenOptions}, time::{MonotonicClock, SystemClock}};
 use cap_tempfile::{TempFile, TempDir};
+use cap_directories::{self, UserDirs, ProjectDirs};
 use capnp::{capability::{Promise, Response}, ErrorKind, Error};
 use capnp_rpc::pry;
 use tokio::io::{AsyncRead, AsyncReadExt};
@@ -25,7 +26,12 @@ impl cap_fs::Server for CapFsImpl {
         Promise::ok(())
     }
     fn dir_builder_new(&mut self, _: cap_fs::DirBuilderNewParams, mut result: cap_fs::DirBuilderNewResults) -> Promise<(), Error> {
-        result.get().set_builder(capnp_rpc::new_client(DirBuilder::new()));
+        result.get().set_builder(capnp_rpc::new_client(DirBuilderImpl{dir_builder: DirBuilder::new()}));
+        Promise::ok(())
+    }
+    fn options(&mut self, _: cap_fs::OptionsParams, mut result: cap_fs::OptionsResults) -> Promise<(), Error> {
+        let _options = File::options();
+        result.get().set_options(capnp_rpc::new_client(OpenOptionsImpl{open_options: _options}));
         Promise::ok(())
     }
     /*
@@ -52,7 +58,200 @@ impl cap_fs::Server for CapFsImpl {
 pub struct AmbientAuthorityImpl;
 
 impl ambient_authority::Server for AmbientAuthorityImpl {
-
+    fn file_open_ambient(&mut self, params: ambient_authority::FileOpenAmbientParams, mut result: ambient_authority::FileOpenAmbientResults) -> Promise<(), Error> {
+        let params_reader = pry!(params.get());
+        let path = pry!(params_reader.get_path());
+        let ambient_authority = cap_std::ambient_authority();
+        let Ok(_file) = File::open_ambient(path, ambient_authority) else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, description: String::from("Failed to open file using ambient authority")});
+        };
+        result.get().set_file(capnp_rpc::new_client(FileImpl{file: _file}));
+        Promise::ok(())
+    }
+    fn file_create_ambient(&mut self, params: ambient_authority::FileCreateAmbientParams, mut result: ambient_authority::FileCreateAmbientResults) -> Promise<(), Error> {
+        let params_reader = pry!(params.get());
+        let path = pry!(params_reader.get_path());
+        let ambient_authority = cap_std::ambient_authority();
+        let Ok(_file) = File::create_ambient(path, ambient_authority) else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, description: String::from("Failed to create file using ambient authority")});
+        };
+        result.get().set_file(capnp_rpc::new_client(FileImpl{file: _file}));
+        Promise::ok(())
+    }/*
+    fn file_open_ambient_with(&mut self, params: ambient_authority::FileOpenAmbientWithParams, mut result: ambient_authority::FileOpenAmbientWithResults) -> Promise<(), Error> {
+        let params_reader = pry!(params.get());
+        let path = pry!(params_reader.get_path());
+        let ambient_authority = cap_std::ambient_authority();
+        let Ok(_file) = File::open_ambient_with(path, ambient_authority) else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, description: String::from("Failed to open file using ambient authority(with options)")});
+        };
+        result.get().set_file(capnp_rpc::new_client(FileImpl{file: _file}));
+        Promise::ok(())
+    }*/
+    fn dir_open_ambient(&mut self, params: ambient_authority::DirOpenAmbientParams, mut result: ambient_authority::DirOpenAmbientResults) -> Promise<(), Error> {
+        let params_reader = pry!(params.get());
+        let path = pry!(params_reader.get_path());
+        let ambient_authority = cap_std::ambient_authority();
+        let Ok(_dir) = Dir::open_ambient_dir(path, ambient_authority) else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, description: String::from("Failed to open dir using ambient authority")});
+        };
+        result.get().set_result(capnp_rpc::new_client(DirImpl{dir: _dir}));
+        Promise::ok(())
+    }/*
+    fn dir_open_parent(&mut self, _: ambient_authority::DirOpenParentParams, mut result: ambient_authority::DirOpenParentResults) -> Promise<(), Error> {
+        let ambient_authority = cap_std::ambient_authority();
+        let Ok(_dir) = Dir::open_parent_dir(ambient_authority) else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, description: String::from("Failed to open parent dir dir using ambient authority")});
+        };
+        result.get().set_result(capnp_rpc::new_client(DirImpl{dir: _dir}));
+        todo!()
+    }*/
+    fn dir_create_ambient_all(&mut self, params: ambient_authority::DirCreateAmbientAllParams, mut result: ambient_authority::DirCreateAmbientAllResults) -> Promise<(), Error> {
+        let params_reader = pry!(params.get());
+        let path = pry!(params_reader.get_path());
+        let ambient_authority = cap_std::ambient_authority();
+        let Ok(()) = Dir::create_ambient_dir_all(path, ambient_authority) else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, description: String::from("Failed to recursively create all dirs using ambient authority")});
+        };
+        Promise::ok(())
+    }
+    fn monotonic_clock_new(&mut self, _: ambient_authority::MonotonicClockNewParams, mut result: ambient_authority::MonotonicClockNewResults) -> Promise<(), Error> {
+        let ambient_authority = cap_std::ambient_authority();
+        result.get().set_clock(capnp_rpc::new_client(MonotonicClockImpl{monotonic_clock: MonotonicClock::new(ambient_authority)}));
+        Promise::ok(())
+    }
+    fn system_clock_new(&mut self, _: ambient_authority::SystemClockNewParams, mut result: ambient_authority::SystemClockNewResults) -> Promise<(), Error> {
+        let ambient_authority = cap_std::ambient_authority();
+        result.get().set_clock(capnp_rpc::new_client(SystemClockImpl{system_clock: SystemClock::new(ambient_authority)}));
+        Promise::ok(())
+    }
+    fn project_dirs_from(&mut self, params: ambient_authority::ProjectDirsFromParams, mut result: ambient_authority::ProjectDirsFromResults) -> Promise<(), Error> {
+        let params_reader = pry!(params.get());
+        let qualifier = pry!(params_reader.get_qualifier());
+        let organization = pry!(params_reader.get_organization());
+        let application = pry!(params_reader.get_application());
+        let ambient_authority = cap_std::ambient_authority();
+        let Some(_project_dirs) = ProjectDirs::from(qualifier, organization, application, ambient_authority) else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, description: String::from("No valid $HOME directory")});
+        };
+        result.get().set_project_dirs(capnp_rpc::new_client(ProjectDirsImpl{project_dirs: _project_dirs}));
+        todo!()
+    }
+    fn user_dirs_home_dir(&mut self, _: ambient_authority::UserDirsHomeDirParams, mut result: ambient_authority::UserDirsHomeDirResults) -> Promise<(), Error> {
+        let ambient_authority = cap_std::ambient_authority();
+        let Some(user_dirs) = UserDirs::new() else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, description: String::from("No valid $HOME directory")});
+        };
+        let Ok(_dir) = UserDirs::home_dir(&user_dirs, ambient_authority) else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, description: String::from("Failed to open home dir")});
+        };
+        result.get().set_dir(capnp_rpc::new_client(DirImpl{dir: _dir}));
+        Promise::ok(())
+    }
+    fn user_dirs_audio_dir(&mut self, _: ambient_authority::UserDirsAudioDirParams, mut result: ambient_authority::UserDirsAudioDirResults) -> Promise<(), Error> {
+        let ambient_authority = cap_std::ambient_authority();
+        let Some(user_dirs) = UserDirs::new() else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, description: String::from("No valid $HOME directory")});
+        };
+        let Ok(_dir) = UserDirs::audio_dir(&user_dirs, ambient_authority) else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, description: String::from("Failed to open audio dir")});
+        };
+        result.get().set_dir(capnp_rpc::new_client(DirImpl{dir: _dir}));
+        Promise::ok(())
+    }
+    fn user_dirs_desktop_dir(&mut self, _: ambient_authority::UserDirsDesktopDirParams, mut result: ambient_authority::UserDirsDesktopDirResults) -> Promise<(), Error> {
+        let ambient_authority = cap_std::ambient_authority();
+        let Some(user_dirs) = UserDirs::new() else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, description: String::from("No valid $HOME directory")});
+        };
+        let Ok(_dir) = UserDirs::desktop_dir(&user_dirs, ambient_authority) else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, description: String::from("Failed to open desktop dir")});
+        };
+        result.get().set_dir(capnp_rpc::new_client(DirImpl{dir: _dir}));
+        Promise::ok(())
+    }
+    fn user_dirs_document_dir(&mut self, _: ambient_authority::UserDirsDocumentDirParams, mut result: ambient_authority::UserDirsDocumentDirResults) -> Promise<(), Error> {
+        let ambient_authority = cap_std::ambient_authority();
+        let Some(user_dirs) = UserDirs::new() else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, description: String::from("No valid $HOME directory")});
+        };
+        let Ok(_dir) = UserDirs::document_dir(&user_dirs, ambient_authority) else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, description: String::from("Failed to open document dir")});
+        };
+        result.get().set_dir(capnp_rpc::new_client(DirImpl{dir: _dir}));
+        Promise::ok(())
+    }
+    fn user_dirs_download_dir(&mut self, _: ambient_authority::UserDirsDownloadDirParams, mut result: ambient_authority::UserDirsDownloadDirResults) -> Promise<(), Error> {
+        let ambient_authority = cap_std::ambient_authority();
+        let Some(user_dirs) = UserDirs::new() else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, description: String::from("No valid $HOME directory")});
+        };
+        let Ok(_dir) = UserDirs::download_dir(&user_dirs, ambient_authority) else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, description: String::from("Failed to open download dir")});
+        };
+        result.get().set_dir(capnp_rpc::new_client(DirImpl{dir: _dir}));
+        Promise::ok(())
+    }
+    fn user_dirs_font_dir(&mut self, _: ambient_authority::UserDirsFontDirParams, mut result: ambient_authority::UserDirsFontDirResults) -> Promise<(), Error> {
+        let ambient_authority = cap_std::ambient_authority();
+        let Some(user_dirs) = UserDirs::new() else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, description: String::from("No valid $HOME directory")});
+        };
+        let Ok(_dir) = UserDirs::font_dir(&user_dirs, ambient_authority) else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, description: String::from("Failed to open font dir")});
+        };
+        result.get().set_dir(capnp_rpc::new_client(DirImpl{dir: _dir}));
+        Promise::ok(())
+    }
+    fn user_dirs_picture_dir(&mut self, _: ambient_authority::UserDirsPictureDirParams, mut result: ambient_authority::UserDirsPictureDirResults) -> Promise<(), Error> {
+        let ambient_authority = cap_std::ambient_authority();
+        let Some(user_dirs) = UserDirs::new() else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, description: String::from("No valid $HOME directory")});
+        };
+        let Ok(_dir) = UserDirs::picture_dir(&user_dirs, ambient_authority) else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, description: String::from("Failed to open picture dir")});
+        };
+        result.get().set_dir(capnp_rpc::new_client(DirImpl{dir: _dir}));
+        Promise::ok(())
+    }
+    fn user_dirs_public_dir(&mut self, _: ambient_authority::UserDirsPublicDirParams, mut result: ambient_authority::UserDirsPublicDirResults) -> Promise<(), Error> {
+        let ambient_authority = cap_std::ambient_authority();
+        let Some(user_dirs) = UserDirs::new() else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, description: String::from("No valid $HOME directory")});
+        };
+        let Ok(_dir) = UserDirs::public_dir(&user_dirs, ambient_authority) else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, description: String::from("Failed to open user's public dir")});
+        };
+        result.get().set_dir(capnp_rpc::new_client(DirImpl{dir: _dir}));
+        Promise::ok(())
+    }
+    fn user_dirs_template_dir(&mut self, _: ambient_authority::UserDirsTemplateDirParams, mut result: ambient_authority::UserDirsTemplateDirResults) -> Promise<(), Error> {
+        let ambient_authority = cap_std::ambient_authority();
+        let Some(user_dirs) = UserDirs::new() else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, description: String::from("No valid $HOME directory")});
+        };
+        let Ok(_dir) = UserDirs::template_dir(&user_dirs, ambient_authority) else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, description: String::from("Failed to open template dir")});
+        };
+        result.get().set_dir(capnp_rpc::new_client(DirImpl{dir: _dir}));
+        Promise::ok(())
+    }
+    fn user_dirs_video_dir(&mut self, _: ambient_authority::UserDirsVideoDirParams, mut result: ambient_authority::UserDirsVideoDirResults) -> Promise<(), Error> {
+        let ambient_authority = cap_std::ambient_authority();
+        let Some(user_dirs) = UserDirs::new() else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, description: String::from("No valid $HOME directory")});
+        };
+        let Ok(_dir) = UserDirs::video_dir(&user_dirs, ambient_authority) else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, description: String::from("Failed to open video dir")});
+        };
+        result.get().set_dir(capnp_rpc::new_client(DirImpl{dir: _dir}));
+        Promise::ok(())
+    }/*
+    fn temp_dir_new(&mut self, _: ambient_authority::TempDirNewParams, mut result: ambient_authority::TempDirNewResults) -> Promise<(), Error> {
+        
+        result.get().set_temp_dir(capnp_rpc::new_client(...));
+        todo!()
+    }*/
 }
 
 pub struct DirImpl {
@@ -357,7 +556,55 @@ pub struct FileImpl {
 }
 
 impl file::Server for FileImpl {
+    fn sync_all(&mut self, _: file::SyncAllParams, _: file::SyncAllResults) -> Promise<(), Error> {
+        let Ok(()) = self.file.sync_all() else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, description: String::from("Failed to sync os-internal metadata to disk")});
+        };
+        Promise::ok(())
+    }
+    fn sync_data(&mut self, _: file::SyncDataParams, _: file::SyncDataResults) -> Promise<(), Error> {
+        let Ok(()) = self.file.sync_data() else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, description: String::from("Failed to sync os-internal metadata to sync data")});
+        };
+        Promise::ok(())
+    }
+    fn set_len(&mut self, params: file::SetLenParams, _: file::SetLenResults) -> Promise<(), Error> {
+        let size_reader = pry!(params.get());
+        let size = size_reader.get_size();
+        let Ok(()) = self.file.set_len(size) else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, description: String::from("Failed to update the size of file")});
+        };
+        Promise::ok(())
+    }
+    fn metadata(&mut self, _: file::MetadataParams, mut result: file::MetadataResults) -> Promise<(), Error> {
+        let Ok(_metadata) = self.file.metadata() else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, description: String::from("Get file metadata")});
+        };
+        result.get().set_metadata(capnp_rpc::new_client(MetadataImpl{metadata: _metadata}));
+        Promise::ok(())
+    }
+    fn try_clone(&mut self, _: file::TryCloneParams, mut result: file::TryCloneResults) -> Promise<(), Error> {
+        let Ok(_file) = self.file.try_clone() else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, description: String::from("Failed to sync os-internal metadata to sync data")});
+        };
+        result.get().set_cloned(capnp_rpc::new_client(FileImpl{file: _file}));
+        Promise::ok(())
+    }
+    /*fn set_permissions(&mut self, params: file::SetPermissionsParams,  _: file::SetPermissionsResults) -> Promise<(), Error> {
+        let permissions_reader = pry!(params.get());
+        let permissions = pry!(permissions_reader.get_perm());
+        let Ok(()) = self.file.set_permissions(permissions) else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, description: String::from("Failed to change permissions of the underlying file")});
+        };
+        Promise::ok(())
+    }*/
 
+    /*
+    fn open(&mut self, _: file::OpenParams, mut result: file::OpenResults) -> Promise<(), Error> {
+        
+        result.get().set_stream();
+        Promise::ok(())
+    }*/
 }
 
 pub struct MetadataImpl {
@@ -375,14 +622,59 @@ pub struct PermissionsImpl {
 impl permissions::Server for PermissionsImpl {
 
 }
-//impl temp_dir::Server for TempDir {
-//
-//}
+/*
+pub struct TempDirImpl {
+    temp_dir: TempDir
+}
 
-impl temp_file::Server for TempFile<'_> {
+impl temp_dir::Server for TempDirImpl {
+
+}*/
+pub struct TempFileImpl<'a> {
+    temp_file: TempFile<'a>
+}
+
+impl temp_file::Server for TempFileImpl<'_> {
 
 }
 
-impl dir_builder::Server for DirBuilder {
+pub struct DirBuilderImpl {
+    dir_builder: DirBuilder
+}
+
+impl dir_builder::Server for DirBuilderImpl {
+
+}
+
+pub struct OpenOptionsImpl {
+    open_options: OpenOptions
+}
+
+impl open_options::Server for OpenOptionsImpl {
+
+}
+
+
+pub struct MonotonicClockImpl {
+    monotonic_clock: MonotonicClock
+}
+
+impl monotonic_clock::Server for MonotonicClockImpl {
+
+}
+
+pub struct SystemClockImpl {
+    system_clock: SystemClock
+}
+
+impl system_clock::Server for SystemClockImpl {
+    
+}
+
+pub struct ProjectDirsImpl {
+    project_dirs: ProjectDirs
+}
+
+impl project_dirs::Server for ProjectDirsImpl {
 
 }

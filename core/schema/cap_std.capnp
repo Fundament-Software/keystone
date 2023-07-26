@@ -4,9 +4,10 @@ interface CapFs {
   useAmbientAuthority @0 () -> (ambientAuthority :AmbientAuthority);
   dirOpen @1 (path :Text) -> (dir :Dir);
   dirBuilderNew @2 () -> (builder :DirBuilder);
-  #tempDirNewIn @3 (dir :Dir) -> (tempDir :TempDir);
-  #tempFileNew @4 (dir :Dir) -> (tempFile :TempFile);
-  #tempFileNewAnonymous @5 (dir :Dir) -> (file :File);
+  options @3 () -> (options :OpenOptions);
+  #tempDirNewIn @4 (dir :Dir) -> (tempDir :TempDir);
+  #tempFileNew @5 (dir :Dir) -> (tempFile :TempFile);
+  #tempFileNewAnonymous @6 (dir :Dir) -> (file :File);
 }
 
 using Stream = import "std/byte_stream.capnp".ByteStream;
@@ -14,12 +15,11 @@ using Stream = import "std/byte_stream.capnp".ByteStream;
 interface File {
   syncAll @0 () -> ();
   syncData @1 () -> ();
-  setLet @2 (size :UInt64) -> ();
+  setLen @2 (size :UInt64) -> ();
   metadata @3 () -> (metadata :Metadata);
   tryClone @4 () -> (cloned :File);
   setPermissions @5 (perm :Permissions) -> ();
-  options @6 () -> (options :OpenOptions);
-  open @7 () -> (stream :Stream);
+  open @6 () -> (stream :Stream);
 }
 
 interface Dir {

@@ -443,7 +443,7 @@ mod tests {
         // Test that GET request fails
         let request = path_client.get_request();
         assert_eq!(
-            request.send().promise.await.err().map(|e| e.description),
+            request.send().promise.await.err().map(|e| e.extra),
             Some("GET is not on a whitelist and can't be executed".to_string())
         );
 

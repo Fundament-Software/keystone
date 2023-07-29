@@ -1,12 +1,12 @@
 use std::{path::Path};
 
-use cap_std::{fs::{Dir, DirBuilder, File, Metadata, ReadDir, Permissions, OpenOptions}, time::{MonotonicClock, SystemClock}};
+use cap_std::{fs::{Dir, DirBuilder, File, Metadata, ReadDir, Permissions, OpenOptions, DirEntry, FileType}, time::{MonotonicClock, SystemClock, SystemTime}};
 use cap_tempfile::{TempFile, TempDir};
 use cap_directories::{self, UserDirs, ProjectDirs};
-use capnp::{capability::{Promise, Response}, ErrorKind, Error};
+use capnp::{capability::{Promise, Response}, ErrorKind, Error, io::Write};
 use capnp_rpc::pry;
 use tokio::io::{AsyncRead, AsyncReadExt};
-use crate::{cap_std_capnp::{ambient_authority, cap_fs, dir, dir_builder, dir_entry, dir_options, duration, file, file_type, instant, metadata, monotonic_clock, open_options, permissions, project_dirs, read_dir, system_clock, system_time, system_time_error, temp_dir, temp_file, user_dirs}, spawn::unix_process::UnixProcessServiceSpawnImpl};
+use crate::{cap_std_capnp::{ambient_authority, cap_fs, dir, dir_builder, dir_entry, dir_options, duration, file, file_type, instant, metadata, monotonic_clock, open_options, permissions, project_dirs, read_dir, system_clock, system_time, system_time_error, temp_dir, temp_file, user_dirs}, spawn::unix_process::UnixProcessServiceSpawnImpl, byte_stream::ByteStreamImpl};
 
 pub struct CapFsImpl;
 
@@ -135,7 +135,7 @@ impl ambient_authority::Server for AmbientAuthorityImpl {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, description: String::from("No valid $HOME directory")});
         };
         result.get().set_project_dirs(capnp_rpc::new_client(ProjectDirsImpl{project_dirs: _project_dirs}));
-        todo!()
+        Promise::ok(())
     }
     fn user_dirs_home_dir(&mut self, _: ambient_authority::UserDirsHomeDirParams, mut result: ambient_authority::UserDirsHomeDirResults) -> Promise<(), Error> {
         let ambient_authority = cap_std::ambient_authority();
@@ -350,19 +350,19 @@ impl dir::Server for DirImpl {
         Promise::ok(())
     }
     fn entries(&mut self, _: dir::EntriesParams, mut result: dir::EntriesResults) -> Promise<(), Error> {
-        let Ok(_iter) = self.dir.entries() else {
+        let Ok(mut _iter) = self.dir.entries() else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, description: String::from("Failed to get dir entries")});
         };
-        result.get().set_iter(capnp_rpc::new_client(ReadDirImpl{iter :_iter}));
+        result.get().set_iter(capnp_rpc::new_client(ReadDirImpl{iter:_iter}));
         Promise::ok(())
     }
     fn read_dir(&mut self, params: dir::ReadDirParams, mut result: dir::ReadDirResults) -> Promise<(), Error> {
         let params_reader = pry!(params.get());
         let path = pry!(params_reader.get_path());
-        let Ok(_iter) = self.dir.read_dir(path) else {
+        let Ok(mut _iter) = self.dir.read_dir(path) else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, description: String::from("Failed to read dir")});
         };
-        result.get().set_iter(capnp_rpc::new_client(ReadDirImpl{iter :_iter}));
+        result.get().set_iter(capnp_rpc::new_client(ReadDirImpl{iter:_iter}));
         Promise::ok(())
     }
     fn read(&mut self, params: dir::ReadParams, mut result: dir::ReadResults) -> Promise<(), Error> {
@@ -548,7 +548,75 @@ pub struct ReadDirImpl {
 }
 
 impl read_dir::Server for ReadDirImpl {
-    
+    fn next(&mut self, _: read_dir::NextParams, mut result: read_dir::NextResults) -> Promise<(), Error> {
+        let Some(_result) = self.iter.next() else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, description: String::from("Final entry reached")});
+        };
+        let Ok(_entry) = _result else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, description: String::from("Encountered an error while getting dir entry")});
+        };
+        result.get().set_entry(capnp_rpc::new_client(DirEntryImpl{entry: _entry}));
+        Promise::ok(())
+    }
+}
+
+pub struct DirEntryImpl {
+    entry: DirEntry
+}
+
+impl dir_entry::Server for DirEntryImpl {
+    fn open(&mut self, _: dir_entry::OpenParams, mut result: dir_entry::OpenResults) -> Promise<(), Error> {
+        let Ok(_file) = self.entry.open() else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, description: String::from("Failed to open file for reading")});
+        };
+        result.get().set_file(capnp_rpc::new_client(FileImpl{file: _file}));
+        Promise::ok(())
+    }
+    /*
+    fn open_with(&mut self, _: dir_entry::OpenWithParams, _: dir_entry::OpenWithResults) -> Promise<(), Error> {
+        
+    }*/
+    fn open_dir(&mut self, _: dir_entry::OpenDirParams, mut result: dir_entry::OpenDirResults) -> Promise<(), Error> {
+        let Ok(_dir) = self.entry.open_dir() else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, description: String::from("Failed to open the entry as a dir")});
+        };
+        result.get().set_dir(capnp_rpc::new_client(DirImpl{dir: _dir}));
+        Promise::ok(())
+    }
+    fn remove_file(&mut self, _: dir_entry::RemoveFileParams, _: dir_entry::RemoveFileResults) -> Promise<(), Error> {
+        let Ok(()) = self.entry.remove_file() else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, description: String::from("Failed to remove file")});
+        };
+        Promise::ok(())
+    }
+    fn remove_dir(&mut self, _: dir_entry::RemoveDirParams, _: dir_entry::RemoveDirResults) -> Promise<(), Error> {
+        let Ok(()) = self.entry.remove_dir() else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, description: String::from("Failed to remove dir")});
+        };
+        Promise::ok(())
+    }
+    fn metadata(&mut self, _: dir_entry::MetadataParams, mut result: dir_entry::MetadataResults) -> Promise<(), Error> {
+        let Ok(_metadata) = self.entry.metadata() else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, description: String::from("Failed to get file metadata")});
+        };
+        result.get().set_metadata(capnp_rpc::new_client(MetadataImpl{metadata: _metadata}));
+        Promise::ok(())
+    }
+    fn file_type(&mut self, _: dir_entry::FileTypeParams, mut result: dir_entry::FileTypeResults) -> Promise<(), Error> {
+        let Ok(_file_type) = self.entry.file_type() else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, description: String::from("Failed to get file type")});
+        };
+        result.get().set_type(capnp_rpc::new_client(FileTypeImpl{file_type: _file_type}));
+        Promise::ok(())
+    }
+    fn file_name(&mut self, _: dir_entry::FileNameParams, mut result: dir_entry::FileNameResults) -> Promise<(), Error> {
+        let _name = self.entry.file_name();
+        let Some(_name) = _name.to_str() else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, description: String::from("File name not valid utf-8")});
+        };
+        result.get().set_result(_name);
+        Promise::ok(())
+    }
 }
 
 pub struct FileImpl {
@@ -598,13 +666,22 @@ impl file::Server for FileImpl {
         };
         Promise::ok(())
     }*/
-
-    /*
+    
     fn open(&mut self, _: file::OpenParams, mut result: file::OpenResults) -> Promise<(), Error> {
-        
-        result.get().set_stream();
+        //Not completely sure that's how byte streams work, also probably needs to use async/futures potentially rc
+
+        let Ok(mut this) = self.file.try_clone() else {
+            return Promise::err((Error{kind: capnp::ErrorKind::Failed, description: String::from("Get owned file")}));
+        };
+        let _stream = ByteStreamImpl::new(move |bytes| {
+            let Ok(()) = this.write_all(bytes) else {
+                return Promise::err((Error{kind: capnp::ErrorKind::Failed, description: String::from("Failed to write to file")}));
+            };
+            Promise::ok(())
+        });
+        result.get().set_stream(capnp_rpc::new_client(_stream));
         Promise::ok(())
-    }*/
+    }
 }
 
 pub struct MetadataImpl {
@@ -612,7 +689,65 @@ pub struct MetadataImpl {
 }
 
 impl metadata::Server for MetadataImpl {
+    fn file_type(&mut self, _: metadata::FileTypeParams, mut result: metadata::FileTypeResults) -> Promise<(), Error> {
+        let _type = self.metadata.file_type();
+        result.get().set_file_type(capnp_rpc::new_client(FileTypeImpl{file_type: _type}));
+        Promise::ok(())
+    }
+    fn is_dir(&mut self, _: metadata::IsDirParams, mut result: metadata::IsDirResults) -> Promise<(), Error> {
+        let _result = self.metadata.is_dir();
+        result.get().set_result(_result);
+        Promise::ok(())
+    }
+    fn is_file(&mut self, _: metadata::IsFileParams, mut result: metadata::IsFileResults) -> Promise<(), Error> {
+        let _result = self.metadata.is_file();
+        result.get().set_result(_result);
+        Promise::ok(())
+    }
+    fn is_symlink(&mut self, _: metadata::IsSymlinkParams, mut result: metadata::IsSymlinkResults) -> Promise<(), Error> {
+        let _result = self.metadata.is_symlink();
+        result.get().set_result(_result);
+        Promise::ok(())
+    }
+    fn len(&mut self, _: metadata::LenParams, mut result: metadata::LenResults) -> Promise<(), Error> {
+        let _result = self.metadata.len();
+        result.get().set_result(_result);
+        Promise::ok(())
+    }
+    fn permissions(&mut self, _: metadata::PermissionsParams, mut result: metadata::PermissionsResults) -> Promise<(), Error> {
+        let _permissions = self.metadata.permissions();
+        result.get().set_permissions(capnp_rpc::new_client(PermissionsImpl{permissions: _permissions}));
+        Promise::ok(())
+    }
+    fn modified(&mut self, _: metadata::ModifiedParams, mut result: metadata::ModifiedResults) -> Promise<(), Error> {
+        let Ok(_time) = self.metadata.modified() else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, description: String::from("Failed to access modified field of the metadata")});
+        };
+        result.get().set_time(capnp_rpc::new_client(SystemTimeImpl{system_time: _time}));
+        Promise::ok(())
+    }
+    fn accessed(&mut self, _: metadata::AccessedParams, mut result: metadata::AccessedResults) -> Promise<(), Error> {
+        let Ok(_time) = self.metadata.accessed() else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, description: String::from("Failed to access accessed field of the metadata")});
+        };
+        result.get().set_time(capnp_rpc::new_client(SystemTimeImpl{system_time: _time}));
+        Promise::ok(())
+    }
+    fn created(&mut self, _: metadata::CreatedParams, mut result: metadata::CreatedResults) -> Promise<(), Error> {
+        let Ok(_time) = self.metadata.created() else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, description: String::from("Failed to access created field of the metadata")});
+        };
+        result.get().set_time(capnp_rpc::new_client(SystemTimeImpl{system_time: _time}));
+        Promise::ok(())
+    }
+}
 
+pub struct FileTypeImpl {
+    file_type: FileType
+}
+
+impl file_type::Server for FileTypeImpl {
+    
 }
 
 pub struct PermissionsImpl {
@@ -635,7 +770,27 @@ pub struct TempFileImpl<'a> {
 }
 
 impl temp_file::Server for TempFileImpl<'_> {
+    /*fn as_file(&mut self, _: temp_file::AsFileParams, mut result: temp_file::AsFileResults) -> Promise<(), Error> {
+        let Ok(_file) = self.temp_file.as_file() else {
 
+        }
+        result.get().set_file(FileImpl{file: _file});
+        Promise::ok(())
+    }
+    fn as_file_mut(&mut self, _: temp_file::AsFileMutParams,  mut result: temp_file::AsFileMutResults) -> Promise<(), Error> {
+        
+
+        result.get().set_file(FileImpl{file: _file});
+        Promise::ok(())
+    }
+    fn replace(&mut self, params: temp_file::ReplaceParams, _: temp_file::ReplaceResults) -> Promise<(), Error> {
+        let params_reader = pry!(params.get());
+        let dest = pry!(params_reader.get_dest());
+        let Ok(()) = self.temp_file.replace(dest) else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, description: String::from("Failed to write file to the target location")});
+        };
+        Promise::ok(())
+    }*/
 }
 
 pub struct DirBuilderImpl {
@@ -654,6 +809,13 @@ impl open_options::Server for OpenOptionsImpl {
 
 }
 
+pub struct SystemTimeImpl {
+    system_time: SystemTime
+}
+
+impl system_time::Server for SystemTimeImpl {
+
+}
 
 pub struct MonotonicClockImpl {
     monotonic_clock: MonotonicClock

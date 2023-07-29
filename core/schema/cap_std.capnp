@@ -135,8 +135,7 @@ interface FileType {
 }
 
 interface ReadDir {
-  next @0 () -> (iter :ReadDir);
-  get @1 () -> (entry :DirEntry);
+  next @0 () -> (entry :DirEntry);
 }
 
 interface OpenOptions {

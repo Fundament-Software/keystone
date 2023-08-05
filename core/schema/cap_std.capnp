@@ -24,7 +24,7 @@ interface File {
 
 interface Dir {
   open @0 (path :Text) -> (file :File);
-  openWith @1 (path :Text, options :OpenOptions) -> (file :File);
+  openWith @1 (path :Text, read :Bool, write :Bool, append :Bool, truncate :Bool, create :Bool, createNew :Bool) -> (file :File);
   createDir @2 (path :Text) -> ();
   createDirAll @3 (path :Text) -> ();
   createDirWith @4 (path :Text, dirBuilder :DirBuilder) -> ();
@@ -113,6 +113,7 @@ interface SystemTime {
   durationSince @0 (earlier :SystemTime) -> (duration :Duration);
   checkedAdd @1 (duration :Duration) -> (result :SystemTime);
   checkedSub @2 (duration :Duration) -> (result :SystemTime);
+  #getTime @3 () -> (time :UnixTime);
 }
 
 interface SystemTimeError {
@@ -153,7 +154,7 @@ interface DirOptions {
 
 interface DirEntry {
   open @0 () -> (file :File);
-  openWith @1 (options :OpenOptions) -> (file :File);
+  openWith @1 (read :Bool, write :Bool, append :Bool, truncate :Bool, create :Bool, createNew :Bool) -> (file :File);
   openDir @2 () -> (dir :Dir);
   removeFile @3 () -> ();
   removeDir @4 () -> ();
@@ -165,7 +166,7 @@ interface DirEntry {
 interface AmbientAuthority {
   fileOpenAmbient @0 (path :Text) -> (file :File);
   fileCreateAmbient @1 (path :Text) -> (file :File);
-  fileOpenAmbientWith @2 (path :Text, options :OpenOptions) -> (file :File);
+  fileOpenAmbientWith @2 (path :Text, read :Bool, write :Bool, append :Bool, truncate :Bool, create :Bool, createNew :Bool) -> (file :File);
   dirOpenAmbient @3 (path :Text) -> (result :Dir);
   dirOpenParent @4 () -> (result :Dir);
   dirCreateAmbientAll @5 (path :Text) -> ();

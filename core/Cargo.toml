@@ -27,6 +27,7 @@ capnp = { git = "https://github.com/Fundament-Software/capnproto-rust" }
 capnp-futures = { git = "https://github.com/Fundament-Software/capnproto-rust" }
 capnp-import = { git = "https://github.com/Fundament-Software/capnproto-rust" }
 capnp-rpc = { git = "https://github.com/Fundament-Software/capnproto-rust" }
+capnp-macros = { git = "https://github.com/Fundament-Software/capnproto-rust" }
 chrono = "0.4"
 color-eyre = "0.6"
 couch_rs = "0.9"

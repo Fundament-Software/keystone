@@ -4,4 +4,4 @@ mod database;
 pub mod http;
 mod node;
 
-capnp_import::capnp_import!("core/schema/**/*.capnp");
+capnp_import::capnp_import!("schema/**/*.capnp");

@@ -6,7 +6,7 @@ mod database;
 mod node;
 mod spawn;
 
-capnp_import::capnp_import!("core/schema/**/*.capnp");
+capnp_import::capnp_import!("schema/**/*.capnp");
 
 use eyre::Result;
 use std::env;

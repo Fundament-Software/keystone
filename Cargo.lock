@@ -357,12 +357,12 @@ dependencies = [
 [[package]]
 name = "capnp"
 version = "0.18.0-alpha"
-source = "git+https://github.com/Fundament-Software/capnproto-rust#2226ee6e377cc31c73de2d2ddb1124bcdbb64f9f"
+source = "git+https://github.com/Fundament-Software/capnproto-rust#017e6f2542c790703cb5236c4c4448ffe9bf2104"
 
 [[package]]
 name = "capnp-futures"
 version = "0.18.0-alpha"
-source = "git+https://github.com/Fundament-Software/capnproto-rust#2226ee6e377cc31c73de2d2ddb1124bcdbb64f9f"
+source = "git+https://github.com/Fundament-Software/capnproto-rust#017e6f2542c790703cb5236c4c4448ffe9bf2104"
 dependencies = [
  "capnp",
  "futures",
@@ -371,7 +371,7 @@ dependencies = [
 [[package]]
 name = "capnp-import"
 version = "0.2.0"
-source = "git+https://github.com/Fundament-Software/capnproto-rust#2226ee6e377cc31c73de2d2ddb1124bcdbb64f9f"
+source = "git+https://github.com/Fundament-Software/capnproto-rust#017e6f2542c790703cb5236c4c4448ffe9bf2104"
 dependencies = [
  "anyhow",
  "capnp",
@@ -391,9 +391,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "capnp-macros"
+version = "0.1.0"
+source = "git+https://github.com/Fundament-Software/capnproto-rust#017e6f2542c790703cb5236c4c4448ffe9bf2104"
+dependencies = [
+ "capnp",
+ "capnp-rpc",
+ "proc-macro2 1.0.63",
+ "quote 1.0.29",
+ "syn 2.0.22",
+]
+
+[[package]]
 name = "capnp-rpc"
 version = "0.18.0-alpha"
-source = "git+https://github.com/Fundament-Software/capnproto-rust#2226ee6e377cc31c73de2d2ddb1124bcdbb64f9f"
+source = "git+https://github.com/Fundament-Software/capnproto-rust#017e6f2542c790703cb5236c4c4448ffe9bf2104"
 dependencies = [
  "capnp",
  "capnp-futures",
@@ -403,7 +415,7 @@ dependencies = [
 [[package]]
 name = "capnpc"
 version = "0.18.0-alpha"
-source = "git+https://github.com/Fundament-Software/capnproto-rust#2226ee6e377cc31c73de2d2ddb1124bcdbb64f9f"
+source = "git+https://github.com/Fundament-Software/capnproto-rust#017e6f2542c790703cb5236c4c4448ffe9bf2104"
 dependencies = [
  "capnp",
 ]
@@ -1282,6 +1294,7 @@ dependencies = [
  "capnp",
  "capnp-futures",
  "capnp-import",
+ "capnp-macros",
  "capnp-rpc",
  "chrono",
  "color-eyre",

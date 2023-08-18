@@ -5,7 +5,7 @@ use cap_tempfile::{TempFile, TempDir};
 use cap_directories::{self, UserDirs, ProjectDirs};
 use capnp::{capability::{Promise, Response}, ErrorKind, Error, io::Write};
 use capnp_rpc::pry;
-//use capnp::{capnp_macros::capnp_let};
+use capnp_macros::capnp_let;
 use tokio::io::{AsyncRead, AsyncReadExt};
 use crate::{cap_std_capnp::{ambient_authority, cap_fs, dir, dir_builder, dir_entry, dir_options, duration, file, file_type, instant, metadata, monotonic_clock, open_options, permissions, project_dirs, read_dir, system_clock, system_time, system_time_error, temp_dir, temp_file, user_dirs}, spawn::unix_process::UnixProcessServiceSpawnImpl, byte_stream::ByteStreamImpl};
 

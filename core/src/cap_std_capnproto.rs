@@ -5,6 +5,7 @@ use cap_tempfile::{TempFile, TempDir};
 use cap_directories::{self, UserDirs, ProjectDirs};
 use capnp::{capability::{Promise, Response}, ErrorKind, Error, io::Write};
 use capnp_rpc::pry;
+use crate::capnp_rust::capnp_macros::capnp_let;
 use tokio::io::{AsyncRead, AsyncReadExt};
 use crate::{cap_std_capnp::{ambient_authority, cap_fs, dir, dir_builder, dir_entry, dir_options, duration, file, file_type, instant, metadata, monotonic_clock, open_options, permissions, project_dirs, read_dir, system_clock, system_time, system_time_error, temp_dir, temp_file, user_dirs}, spawn::unix_process::UnixProcessServiceSpawnImpl, byte_stream::ByteStreamImpl};
 
@@ -846,14 +847,14 @@ impl temp_file::Server for TempFileImpl<'_> {
     /*fn as_file(&mut self, _: temp_file::AsFileParams, mut result: temp_file::AsFileResults) -> Promise<(), Error> {
         let Ok(_file) = self.temp_file.as_file() else {
 
-        }
-        result.get().set_file(FileImpl{file: _file});
+        };
+        result.get().set_file(capnp_rpc::new_client(FileImpl{file: _file}));
         Promise::ok(())
     }
     fn as_file_mut(&mut self, _: temp_file::AsFileMutParams,  mut result: temp_file::AsFileMutResults) -> Promise<(), Error> {
         
 
-        result.get().set_file(FileImpl{file: _file});
+        result.get().set_file(capnp_rpc::new_client(FileImpl{file: _file}));
         Promise::ok(())
     }
     fn replace(&mut self, params: temp_file::ReplaceParams, _: temp_file::ReplaceResults) -> Promise<(), Error> {
@@ -887,10 +888,11 @@ pub struct SystemTimeImpl {
 }
 
 impl system_time::Server for SystemTimeImpl {
-    /*fn duration_since(&mut self, params: system_time::DurationSinceParams, mut result: system_time::DurationSinceResults) -> Promise<(), Error> {
+    fn duration_since(&mut self, params: system_time::DurationSinceParams, mut result: system_time::DurationSinceResults) -> Promise<(), Error> {
         let params_reader = pry!(params.get());
-        let 
-    }*/
+        //capnp_let!({});
+        todo!()
+    }
 
     fn checked_add(&mut self, params: system_time::CheckedAddParams, mut result: system_time::CheckedAddResults) -> Promise<(), Error> {
         let params_reader = pry!(params.get());
@@ -917,10 +919,16 @@ impl system_time::Server for SystemTimeImpl {
         result.get().set_result(capnp_rpc::new_client(SystemTimeImpl{system_time: _time}));
         Promise::ok(())
     }
-    /*
-    fn get_time(&mut self, _: system_time::GetTimeParams, mut result: system_time::GetTimeResults) -> Promise<(), Error> {
-        todo!()
-    }*/
+    
+    fn get_duration_since_unix_epoch(&mut self, _: system_time::GetDurationSinceUnixEpochParams, mut result: system_time::GetDurationSinceUnixEpochResults) -> Promise<(), Error> {
+        let Ok(_duration) = self.system_time.into_std().duration_since(std::time::UNIX_EPOCH) else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, description: String::from("Failed to get duration since unix epoch")});
+        };
+        let mut response = result.get().init_duration();
+        response.set_secs(_duration.as_secs());
+        response.set_nanos(_duration.subsec_nanos());
+        Promise::ok(())
+    }
 }
 
 pub struct InstantImpl {

@@ -110,10 +110,10 @@ interface SystemClock {
 }
 
 interface SystemTime {
-  durationSince @0 (earlier :SystemTime) -> (duration :Duration);
+  durationSince @0 (durationSinceUnixEpoch :SystemTime) -> (duration :Duration);
   checkedAdd @1 (duration :Duration) -> (result :SystemTime);
   checkedSub @2 (duration :Duration) -> (result :SystemTime);
-  #getTime @3 () -> (time :UnixTime);
+  getDurationSinceUnixEpoch @3 () -> (duration :Duration);
 }
 
 interface SystemTimeError {

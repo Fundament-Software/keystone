@@ -286,7 +286,7 @@ async fn allowlist_test() -> eyre::Result<(), capnp::Error> {
     // GET request fails
     let request = client.get_request();
     assert_eq!(
-        request.send().promise.await.err().map(|e| e.description),
+        request.send().promise.await.err().map(|e| e.extra),
         Some("GET is not on a whitelist and can't be executed".to_string())
     );
 
@@ -301,14 +301,14 @@ async fn allowlist_test() -> eyre::Result<(), capnp::Error> {
     // GET request fails
     let request = client.get_request();
     assert_eq!(
-        request.send().promise.await.err().map(|e| e.description),
+        request.send().promise.await.err().map(|e| e.extra),
         Some("GET is not on a whitelist and can't be executed".to_string())
     );
 
     // DELETE request now doesn't work
     let request = client.delete_request();
     assert_eq!(
-        request.send().promise.await.err().map(|e| e.description),
+        request.send().promise.await.err().map(|e| e.extra),
         Some("DELETE is not on a whitelist and can't be executed".to_string())
     );
 

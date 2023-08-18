@@ -356,15 +356,13 @@ dependencies = [
 
 [[package]]
 name = "capnp"
-version = "0.14.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2dca085c2c7d9d65ad749d450b19b551efaa8e3476a439bdca07aca8533097f3"
+version = "0.18.0-alpha"
+source = "git+https://github.com/Fundament-Software/capnproto-rust#2226ee6e377cc31c73de2d2ddb1124bcdbb64f9f"
 
 [[package]]
 name = "capnp-futures"
-version = "0.14.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9821801cc6f199a9d9c3c793504e800c797b536d2befddaffb15144e40a6e63a"
+version = "0.18.0-alpha"
+source = "git+https://github.com/Fundament-Software/capnproto-rust#2226ee6e377cc31c73de2d2ddb1124bcdbb64f9f"
 dependencies = [
  "capnp",
  "futures",
@@ -373,7 +371,7 @@ dependencies = [
 [[package]]
 name = "capnp-import"
 version = "0.2.0"
-source = "git+https://github.com/Fundament-Software/capnp-import#6b9831f354acb15074ed243b8b77eb45bcccfe6a"
+source = "git+https://github.com/Fundament-Software/capnproto-rust#2226ee6e377cc31c73de2d2ddb1124bcdbb64f9f"
 dependencies = [
  "anyhow",
  "capnp",
@@ -394,9 +392,8 @@ dependencies = [
 
 [[package]]
 name = "capnp-rpc"
-version = "0.14.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4c4f17f96f68f2c1168ed7105d9e5cb4a095a5bef3578aee0f9c0644b85ca95e"
+version = "0.18.0-alpha"
+source = "git+https://github.com/Fundament-Software/capnproto-rust#2226ee6e377cc31c73de2d2ddb1124bcdbb64f9f"
 dependencies = [
  "capnp",
  "capnp-futures",
@@ -405,9 +402,8 @@ dependencies = [
 
 [[package]]
 name = "capnpc"
-version = "0.14.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bdc9f1dc84666d4ff007b1a16c8f97db80764a624625979be05d869bcff43aaa"
+version = "0.18.0-alpha"
+source = "git+https://github.com/Fundament-Software/capnproto-rust#2226ee6e377cc31c73de2d2ddb1124bcdbb64f9f"
 dependencies = [
  "capnp",
 ]
@@ -1276,7 +1272,6 @@ dependencies = [
 name = "keystone"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "assert_fs",
  "async-trait",
  "atomic-counter",

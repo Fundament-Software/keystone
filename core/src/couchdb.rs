@@ -1,11 +1,11 @@
 use super::database;
-use eyre::Result;
 use async_trait::async_trait;
 use atomic_counter::{AtomicCounter, RelaxedCounter};
 use capnp_rpc::pry;
 use couch_rs::document::TypedCouchDocument;
 use couch_rs::types::document::DocumentId;
 use couch_rs::CouchDocument;
+use eyre::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -26,7 +26,7 @@ impl CouchDB {
         Ok(Self {
             client,
             rollover: RelaxedCounter::new(0),
-            log: log,
+            log,
         })
     }
 }

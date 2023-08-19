@@ -18,8 +18,8 @@ impl cap_fs::Server for CapFsImpl {
     }
     fn dir_open(&mut self, params: cap_fs::DirOpenParams, mut result: cap_fs::DirOpenResults) -> Promise<(), Error> {
         let path_reader = pry!(params.get());
-        let path = Path::new(pry!(path_reader.get_path()));
-        let Ok(file) = std::fs::File::open(path) else {
+        let path = pry!(path_reader.get_path());
+        let Ok(file) = std::fs::File::open(Path::new(path)) else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to open file")});
         };
         let dir = DirImpl{dir: Dir::from_std_file(file)};
@@ -1114,7 +1114,8 @@ mod tests {
 
         let cap: cap_fs::Client = capnp_rpc::new_client(crate::cap_std_capnproto::CapFsImpl);
         let mut request = cap.dir_open_request();
-        let path = std::env::temp_dir();
+        let mut path = std::env::temp_dir();
+        path.push("capnp_test.txt");
         request.get().set_path(path.to_str().unwrap());
         let result = futures::executor::block_on(request.send().promise);
         let dir = result?.get()?.get_dir()?;

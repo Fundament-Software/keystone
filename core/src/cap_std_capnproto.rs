@@ -890,8 +890,16 @@ pub struct SystemTimeImpl {
 impl system_time::Server for SystemTimeImpl {
     fn duration_since(&mut self, params: system_time::DurationSinceParams, mut result: system_time::DurationSinceResults) -> Promise<(), Error> {
         let params_reader = pry!(params.get());
-        //capnp_let!({});
-        todo!()
+        capnp_let!({duration_since_unix_epoch : {secs, nanos}} = params_reader);
+        //Add duration since unix epoch to unix epoch to reconstruct a system time
+        let earlier = cap_std::time::SystemTime::from_std(std::time::UNIX_EPOCH + Duration::new(secs, nanos));
+        let Ok(_duration_since) = self.system_time.duration_since(earlier) else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("System time earlier than self")});
+        };
+        let mut response = result.get().init_duration();
+        response.set_secs(_duration_since.as_secs());
+        response.set_nanos(_duration_since.subsec_nanos());
+        Promise::ok(())
     }
 
     fn checked_add(&mut self, params: system_time::CheckedAddParams, mut result: system_time::CheckedAddResults) -> Promise<(), Error> {
@@ -1040,3 +1048,38 @@ impl project_dirs::Server for ProjectDirsImpl {
         Promise::ok(())
     }
 }
+
+pub type Result<T> = ::core::result::Result<T, Error>;
+
+pub trait IntoResult {
+    type InnerType;
+    fn into_result(self) -> Result<Self::InnerType>;
+}
+
+impl<T> IntoResult for Result<T> {
+    type InnerType = T;
+    fn into_result(self) -> Result<Self::InnerType> {
+        self
+    }
+}
+
+impl IntoResult for u64 {
+    type InnerType = u64;
+    fn into_result(self) -> Result<Self::InnerType> {
+        Ok(self)
+    }
+}
+
+impl IntoResult for u32 {
+    type InnerType = u32;
+    fn into_result(self) -> Result<Self::InnerType> {
+        Ok(self)
+    }
+}
+/*
+impl<T: capnp::introspect::Introspect> IntoResult for T {
+    type InnerType = Self;
+    fn into_result(self) -> Result<Self::InnerType> {
+        Ok::<Self::InnerType, Error>(self)
+    }
+}*/

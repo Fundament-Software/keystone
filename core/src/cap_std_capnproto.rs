@@ -1115,15 +1115,20 @@ mod tests {
         let dir = result?.get()?.get_dir()?;
         let mut read_request = dir.read_request();
         read_request.get().set_path("test.txt");
-        let out = futures::executor::block_on(read_request.send().promise)?.get()?.get_result()?;
-        println!("{}", out);
+        let res = futures::executor::block_on(read_request.send().promise)?;
+        let out = res.get()?.get_result()?;
+        for c in out {
+            print!("{}", c)
+        }
+        return Ok(())
+        //println!("{}", out);
 
 
         //let wrapped = FileImpl{file :cap_std::fs::File::from_std(_file)};
         //let cap: crate::cap_std_capnproto::file::Client = capnp_rpc::new_client(wrapped);
         
 
-        todo!()
+        //todo!()
     }
 
 

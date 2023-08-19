@@ -1083,3 +1083,55 @@ impl<T: capnp::introspect::Introspect> IntoResult for T {
         Ok::<Self::InnerType, Error>(self)
     }
 }*/
+
+#[cfg(test)]
+mod tests {
+    use std::{path::Path};
+
+    use cap_std::{fs::{Dir, DirBuilder, File, Metadata, ReadDir, Permissions, OpenOptions, DirEntry, FileType}, time::{MonotonicClock, SystemClock, SystemTime, Duration, Instant}};
+    use cap_tempfile::{TempFile, TempDir};
+    use cap_directories::{self, UserDirs, ProjectDirs};
+    use capnp_rpc::pry;
+    use capnp_macros::capnp_let;
+    use tokio::io::{AsyncRead, AsyncReadExt};
+    use crate::{cap_std_capnp::{ambient_authority, cap_fs, dir, dir_builder, dir_entry, dir_options, duration, file, file_type, instant, metadata, monotonic_clock, open_options, permissions, project_dirs, read_dir, system_clock, system_time, system_time_error, temp_dir, temp_file, user_dirs}, spawn::unix_process::UnixProcessServiceSpawnImpl, byte_stream::ByteStreamImpl};
+    
+
+
+    #[test]
+    fn test_open_read() -> eyre::Result<()> {
+        use std::io::{BufWriter, Write};
+        use super::FileImpl;
+
+        let _f = std::fs::File::create("test.txt")?;
+        let mut writer = BufWriter::new(_f);
+        writer.write_all(b"Just a test file")?;
+        writer.flush()?;
+
+        let cap: cap_fs::Client = capnp_rpc::new_client(crate::cap_std_capnproto::CapFsImpl);
+        let mut request = cap.dir_open_request();
+        request.get().set_path("");
+        let result = futures::executor::block_on(request.send().promise);
+        let dir = result?.get()?.get_dir()?;
+        let mut read_request = dir.read_request();
+        read_request.get().set_path("test.txt");
+        let out = futures::executor::block_on(read_request.send().promise)?.get()?.get_result()?;
+        println!("{}", out);
+
+
+        //let wrapped = FileImpl{file :cap_std::fs::File::from_std(_file)};
+        //let cap: crate::cap_std_capnproto::file::Client = capnp_rpc::new_client(wrapped);
+        
+
+        todo!()
+    }
+
+
+
+
+
+
+
+
+
+}

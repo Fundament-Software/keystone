@@ -890,6 +890,8 @@ pub struct SystemTimeImpl {
 impl system_time::Server for SystemTimeImpl {
     fn duration_since(&mut self, params: system_time::DurationSinceParams, mut result: system_time::DurationSinceResults) -> Promise<(), Error> {
         let params_reader = pry!(params.get());
+        //let dur = params_reader.get_duration_since_unix_epoch();
+        //capnp_let!({duration_since_unix_epoch : {secs, nanos}} = params_reader);
         capnp_let!({duration_since_unix_epoch : {secs, nanos}} = params_reader);
         //Add duration since unix epoch to unix epoch to reconstruct a system time
         let earlier = cap_std::time::SystemTime::from_std(std::time::UNIX_EPOCH + Duration::new(secs, nanos));
@@ -1076,7 +1078,7 @@ impl IntoResult for u32 {
         Ok(self)
     }
 }
-/*
+/* 
 impl<T: capnp::introspect::Introspect> IntoResult for T {
     type InnerType = Self;
     fn into_result(self) -> Result<Self::InnerType> {
@@ -1103,18 +1105,21 @@ mod tests {
         use std::io::{BufWriter, Write};
         use super::FileImpl;
 
-        let _f = std::fs::File::create("test.txt")?;
+        let mut path = std::env::temp_dir();
+        path.push("capnp_test.txt");
+        let _f = std::fs::File::create(path)?;
         let mut writer = BufWriter::new(_f);
         writer.write_all(b"Just a test file")?;
         writer.flush()?;
 
         let cap: cap_fs::Client = capnp_rpc::new_client(crate::cap_std_capnproto::CapFsImpl);
         let mut request = cap.dir_open_request();
-        request.get().set_path("");
+        let path = std::env::temp_dir();
+        request.get().set_path(path.to_str().unwrap());
         let result = futures::executor::block_on(request.send().promise);
         let dir = result?.get()?.get_dir()?;
         let mut read_request = dir.read_request();
-        read_request.get().set_path("test.txt");
+        read_request.get().set_path("capnp_test.txt");
         let res = futures::executor::block_on(read_request.send().promise)?;
         let out = res.get()?.get_result()?;
         for c in out {

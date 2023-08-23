@@ -1099,6 +1099,30 @@ mod tests {
     use crate::{cap_std_capnp::{ambient_authority, cap_fs, dir, dir_builder, dir_entry, dir_options, duration, file, file_type, instant, metadata, monotonic_clock, open_options, permissions, project_dirs, read_dir, system_clock, system_time, system_time_error, temp_dir, temp_file, user_dirs}, spawn::unix_process::UnixProcessServiceSpawnImpl, byte_stream::ByteStreamImpl};
     
 
+    #[test]
+    fn cap_std_test_open_read() -> eyre::Result<()> {
+        use std::io::{BufWriter, Write};
+        use super::FileImpl;
+
+        let mut path = std::env::temp_dir();
+        path.push("capnp_test.txt");
+        let _f = std::fs::File::create(path)?;
+        let mut writer = BufWriter::new(_f);
+        writer.write_all(b"Just a test file ")?;
+        writer.flush()?;
+
+        let mut path = std::env::temp_dir();
+        //path.push("capnp_test.txt");
+        //path.push("test");
+        let dir = cap_std::fs::Dir::open_ambient_dir(path, cap_std::ambient_authority()).unwrap();
+        //let buf = dir.open("capnp_test.txt")?;
+        //print!("{}", buf.as_os_str().to_str().unwrap());
+        let out = dir.read("capnp_test.txt")?;
+        for c in out {
+            print!("{}", c as char)
+        }
+        return Ok(())
+    }
 
     #[test]
     fn test_open_read() -> eyre::Result<()> {
@@ -1120,7 +1144,7 @@ mod tests {
         let result = futures::executor::block_on(request.send().promise);
         let dir = result?.get()?.get_dir()?;
         let mut read_request = dir.read_request();
-        read_request.get().set_path("capnp_test.txt");
+        read_request.get().set_path("./capnp_test.txt");
         let res = futures::executor::block_on(read_request.send().promise)?;
         let out = res.get()?.get_result()?;
         for c in out {

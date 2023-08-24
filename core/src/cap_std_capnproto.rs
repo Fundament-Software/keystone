@@ -1123,9 +1123,38 @@ mod tests {
         }
         return Ok(())
     }
+    #[test]
+    fn test_write() -> eyre::Result<()> {
+        //use ambient authority to open a dir, create a file(Or open it in write mode if it already exists), open a bytestream, use the bytestream to write some bytes
+        let cap: cap_fs::Client = capnp_rpc::new_client(crate::cap_std_capnproto::CapFsImpl);
 
+        let mut use_aa_request = cap.use_ambient_authority_request();
+        let res = futures::executor::block_on(use_aa_request.send().promise);
+        let ambient_authority = res?.get()?.get_ambient_authority()?;
+
+        let mut request = ambient_authority.dir_open_ambient_request();
+        let mut path = std::env::temp_dir();
+        request.get().set_path(path.to_str().unwrap());
+        let result = futures::executor::block_on(request.send().promise);
+        let dir = result?.get()?.get_result()?;
+
+        let mut create_request = dir.create_request();
+        create_request.get().set_path("capnp_test.txt");
+        let res = futures::executor::block_on(create_request.send().promise)?;
+        let file = res.get()?.get_file()?;
+
+        let mut open_bytestream_request = file.open_request();
+        let res = futures::executor::block_on(open_bytestream_request.send().promise)?;
+        let stream = res.get()?.get_stream()?;
+
+        let mut write_request = stream.write_request();
+        write_request.get().set_bytes(b" Writing some bytes test ");
+        let res = futures::executor::block_on(write_request.send().promise)?;
+        return Ok(())
+    }
     #[test]
     fn test_open_read() -> eyre::Result<()> {
+        //use ambient authority to open directory, read contents of a file as bytes and print them out
         use std::io::{BufWriter, Write};
         use super::FileImpl;
 
@@ -1135,17 +1164,18 @@ mod tests {
         let mut writer = BufWriter::new(_f);
         writer.write_all(b"Just a test file ")?;
         writer.flush()?;
-
+        
         let cap: cap_fs::Client = capnp_rpc::new_client(crate::cap_std_capnproto::CapFsImpl);
         let mut request = cap.use_ambient_authority_request();
         let r = futures::executor::block_on(request.send().promise);
         let ambient_authority = r?.get()?.get_ambient_authority()?;
-
-        let mut path = std::env::temp_dir();
+        
         let mut request = ambient_authority.dir_open_ambient_request();
+        let mut path = std::env::temp_dir();
         request.get().set_path(path.to_str().unwrap());
-        let result = futures::executor::block_on(request.send().promise);
-        let dir = result?.get()?.get_result()?;
+        let result = futures::executor::block_on(request.send().promise)?;
+        let dir = result.get()?.get_result()?;
+
         let mut read_request = dir.read_request();
         read_request.get().set_path("capnp_test.txt");
         let res = futures::executor::block_on(read_request.send().promise)?;

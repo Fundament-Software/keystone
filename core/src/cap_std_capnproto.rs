@@ -1133,32 +1133,27 @@ mod tests {
         path.push("capnp_test.txt");
         let _f = std::fs::File::create(path)?;
         let mut writer = BufWriter::new(_f);
-        writer.write_all(b"Just a test file")?;
+        writer.write_all(b"Just a test file ")?;
         writer.flush()?;
 
         let cap: cap_fs::Client = capnp_rpc::new_client(crate::cap_std_capnproto::CapFsImpl);
-        let mut request = cap.dir_open_request();
+        let mut request = cap.use_ambient_authority_request();
+        let r = futures::executor::block_on(request.send().promise);
+        let ambient_authority = r?.get()?.get_ambient_authority()?;
+
         let mut path = std::env::temp_dir();
-        path.push("capnp_test.txt");
+        let mut request = ambient_authority.dir_open_ambient_request();
         request.get().set_path(path.to_str().unwrap());
         let result = futures::executor::block_on(request.send().promise);
-        let dir = result?.get()?.get_dir()?;
+        let dir = result?.get()?.get_result()?;
         let mut read_request = dir.read_request();
-        read_request.get().set_path("./capnp_test.txt");
+        read_request.get().set_path("capnp_test.txt");
         let res = futures::executor::block_on(read_request.send().promise)?;
         let out = res.get()?.get_result()?;
         for c in out {
-            print!("{}", c)
+            print!("{}", *c as char)
         }
         return Ok(())
-        //println!("{}", out);
-
-
-        //let wrapped = FileImpl{file :cap_std::fs::File::from_std(_file)};
-        //let cap: crate::cap_std_capnproto::file::Client = capnp_rpc::new_client(wrapped);
-        
-
-        //todo!()
     }
 
 

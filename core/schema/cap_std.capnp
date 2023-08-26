@@ -100,13 +100,13 @@ interface MonotonicClock {
 
 interface SystemClock {
   now @0 () -> (time :SystemTime);
-  struct ElapsedResult {
-    union {
-      duration @0 :Duration;
-      error @1 :SystemTimeError;
-    }
-  }
-  elapsed @1 (systemTime :SystemTime) -> (result :ElapsedResult);
+  #struct ElapsedResult {
+  #  union {
+  #    duration @0 :Duration;
+  #    error @1 :SystemTimeError;
+  #  }
+  #}
+  elapsed @1 (durationSinceUnixEpoch :Duration) -> (result :Duration);
 }
 
 interface SystemTime {
@@ -204,6 +204,5 @@ interface TempDir extends(Dir) {
 
 interface TempFile {
   asFile @0 () -> (file :File);
-  asFileMut @1 () -> (file :File);
-  replace @2 (dest :Text) -> ();
+  replace @1 (dest :Text) -> ();
 }

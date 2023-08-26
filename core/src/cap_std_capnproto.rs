@@ -8,6 +8,7 @@ use capnp_rpc::pry;
 use capnp_macros::capnp_let;
 use tokio::io::{AsyncRead, AsyncReadExt};
 use crate::{cap_std_capnp::{ambient_authority, cap_fs, dir, dir_builder, dir_entry, dir_options, duration, file, file_type, instant, metadata, monotonic_clock, open_options, permissions, project_dirs, read_dir, system_clock, system_time, system_time_error, temp_dir, temp_file, user_dirs}, spawn::unix_process::UnixProcessServiceSpawnImpl, byte_stream::ByteStreamImpl};
+//use capnp::IntoResult;
 
 pub struct CapFsImpl;
 
@@ -110,7 +111,7 @@ impl ambient_authority::Server for AmbientAuthorityImpl {
     fn dir_open_parent(&mut self, _: ambient_authority::DirOpenParentParams, mut result: ambient_authority::DirOpenParentResults) -> Promise<(), Error> {
         let ambient_authority = cap_std::ambient_authority();
         let Ok(_dir) = Dir::open_parent_dir(ambient_authority) else {
-            return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to open parent dir dir using ambient authority")});
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to open parent dir using ambient authority")});
         };
         result.get().set_result(capnp_rpc::new_client(DirImpl{dir: _dir}));
         todo!()
@@ -844,19 +845,14 @@ pub struct TempFileImpl<'a> {
 }
 
 impl temp_file::Server for TempFileImpl<'_> {
-    /*fn as_file(&mut self, _: temp_file::AsFileParams, mut result: temp_file::AsFileResults) -> Promise<(), Error> {
-        let Ok(_file) = self.temp_file.as_file() else {
-
+    fn as_file(&mut self, _: temp_file::AsFileParams, mut result: temp_file::AsFileResults) -> Promise<(), Error> {
+        let _file = self.temp_file.as_file_mut();
+        let Ok(_cloned) = _file.try_clone() else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to get an owned version of the underlying file")});
         };
-        result.get().set_file(capnp_rpc::new_client(FileImpl{file: _file}));
+        result.get().set_file(capnp_rpc::new_client(FileImpl{file: _cloned}));
         Promise::ok(())
-    }
-    fn as_file_mut(&mut self, _: temp_file::AsFileMutParams,  mut result: temp_file::AsFileMutResults) -> Promise<(), Error> {
-        
-
-        result.get().set_file(capnp_rpc::new_client(FileImpl{file: _file}));
-        Promise::ok(())
-    }
+    }/*
     fn replace(&mut self, params: temp_file::ReplaceParams, _: temp_file::ReplaceResults) -> Promise<(), Error> {
         let params_reader = pry!(params.get());
         let dest = pry!(params_reader.get_dest());
@@ -991,7 +987,9 @@ impl monotonic_clock::Server for MonotonicClockImpl {
         result.get().set_instant(capnp_rpc::new_client(InstantImpl{instant: _instant}));
         Promise::ok(())
     }
-    //fn elapsed(&mut self, _: monotonic_clock::ElapsedParams, _: monotonic_clock::ElapsedResults) -> Promise<(), Error> {}
+    //fn elapsed(&mut self, _: monotonic_clock::ElapsedParams, _: monotonic_clock::ElapsedResults) -> Promise<(), Error> {
+//
+    //}
 }
 
 pub struct SystemClockImpl {
@@ -1004,9 +1002,19 @@ impl system_clock::Server for SystemClockImpl {
         result.get().set_time(capnp_rpc::new_client(SystemTimeImpl{system_time: _system_time}));
         Promise::ok(())
     }
-    /*fn elapsed(&mut self, _: system_clock::ElapsedParams, _: system_clock::ElapsedResults) -> Promise<(), Error> {
-        
-    }*/
+    fn elapsed(&mut self, params: system_clock::ElapsedParams, mut result: system_clock::ElapsedResults) -> Promise<(), Error> {
+        let params_reader = pry!(params.get());
+        capnp_let!({duration_since_unix_epoch : {secs, nanos}} = params_reader);
+        //Add duration since unix epoch to unix epoch to reconstruct a system time
+        let earlier = cap_std::time::SystemTime::from_std(std::time::UNIX_EPOCH + Duration::new(secs, nanos));
+        let Ok(_elapsed) = self.system_clock.elapsed(earlier) else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to get amount of time elapsed")});
+        };
+        let mut response = result.get().init_result();
+        response.set_secs(_elapsed.as_secs());
+        response.set_nanos(_elapsed.subsec_nanos());
+        Promise::ok(())
+    }
 }
 
 pub struct ProjectDirsImpl {
@@ -1101,6 +1109,7 @@ mod tests {
 
     #[test]
     fn cap_std_test_open_read() -> eyre::Result<()> {
+        
         use std::io::{BufWriter, Write};
         use super::FileImpl;
 
@@ -1112,11 +1121,7 @@ mod tests {
         writer.flush()?;
 
         let mut path = std::env::temp_dir();
-        //path.push("capnp_test.txt");
-        //path.push("test");
         let dir = cap_std::fs::Dir::open_ambient_dir(path, cap_std::ambient_authority()).unwrap();
-        //let buf = dir.open("capnp_test.txt")?;
-        //print!("{}", buf.as_os_str().to_str().unwrap());
         let out = dir.read("capnp_test.txt")?;
         for c in out {
             print!("{}", c as char)
@@ -1149,7 +1154,7 @@ mod tests {
 
         let mut write_request = stream.write_request();
         write_request.get().set_bytes(b" Writing some bytes test ");
-        let res = futures::executor::block_on(write_request.send().promise)?;
+        let _res = futures::executor::block_on(write_request.send().promise)?;
         return Ok(())
     }
     #[test]
@@ -1164,7 +1169,7 @@ mod tests {
         let mut writer = BufWriter::new(_f);
         writer.write_all(b"Just a test file ")?;
         writer.flush()?;
-        
+
         let cap: cap_fs::Client = capnp_rpc::new_client(crate::cap_std_capnproto::CapFsImpl);
         let mut request = cap.use_ambient_authority_request();
         let r = futures::executor::block_on(request.send().promise);

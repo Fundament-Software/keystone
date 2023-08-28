@@ -473,16 +473,20 @@ impl dir::Server for DirImpl {
         };
         Promise::ok(())
     }
-    fn set_permissions(&mut self, params: dir::SetPermissionsParams, _: dir::SetPermissionsResults) -> Promise<(), Error> {
+    fn set_readonly(&mut self, params: dir::SetReadonlyParams, _: dir::SetReadonlyResults) -> Promise<(), Error> {
         let params_reader = pry!(params.get());
         let path = pry!(params_reader.get_path());
-        let perm = pry!(params_reader.get_perm());
-
-        //let Ok(()) = self.dir.set_permissions(path, perm) else {
-        //    return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to set permissions")});
-        //};
-        //Promise::ok(())
-        todo!()
+        let readonly = params_reader.get_readonly();
+        //capnp_let!({path, readonly} = params_reader);
+        let Ok(_meta) = self.dir.metadata(path) else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to get underlying file's metadata")});
+        };
+        let mut permissions = _meta.permissions();
+        permissions.set_readonly(readonly);
+        let Ok(()) = self.dir.set_permissions(path, permissions) else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to change permissions of the underlying file")});
+        };
+        Promise::ok(())
     }
     fn symlink_metadata(&mut self, params: dir::SymlinkMetadataParams, mut result: dir::SymlinkMetadataResults) -> Promise<(), Error> {
         let params_reader = pry!(params.get());
@@ -694,14 +698,19 @@ impl file::Server for FileImpl {
         result.get().set_cloned(capnp_rpc::new_client(FileImpl{file: _file}));
         Promise::ok(())
     }
-    /*fn set_permissions(&mut self, params: file::SetPermissionsParams,  _: file::SetPermissionsResults) -> Promise<(), Error> {
-        let permissions_reader = pry!(params.get());
-        let permissions = pry!(permissions_reader.get_perm());
+    fn set_readonly(&mut self, params: file::SetReadonlyParams,  _: file::SetReadonlyResults) -> Promise<(), Error> {
+        let readonly_reader = pry!(params.get());
+        let readonly = readonly_reader.get_readonly();
+        let Ok(_meta) = self.file.metadata() else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to get file's metadata")});
+        };
+        let mut permissions = _meta.permissions();
+        permissions.set_readonly(readonly);
         let Ok(()) = self.file.set_permissions(permissions) else {
-            return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to change permissions of the underlying file")});
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to change permissions of the file")});
         };
         Promise::ok(())
-    }*/
+    }
     
     fn open(&mut self, _: file::OpenParams, mut result: file::OpenResults) -> Promise<(), Error> {
         //Not completely sure that's how byte streams work, also probably needs to use async/futures potentially rc

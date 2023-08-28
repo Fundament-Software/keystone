@@ -18,7 +18,7 @@ interface File {
   setLen @2 (size :UInt64) -> ();
   metadata @3 () -> (metadata :Metadata);
   tryClone @4 () -> (cloned :File);
-  setPermissions @5 (perm :Permissions) -> ();
+  setReadonly @5 (readonly :Bool) -> ();
   open @6 () -> (stream :Stream);
 }
 
@@ -45,7 +45,7 @@ interface Dir {
   removeOpenDirAll @19 () -> ();
   removeFile @20 (path :Text) -> ();
   rename @21 (from :Text, to :Text) -> ();
-  setPermissions @22 (path :Text, perm :Permissions) -> ();
+  setReadonly @22 (path :Text, readonly :Bool) -> ();
   symlinkMetadata @23 (path :Text) -> (metadata :Metadata);
   write @24 (path :Text, contents :Data) -> ();
   symlink @25 (original :Text, link :Text) -> ();

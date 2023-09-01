@@ -553,21 +553,24 @@ impl dir::Server for DirImpl {
         };
         //result.get().set_temp_dir(capnp_rpc::new_client(temp_dir));
         todo!()
-    }
-    fn temp_file_new(&mut self,  _: dir::TempFileNewParams, mut result: dir::TempFileNewResults) -> Promise<(), Error> {
-        let Ok(temp_file) = cap_tempfile::TempFile::new(&self.dir) else {
-            return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to create temp file")});
-        };
-        result.get().set_temp_file(capnp_rpc::new_client(temp_file));
-        Promise::ok(())
-    }
+    }*/
+    //fn temp_file_new(&mut self,  _: dir::TempFileNewParams, mut result: dir::TempFileNewResults) -> Promise<(), Error> {
+        //let Ok(_dir) = self.dir.try_clone() else {
+        //    return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to make an owned copy of the underlying dir")});
+        //};
+    //    let Ok(temp_file) = cap_tempfile::TempFile::new(&self.dir) else {
+    //        return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to create temp file")});
+    //    };
+    //    result.get().set_temp_file(capnp_rpc::new_client(TempFileImpl{temp_file: temp_file}));
+    //    Promise::ok(())
+    //}
     fn temp_file_new_anonymous(&mut self, _: dir::TempFileNewAnonymousParams, mut result: dir::TempFileNewAnonymousResults) -> Promise<(), Error> {
         let Ok(file) = cap_tempfile::TempFile::new_anonymous(&self.dir) else {
-            return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to create temp anonymous temp file")});
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to create anonymous temp file")});
         };
         result.get().set_file(capnp_rpc::new_client(FileImpl{file}));
         Promise::ok(())
-    }*/
+    }
 }
 
 pub struct ReadDirImpl {
@@ -713,8 +716,6 @@ impl file::Server for FileImpl {
     }
     
     fn open(&mut self, _: file::OpenParams, mut result: file::OpenResults) -> Promise<(), Error> {
-        //Not completely sure that's how byte streams work, also probably needs to use async/futures potentially rc
-
         let Ok(mut this) = self.file.try_clone() else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Get owned file")});
         };
@@ -841,14 +842,22 @@ impl permissions::Server for PermissionsImpl {
         Promise::ok(())
     }
 }
-/*
+
 pub struct TempDirImpl {
     temp_dir: TempDir
 }
+/*
+impl std::ops::Deref for TempDirImpl {
+    type Target = DirImpl;
 
-impl temp_dir::Server for TempDirImpl {
-
+    fn deref(&self) -> &Self::Target {
+    
+    }
 }*/
+
+//impl temp_dir::Server for TempDirImpl {
+
+//}
 pub struct TempFileImpl<'a> {
     temp_file: TempFile<'a>
 }
@@ -984,6 +993,15 @@ impl instant::Server for InstantImpl {
         result.get().set_instant(capnp_rpc::new_client(InstantImpl{instant: _instant}));
         Promise::ok(())
     }
+    //fn get_duration_since_unix_epoch(&mut self, _: instant::GetDurationSinceUnixEpochParams, mut result: instant::GetDurationSinceUnixEpochResults) -> Promise<(), Error> {
+    //    let Ok(_duration) = self.instant + std::time::UNIX_EPOCH else {
+    //        return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to get duration since unix epoch")});
+    //    };
+    //    let mut response = result.get().init_duration();
+    //    response.set_secs(_duration.as_secs());
+    //    response.set_nanos(_duration.subsec_nanos());
+    //    Promise::ok(())
+    //}
 }
 
 pub struct MonotonicClockImpl {
@@ -1117,6 +1135,344 @@ mod tests {
     
 
     #[test]
+    fn create_dir_all_canonicalize_test() -> eyre::Result<()> {
+
+        let cap: cap_fs::Client = capnp_rpc::new_client(crate::cap_std_capnproto::CapFsImpl);
+
+        let mut use_aa_request = cap.use_ambient_authority_request();
+        let ambient_authority = futures::executor::block_on(use_aa_request.send().promise)?.get()?.get_ambient_authority()?;
+        
+        let mut open_ambient_request = ambient_authority.dir_open_ambient_request();
+        let mut path = std::env::temp_dir();
+        open_ambient_request.get().set_path(path.to_str().unwrap());
+        let dir = futures::executor::block_on(open_ambient_request.send().promise)?.get()?.get_result()?;
+
+        let mut create_dir_all_request = dir.create_dir_all_request();
+        create_dir_all_request.get().set_path("test_dir/testing_recursively_creating_dirs");
+        futures::executor::block_on(create_dir_all_request.send().promise)?;
+
+        let mut canonicalize_request = dir.canonicalize_request();
+        canonicalize_request.get().set_path("test_dir/testing_recursively_creating_dirs");
+        let result = futures::executor::block_on(canonicalize_request.send().promise)?;
+        let p = result.get()?.get_path_buf()?;
+        println!("path = {p}");
+        return Ok(())
+    }
+    
+    #[test]
+    fn test_create_write_getmetadata() -> eyre::Result<()> {
+        //use ambient authority to open a dir, create a file(Or open it in write mode if it already exists), open a bytestream, use the bytestream to write some bytes, get file metadata
+        let cap: cap_fs::Client = capnp_rpc::new_client(crate::cap_std_capnproto::CapFsImpl);
+
+        let mut use_aa_request = cap.use_ambient_authority_request();
+        let ambient_authority = futures::executor::block_on(use_aa_request.send().promise)?.get()?.get_ambient_authority()?;
+
+        let mut open_ambient_request = ambient_authority.dir_open_ambient_request();
+        let mut path = std::env::temp_dir();
+        open_ambient_request.get().set_path(path.to_str().unwrap());
+        let dir = futures::executor::block_on(open_ambient_request.send().promise)?.get()?.get_result()?;
+
+        let mut create_request = dir.create_request();
+        create_request.get().set_path("capnp_test.txt");
+        let file = futures::executor::block_on(create_request.send().promise)?.get()?.get_file()?;
+
+        let mut open_bytestream_request = file.open_request();
+        let stream = futures::executor::block_on(open_bytestream_request.send().promise)?.get()?.get_stream()?;
+
+        let mut write_request = stream.write_request();
+        write_request.get().set_bytes(b" Writing some bytes test ");
+        let _res = futures::executor::block_on(write_request.send().promise)?;
+
+        let mut file_metadata_request = dir.metadata_request();
+        file_metadata_request.get().set_path("capnp_test.txt");
+        let metadata = futures::executor::block_on(file_metadata_request.send().promise)?.get()?.get_metadata()?;
+        println!("File metadata:");
+        test_metadata(metadata)?;
+
+        let mut dir_metadata_request = dir.dir_metadata_request();
+        let metadata = futures::executor::block_on(dir_metadata_request.send().promise)?.get()?.get_metadata()?;
+        println!("Dir metadata:");
+        test_metadata(metadata)?;
+
+        return Ok(())
+    }
+
+    #[test]
+    fn test_user_dirs() -> eyre::Result<()> {
+        //idk what to do with all these dirs to test that they are right but I guess it's up to cap directories
+        let cap: cap_fs::Client = capnp_rpc::new_client(crate::cap_std_capnproto::CapFsImpl);
+
+        let use_aa_request = cap.use_ambient_authority_request();
+        let ambient_authority = futures::executor::block_on(use_aa_request.send().promise)?.get()?.get_ambient_authority()?;
+
+        let home_dir_request = ambient_authority.user_dirs_home_dir_request();
+        let home_dir = futures::executor::block_on(home_dir_request.send().promise)?.get()?.get_dir()?;
+
+        let audio_dir_request = ambient_authority.user_dirs_audio_dir_request();
+        let audio_dir = futures::executor::block_on(audio_dir_request.send().promise)?.get()?.get_dir()?;
+
+        let desktop_dir_request = ambient_authority.user_dirs_desktop_dir_request();
+        let desktop_dir = futures::executor::block_on(desktop_dir_request.send().promise)?.get()?.get_dir()?;
+
+        let document_dir_request = ambient_authority.user_dirs_document_dir_request();
+        let document_dir = futures::executor::block_on(document_dir_request.send().promise)?.get()?.get_dir()?;
+
+        let download_dir_request = ambient_authority.user_dirs_download_dir_request();
+        let download_dir = futures::executor::block_on(download_dir_request.send().promise)?.get()?.get_dir()?;
+
+        //fails for some reason
+        //let font_dir_request = ambient_authority.user_dirs_font_dir_request();
+        //let font_dir = futures::executor::block_on(font_dir_request.send().promise)?.get()?.get_dir()?;
+
+        let picture_dir_request = ambient_authority.user_dirs_picture_dir_request();
+        let picture_dir = futures::executor::block_on(picture_dir_request.send().promise)?.get()?.get_dir()?;
+
+        let public_dir_request = ambient_authority.user_dirs_public_dir_request();
+        let public_dir = futures::executor::block_on(public_dir_request.send().promise)?.get()?.get_dir()?;
+
+        let template_dir_request = ambient_authority.user_dirs_template_dir_request();
+        let template_dir = futures::executor::block_on(template_dir_request.send().promise)?.get()?.get_dir()?;
+
+        let video_dir_request = ambient_authority.user_dirs_video_dir_request();
+        let video_dir = futures::executor::block_on(video_dir_request.send().promise)?.get()?.get_dir()?;
+
+        return Ok(())
+    }
+
+    #[test]
+    fn test_project_dirs() -> eyre::Result<()> {
+        todo!()
+    }
+
+    #[test]
+    fn test_system_clock() -> eyre::Result<()> {
+        let cap: cap_fs::Client = capnp_rpc::new_client(crate::cap_std_capnproto::CapFsImpl);
+
+        let use_aa_request = cap.use_ambient_authority_request();
+        let ambient_authority = futures::executor::block_on(use_aa_request.send().promise)?.get()?.get_ambient_authority()?;
+
+        let system_clock_request = ambient_authority.system_clock_new_request();
+        let system_clock = futures::executor::block_on(system_clock_request.send().promise)?.get()?.get_clock()?;
+
+        let now_request = system_clock.now_request();
+        let now = futures::executor::block_on(now_request.send().promise)?.get()?.get_time()?;
+
+        let duration_since_unix_epoch_request = now.get_duration_since_unix_epoch_request();
+        let result = futures::executor::block_on(duration_since_unix_epoch_request.send().promise)?;
+        let duration_since_unix_epoch = result.get()?.get_duration()?;
+        let secs = duration_since_unix_epoch.get_secs();
+        let nanos = duration_since_unix_epoch.get_nanos();
+        print!("\nDuration since unix epoch to now: secs:{secs} nanos:{nanos}");
+
+        print!(" waiting 5 seconds ");
+        std::thread::sleep(std::time::Duration::from_secs(5));
+
+        let mut elapsed_request = system_clock.elapsed_request();
+        let mut dur_param = elapsed_request.get().init_duration_since_unix_epoch();
+        dur_param.set_secs(secs);
+        dur_param.set_nanos(nanos);
+        let result = futures::executor::block_on(elapsed_request.send().promise)?;
+        let elapsed = result.get()?.get_result()?;
+        let secs = elapsed.get_secs();
+        let nanos = elapsed.get_nanos();
+        print!("elapsed since last: secs:{secs} nanos{nanos}\n");
+
+        return Ok(())
+    }
+
+    #[test]
+    fn test_read_dir_iterator() -> eyre::Result<()> {
+        let mut path = std::env::temp_dir();
+        path.push("capnp_test_dir");
+        std::fs::create_dir_all(path.clone())?;
+        let mut fp = path.clone();
+        fp.push("test.txt");
+        let _f = std::fs::File::create(fp)?;
+        let mut dp = path.clone();
+        dp.push("dir1");
+        std::fs::create_dir_all(dp)?;
+        path.push("dir2");
+        std::fs::create_dir_all(path)?;
+
+        let cap: cap_fs::Client = capnp_rpc::new_client(crate::cap_std_capnproto::CapFsImpl);
+        let mut use_aa_request = cap.use_ambient_authority_request();
+        let ambient_authority = futures::executor::block_on(use_aa_request.send().promise)?.get()?.get_ambient_authority()?;
+        
+        let mut open_ambient_request = ambient_authority.dir_open_ambient_request();
+        let mut path = std::env::temp_dir();
+        path.push("capnp_test_dir");
+        open_ambient_request.get().set_path(path.to_str().unwrap());
+        let dir = futures::executor::block_on(open_ambient_request.send().promise)?.get()?.get_result()?;
+
+        let entries_request = dir.entries_request();
+        let iter = futures::executor::block_on(entries_request.send().promise)?.get()?.get_iter()?;
+        loop {
+            match futures::executor::block_on(iter.next_request().send().promise){
+                Ok(result) => {
+                    println!("New entry:");
+                    let entry = result.get()?.get_entry()?;
+                    dir_entry_test(entry)?;
+                },
+                Err(result) => {
+                    println!("Final entry reached");
+                    break;
+                }
+            }
+        }
+        return Ok(())
+    }
+    
+    fn dir_entry_test(entry: dir_entry::Client) -> eyre::Result<()> {
+        println!("\nDir entry test:");
+        match futures::executor::block_on(entry.open_request().send().promise) {
+            Ok(result) => {
+                println!("Is file");
+                let file = result.get()?.get_file()?;
+            },
+            Err(result) => println!("Isn't file")
+        }
+
+        match futures::executor::block_on(entry.open_dir_request().send().promise) {
+            Ok(result) => {
+                println!("Is dir");
+                let dir = result.get()?.get_dir()?;
+            },
+            Err(result) => println!("Isn't dir")
+        }
+
+        let metadata = futures::executor::block_on(entry.metadata_request().send().promise)?.get()?.get_metadata()?;
+        test_metadata(metadata)?;
+
+        let file_type = futures::executor::block_on(entry.file_type_request().send().promise)?.get()?.get_type()?;
+        test_file_type(file_type)?;
+
+        let result = futures::executor::block_on(entry.file_name_request().send().promise)?;
+        let name = result.get()?.get_result()?;
+        println!("File/dir name: {name}");
+        return Ok(())
+    }
+
+    fn test_metadata(metadata: metadata::Client) -> eyre::Result<()> {
+        println!("\nMetadata test:");
+        let is_dir_request = metadata.is_dir_request();
+        let result = futures::executor::block_on(is_dir_request.send().promise)?.get()?.get_result();
+        println!("Is dir: {result}");
+
+        let is_file_request = metadata.is_file_request();
+        let result = futures::executor::block_on(is_file_request.send().promise)?.get()?.get_result();
+        println!("Is file: {result}");
+
+        let is_symlink_request = metadata.is_symlink_request();
+        let result = futures::executor::block_on(is_symlink_request.send().promise)?.get()?.get_result();
+        println!("Is symlink: {result}");
+
+        let len_request = metadata.len_request();
+        let result = futures::executor::block_on(len_request.send().promise)?.get()?.get_result();
+        println!("Len: {result}");
+
+        let file_type_request = metadata.file_type_request();
+        let file_type =futures::executor::block_on(file_type_request.send().promise)?.get()?.get_file_type()?;
+        test_file_type(file_type)?;
+
+        let permissions_request = metadata.permissions_request();
+        let permissions = futures::executor::block_on(permissions_request.send().promise)?.get()?.get_permissions()?;
+        test_permissions(permissions)?;
+
+        let mut modified_request = metadata.modified_request();
+        let modified_time = futures::executor::block_on(modified_request.send().promise)?.get()?.get_time()?;
+        println!("Modified time:");
+        test_system_time(modified_time)?;
+
+        let mut accessed_request = metadata.accessed_request();
+        let accessed_time = futures::executor::block_on(accessed_request.send().promise)?.get()?.get_time()?;
+        println!("Accessed time:");
+        test_system_time(accessed_time)?;
+
+        let mut created_request = metadata.created_request();
+        let created_time = futures::executor::block_on(created_request.send().promise)?.get()?.get_time()?;
+        println!("Created time:");
+        test_system_time(created_time)?;
+
+        return Ok(())
+    }
+
+    fn test_permissions(permissions: permissions::Client) -> eyre::Result<()> {
+        println!("\nPermissions test:");
+        let readonly_request = permissions.readonly_request();
+        let result = futures::executor::block_on(readonly_request.send().promise)?.get()?.get_result();
+        println!("Is readonly: {result}");
+
+        //TODO test setting readonly
+        return Ok(())
+    }
+
+    fn test_system_time(time: system_time::Client) -> eyre::Result<()> {
+        println!("\nSystem time test:");
+        //TODO test other stuff
+
+
+        let get_duration_since_unix_epoch_request = time.get_duration_since_unix_epoch_request();
+        let result = futures::executor::block_on(get_duration_since_unix_epoch_request.send().promise)?;
+        let duration = result.get()?.get_duration()?;
+        let secs = duration.get_secs();
+        let nanos = duration.get_nanos();
+        //capnp_let!({secs, nanos} = duration);
+        println!("Duration since unix epoch: secs:{secs} nanos:{nanos}");
+        return Ok(())
+    }
+
+    fn test_file_type(file_type: file_type::Client) -> eyre::Result<()> {
+        println!("\nFile type test:");
+        //TODO test creating file types
+
+        let mut is_dir_request = file_type.is_dir_request();
+        let result = futures::executor::block_on(is_dir_request.send().promise)?.get()?.get_result();
+        println!("Is dir: {result}");
+
+        let mut is_file_request = file_type.is_file_request();
+        let result = futures::executor::block_on(is_file_request.send().promise)?.get()?.get_result();
+        println!("Is file: {result}");
+
+        let mut is_symlink_request = file_type.is_symlink_request();
+        let result = futures::executor::block_on(is_symlink_request.send().promise)?.get()?.get_result();
+        println!("Is symlink: {result}");
+
+
+        return Ok(())
+    }
+
+    #[test]
+    fn test_open_read() -> eyre::Result<()> {
+        //use ambient authority to open directory, read contents of a file as bytes and print them out
+        use std::io::{BufWriter, Write};
+
+        let mut path = std::env::temp_dir();
+        path.push("capnp_test.txt");
+        let _f = std::fs::File::create(path)?;
+        let mut writer = BufWriter::new(_f);
+        writer.write_all(b"Just a test file ")?;
+        writer.flush()?;
+
+        let cap: cap_fs::Client = capnp_rpc::new_client(crate::cap_std_capnproto::CapFsImpl);
+        let mut use_aa_request = cap.use_ambient_authority_request();
+        let ambient_authority = futures::executor::block_on(use_aa_request.send().promise)?.get()?.get_ambient_authority()?;
+        
+        let mut open_ambient_request = ambient_authority.dir_open_ambient_request();
+        let mut path = std::env::temp_dir();
+        open_ambient_request.get().set_path(path.to_str().unwrap());
+        let dir = futures::executor::block_on(open_ambient_request.send().promise)?.get()?.get_result()?;
+
+        let mut read_request = dir.read_request();
+        read_request.get().set_path("capnp_test.txt");
+        let res = futures::executor::block_on(read_request.send().promise)?;
+        let out = res.get()?.get_result()?;
+        for c in out {
+            print!("{}", *c as char)
+        }
+        return Ok(())
+    }
+
+    #[test]
     fn cap_std_test_open_read() -> eyre::Result<()> {
         
         use std::io::{BufWriter, Write};
@@ -1137,69 +1493,6 @@ mod tests {
         }
         return Ok(())
     }
-    #[test]
-    fn test_write() -> eyre::Result<()> {
-        //use ambient authority to open a dir, create a file(Or open it in write mode if it already exists), open a bytestream, use the bytestream to write some bytes
-        let cap: cap_fs::Client = capnp_rpc::new_client(crate::cap_std_capnproto::CapFsImpl);
-
-        let mut use_aa_request = cap.use_ambient_authority_request();
-        let res = futures::executor::block_on(use_aa_request.send().promise);
-        let ambient_authority = res?.get()?.get_ambient_authority()?;
-
-        let mut request = ambient_authority.dir_open_ambient_request();
-        let mut path = std::env::temp_dir();
-        request.get().set_path(path.to_str().unwrap());
-        let result = futures::executor::block_on(request.send().promise);
-        let dir = result?.get()?.get_result()?;
-
-        let mut create_request = dir.create_request();
-        create_request.get().set_path("capnp_test.txt");
-        let res = futures::executor::block_on(create_request.send().promise)?;
-        let file = res.get()?.get_file()?;
-
-        let mut open_bytestream_request = file.open_request();
-        let res = futures::executor::block_on(open_bytestream_request.send().promise)?;
-        let stream = res.get()?.get_stream()?;
-
-        let mut write_request = stream.write_request();
-        write_request.get().set_bytes(b" Writing some bytes test ");
-        let _res = futures::executor::block_on(write_request.send().promise)?;
-        return Ok(())
-    }
-    #[test]
-    fn test_open_read() -> eyre::Result<()> {
-        //use ambient authority to open directory, read contents of a file as bytes and print them out
-        use std::io::{BufWriter, Write};
-        use super::FileImpl;
-
-        let mut path = std::env::temp_dir();
-        path.push("capnp_test.txt");
-        let _f = std::fs::File::create(path)?;
-        let mut writer = BufWriter::new(_f);
-        writer.write_all(b"Just a test file ")?;
-        writer.flush()?;
-
-        let cap: cap_fs::Client = capnp_rpc::new_client(crate::cap_std_capnproto::CapFsImpl);
-        let mut request = cap.use_ambient_authority_request();
-        let r = futures::executor::block_on(request.send().promise);
-        let ambient_authority = r?.get()?.get_ambient_authority()?;
-        
-        let mut request = ambient_authority.dir_open_ambient_request();
-        let mut path = std::env::temp_dir();
-        request.get().set_path(path.to_str().unwrap());
-        let result = futures::executor::block_on(request.send().promise)?;
-        let dir = result.get()?.get_result()?;
-
-        let mut read_request = dir.read_request();
-        read_request.get().set_path("capnp_test.txt");
-        let res = futures::executor::block_on(read_request.send().promise)?;
-        let out = res.get()?.get_result()?;
-        for c in out {
-            print!("{}", *c as char)
-        }
-        return Ok(())
-    }
-
 
 
 

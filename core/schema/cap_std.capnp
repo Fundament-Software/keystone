@@ -86,11 +86,12 @@ struct Duration {
 }
 
 interface Instant {
-  durationSince @0 (earlier :Instant) -> (duration :Duration);
-  checkedDurationSince @1 (earlier :Instant) -> (duration :Duration);
-  saturatingDurationSince @2 (earlier :Instant) -> (duration :Duration);
+  durationSince @0 (earlierDurationSinceUnixEpoch :Duration) -> (duration :Duration);
+  checkedDurationSince @1 (earlierDurationSinceUnixEpoch :Duration) -> (duration :Duration);
+  saturatingDurationSince @2 (earlierDurationSinceUnixEpoch :Duration) -> (duration :Duration);
   checkedAdd @3 (duration :Duration) -> (instant :Instant);
   checkedSub @4 (duration :Duration) -> (instant :Instant);
+  getDurationSinceUnixEpoch @5 () -> (duration :Duration);
 }
 
 interface MonotonicClock {

@@ -31,11 +31,11 @@ impl cap_fs::Server for CapFsImpl {
         result.get().set_builder(capnp_rpc::new_client(DirBuilderImpl{dir_builder: DirBuilder::new()}));
         Promise::ok(())
     }
-    fn options(&mut self, _: cap_fs::OptionsParams, mut result: cap_fs::OptionsResults) -> Promise<(), Error> {
+    /*fn options(&mut self, _: cap_fs::OptionsParams, mut result: cap_fs::OptionsResults) -> Promise<(), Error> {
         let _options = File::options();
         result.get().set_options(capnp_rpc::new_client(OpenOptionsImpl{open_options: _options}));
         Promise::ok(())
-    }
+    }*/
     /*
     fn temp_dir_new_in(&mut self, params: cap_fs::TempDirNewInParams, mut result: cap_fs::TempDirNewInResults) -> Promise<(), capnp::Error> {
         let dir_reader = pry!(params.get());
@@ -54,7 +54,7 @@ impl cap_fs::Server for CapFsImpl {
         let dir = pry!(dir_reader.get_dir());
 
         todo!()
-    }*/
+    } */
 }
 
 pub struct AmbientAuthorityImpl;
@@ -82,12 +82,13 @@ impl ambient_authority::Server for AmbientAuthorityImpl {
     }
     fn file_open_ambient_with(&mut self, params: ambient_authority::FileOpenAmbientWithParams, mut result: ambient_authority::FileOpenAmbientWithResults) -> Promise<(), Error> {
         let params_reader = pry!(params.get());
-        let read = params_reader.get_read();
+        /*let read = params_reader.get_read();
         let write = params_reader.get_write();
         let append = params_reader.get_append();
         let truncate = params_reader.get_truncate();
         let create = params_reader.get_create();
-        let create_new = params_reader.get_create_new();
+        let create_new = params_reader.get_create_new();*/
+        capnp_let!({open_options : {read, write, append, truncate, create, create_new}} = params_reader);
         let mut options = OpenOptions::new();
         let path = pry!(params_reader.get_path());
         options.read(read).write(write).append(append).truncate(truncate).create(create).create_new(create_new);
@@ -262,6 +263,7 @@ impl ambient_authority::Server for AmbientAuthorityImpl {
         result.get().set_temp_dir(capnp_rpc::new_client(...));
         todo!()
     }*/
+    
 }
 
 pub struct DirImpl {
@@ -281,12 +283,13 @@ impl dir::Server for DirImpl {
     }
     fn open_with(&mut self, params: dir::OpenWithParams, mut result: dir::OpenWithResults) -> Promise<(), Error> {
         let params_reader = pry!(params.get());
-        let read = params_reader.get_read();
+        /*let read = params_reader.get_read();
         let write = params_reader.get_write();
         let append = params_reader.get_append();
         let truncate = params_reader.get_truncate();
         let create = params_reader.get_create();
-        let create_new = params_reader.get_create_new();
+        let create_new = params_reader.get_create_new();*/
+        capnp_let!({open_options : {read, write, append, truncate, create, create_new}} = params_reader);
         let mut options = OpenOptions::new();
         let path = pry!(params_reader.get_path());
         options.read(read).write(write).append(append).truncate(truncate).create(create).create_new(create_new);
@@ -554,16 +557,16 @@ impl dir::Server for DirImpl {
         //result.get().set_temp_dir(capnp_rpc::new_client(temp_dir));
         todo!()
     }*/
-    //fn temp_file_new(&mut self,  _: dir::TempFileNewParams, mut result: dir::TempFileNewResults) -> Promise<(), Error> {
+    /*fn temp_file_new(&mut self,  _: dir::TempFileNewParams, mut result: dir::TempFileNewResults) -> Promise<(), Error> {
         //let Ok(_dir) = self.dir.try_clone() else {
         //    return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to make an owned copy of the underlying dir")});
         //};
-    //    let Ok(temp_file) = cap_tempfile::TempFile::new(&self.dir) else {
-    //        return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to create temp file")});
-    //    };
-    //    result.get().set_temp_file(capnp_rpc::new_client(TempFileImpl{temp_file: temp_file}));
-    //    Promise::ok(())
-    //}
+        let Ok(temp_file) = cap_tempfile::TempFile::new(&self.dir) else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to create temp file")});
+        };
+        result.get().set_temp_file(capnp_rpc::new_client(TempFileImpl{temp_file: temp_file}));
+        Promise::ok(())
+    }*/
     fn temp_file_new_anonymous(&mut self, _: dir::TempFileNewAnonymousParams, mut result: dir::TempFileNewAnonymousResults) -> Promise<(), Error> {
         let Ok(file) = cap_tempfile::TempFile::new_anonymous(&self.dir) else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to create anonymous temp file")});
@@ -605,12 +608,13 @@ impl dir_entry::Server for DirEntryImpl {
     
     fn open_with(&mut self, params: dir_entry::OpenWithParams, mut result: dir_entry::OpenWithResults) -> Promise<(), Error> {
         let params_reader = pry!(params.get());
-        let read = params_reader.get_read();
+        /*let read = params_reader.get_read();
         let write = params_reader.get_write();
         let append = params_reader.get_append();
         let truncate = params_reader.get_truncate();
         let create = params_reader.get_create();
-        let create_new = params_reader.get_create_new();
+        let create_new = params_reader.get_create_new();*/
+        capnp_let!({open_options : {read, write, append, truncate, create, create_new}} = params_reader);
         let mut options = OpenOptions::new();
         options.read(read).write(write).append(append).truncate(truncate).create(create).create_new(create_new);
         let Ok(_file) = self.entry.open_with(&options) else {
@@ -889,13 +893,13 @@ impl dir_builder::Server for DirBuilderImpl {
 
 }
 
-pub struct OpenOptionsImpl {
+/*pub struct OpenOptionsImpl {
     open_options: OpenOptions
 }
 
 impl open_options::Server for OpenOptionsImpl {
 
-}
+}*/
 
 pub struct SystemTimeImpl {
     system_time: SystemTime
@@ -1086,6 +1090,8 @@ impl project_dirs::Server for ProjectDirsImpl {
     }
 }
 
+
+//Importing IntoResult from capnp causes weird things with rust analyzer for some reason but seemingly builds/works fine
 pub type Result<T> = ::core::result::Result<T, Error>;
 
 pub trait IntoResult {
@@ -1113,7 +1119,14 @@ impl IntoResult for u32 {
         Ok(self)
     }
 }
-/* 
+
+impl IntoResult for bool {
+    type InnerType = bool;
+    fn into_result(self) -> Result<Self::InnerType> {
+        Ok(self)
+    }
+}
+/*
 impl<T: capnp::introspect::Introspect> IntoResult for T {
     type InnerType = Self;
     fn into_result(self) -> Result<Self::InnerType> {

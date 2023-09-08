@@ -24,7 +24,7 @@ interface File {
 
 interface Dir {
   open @0 (path :Text) -> (file :File);
-  openWith @1 (path :Text, read :Bool, write :Bool, append :Bool, truncate :Bool, create :Bool, createNew :Bool) -> (file :File);
+  openWith @1 (path :Text, openOptions :OpenOptions) -> (file :File);
   createDir @2 (path :Text) -> ();
   createDirAll @3 (path :Text) -> ();
   createDirWith @4 (path :Text, dirBuilder :DirBuilder) -> ();
@@ -140,14 +140,23 @@ interface ReadDir {
   next @0 () -> (entry :DirEntry);
 }
 
-interface OpenOptions {
-  read @0 (read :Bool) -> (openOptions :OpenOptions);
-  write @1 (write :Bool) -> (openOptions :OpenOptions);
-  append @2 (append :Bool) -> (openOptions :OpenOptions);
-  truncate @3 (truncate :Bool) -> (openOptions :OpenOptions);
-  create @4 (create :Bool) -> (openOptions :OpenOptions);
-  createNew @5 (createNew :Bool) -> (openOptions :OpenOptions);
+struct OpenOptions {
+  read @0 :Bool;
+  write @1 :Bool;
+  append @2 :Bool;
+  truncate @3 :Bool;
+  create @4 :Bool;
+  createNew @5 :Bool;
 }
+
+#interface OpenOptions {
+#  read @0 (read :Bool) -> (openOptions :OpenOptions);
+#  write @1 (write :Bool) -> (openOptions :OpenOptions);
+#  append @2 (append :Bool) -> (openOptions :OpenOptions);
+#  truncate @3 (truncate :Bool) -> (openOptions :OpenOptions);
+#  create @4 (create :Bool) -> (openOptions :OpenOptions);
+#  createNew @5 (createNew :Bool) -> (openOptions :OpenOptions);
+#}
 
 interface DirOptions {
 
@@ -155,7 +164,7 @@ interface DirOptions {
 
 interface DirEntry {
   open @0 () -> (file :File);
-  openWith @1 (read :Bool, write :Bool, append :Bool, truncate :Bool, create :Bool, createNew :Bool) -> (file :File);
+  openWith @1 (openOptions :OpenOptions) -> (file :File);
   openDir @2 () -> (dir :Dir);
   removeFile @3 () -> ();
   removeDir @4 () -> ();
@@ -167,7 +176,7 @@ interface DirEntry {
 interface AmbientAuthority {
   fileOpenAmbient @0 (path :Text) -> (file :File);
   fileCreateAmbient @1 (path :Text) -> (file :File);
-  fileOpenAmbientWith @2 (path :Text, read :Bool, write :Bool, append :Bool, truncate :Bool, create :Bool, createNew :Bool) -> (file :File);
+  fileOpenAmbientWith @2 (path :Text, openOptions :OpenOptions) -> (file :File);
   dirOpenAmbient @3 (path :Text) -> (result :Dir);
   dirOpenParent @4 () -> (result :Dir);
   dirCreateAmbientAll @5 (path :Text) -> ();

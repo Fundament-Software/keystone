@@ -3,11 +3,9 @@
 interface CapFs {
   useAmbientAuthority @0 () -> (ambientAuthority :AmbientAuthority);
   dirOpen @1 (path :Text) -> (dir :Dir);
-  dirBuilderNew @2 () -> (builder :DirBuilder);
-  options @3 () -> (options :OpenOptions);
-  #tempDirNewIn @4 (dir :Dir) -> (tempDir :TempDir);
-  #tempFileNew @5 (dir :Dir) -> (tempFile :TempFile);
-  #tempFileNewAnonymous @6 (dir :Dir) -> (file :File);
+  #tempDirNewIn @2 (dir :Dir) -> (tempDir :TempDir);
+  #tempFileNew @3 (dir :Dir) -> (tempFile :TempFile);
+  #tempFileNewAnonymous @4 (dir :Dir) -> (file :File);
 }
 
 using Stream = import "std/byte_stream.capnp".ByteStream;
@@ -27,40 +25,37 @@ interface Dir {
   openWith @1 (path :Text, openOptions :OpenOptions) -> (file :File);
   createDir @2 (path :Text) -> ();
   createDirAll @3 (path :Text) -> ();
-  createDirBuilderForDir @4 (path :Text) -> (dirBuilder :DirBuilder);
-  create @5 (path :Text) -> (file :File);
-  canonicalize @6 (path :Text) -> (pathBuf :Text);
-  copy @7 (pathFrom :Text, pathTo :Text) -> (result :UInt64);
-  hardLink @8 (srcPath :Text, dstPath :Text) -> ();
-  metadata @9 (path :Text) -> (metadata :Metadata);
-  dirMetadata @10 () -> (metadata :Metadata);
-  entries @11 () -> (iter :ReadDir);
-  readDir @12 (path :Text) -> (iter :ReadDir);
-  read @13 (path :Text) -> (result :Data);
-  readLink @14 (path :Text) -> (result :Text);
-  readToString @15 (path :Text) -> (result :Text);
-  removeDir @16 (path :Text) -> ();
-  removeDirAll @17 (path :Text) -> ();
-  removeOpenDir @18 () -> ();
-  removeOpenDirAll @19 () -> ();
-  removeFile @20 (path :Text) -> ();
-  rename @21 (from :Text, to :Text) -> ();
-  setReadonly @22 (path :Text, readonly :Bool) -> ();
-  symlinkMetadata @23 (path :Text) -> (metadata :Metadata);
-  write @24 (path :Text, contents :Data) -> ();
-  symlink @25 (original :Text, link :Text) -> ();
+  create @4 (path :Text) -> (file :File);
+  canonicalize @5 (path :Text) -> (pathBuf :Text);
+  copy @6 (pathFrom :Text, pathTo :Text) -> (result :UInt64);
+  hardLink @7 (srcPath :Text, dstPath :Text) -> ();
+  metadata @8 (path :Text) -> (metadata :Metadata);
+  dirMetadata @9 () -> (metadata :Metadata);
+  entries @10 () -> (iter :ReadDir);
+  readDir @11 (path :Text) -> (iter :ReadDir);
+  read @12 (path :Text) -> (result :Data);
+  readLink @13 (path :Text) -> (result :Text);
+  readToString @14 (path :Text) -> (result :Text);
+  removeDir @15 (path :Text) -> ();
+  removeDirAll @16 (path :Text) -> ();
+  removeOpenDir @17 () -> ();
+  removeOpenDirAll @18 () -> ();
+  removeFile @19 (path :Text) -> ();
+  rename @20 (from :Text, to :Text) -> ();
+  setReadonly @21 (path :Text, readonly :Bool) -> ();
+  symlinkMetadata @22 (path :Text) -> (metadata :Metadata);
+  write @23 (path :Text, contents :Data) -> ();
+  symlink @24 (original :Text, link :Text) -> ();
 
   #Several unimplemented unix functions in cap std
   
-  #tryClone @26 () -> (directory :Directory);
-  exists @26 (path :Text) -> (result :Bool);
-  tryExists @27 (path :Text) -> (result :Bool);
-  isFile @28 (path :Text) -> (result :Bool);
-  isDir @29 (path :Text) -> (result :Bool);
-  tempDirNewIn @30 () -> (tempDir :TempDir);
-  tempFileNew @31 () -> (tempFile :TempFile);
-  tempFileNewAnonymous @32 () -> (file :File);
-  #reopenDir @31 (dir :Filelike) -> (result :Dir); #Filelike = primitive type trait thing
+  exists @25 (path :Text) -> (result :Bool);
+  tryExists @26 (path :Text) -> (result :Bool);
+  isFile @27 (path :Text) -> (result :Bool);
+  isDir @28 (path :Text) -> (result :Bool);
+  tempDirNewIn @29 () -> (tempDir :TempDir);
+  tempFileNew @30 () -> (tempFile :TempFile);
+  tempFileNewAnonymous @31 () -> (file :File);
 }
 
 interface Permissions {
@@ -101,12 +96,6 @@ interface MonotonicClock {
 
 interface SystemClock {
   now @0 () -> (time :SystemTime);
-  #struct ElapsedResult {
-  #  union {
-  #    duration @0 :Duration;
-  #    error @1 :SystemTimeError;
-  #  }
-  #}
   elapsed @1 (durationSinceUnixEpoch :Duration) -> (result :Duration);
 }
 
@@ -119,13 +108,6 @@ interface SystemTime {
 
 interface SystemTimeError {
   duration @0 () -> (duration :Duration);
-}
-
-interface DirBuilder {
-  setRecursive @0 (recursive :Bool) -> (builder :DirBuilder);
-  options @1 () -> (options :DirOptions);
-  isRecursive @2 () -> (result :Bool);
-  createDirWith @3 (path :Text) -> ();
 }
 
 interface FileType {
@@ -158,10 +140,6 @@ struct OpenOptions {
 #  create @4 (create :Bool) -> (openOptions :OpenOptions);
 #  createNew @5 (createNew :Bool) -> (openOptions :OpenOptions);
 #}
-
-interface DirOptions {
-
-}
 
 interface DirEntry {
   open @0 () -> (file :File);

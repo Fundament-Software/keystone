@@ -7,7 +7,7 @@ use capnp::{capability::{Promise, Response}, ErrorKind, Error, io::Write};
 use capnp_rpc::pry;
 use capnp_macros::capnp_let;
 use tokio::io::{AsyncRead, AsyncReadExt};
-use crate::{cap_std_capnp::{ambient_authority, cap_fs, dir, dir_builder, dir_entry, dir_options, duration, file, file_type, instant, metadata, monotonic_clock, open_options, permissions, project_dirs, read_dir, system_clock, system_time, system_time_error, temp_dir, temp_file, user_dirs}, spawn::unix_process::UnixProcessServiceSpawnImpl, byte_stream::ByteStreamImpl};
+use crate::{cap_std_capnp::{ambient_authority, cap_fs, dir, dir_entry, duration, file, file_type, instant, metadata, monotonic_clock, open_options, permissions, project_dirs, read_dir, system_clock, system_time, system_time_error, temp_dir, temp_file, user_dirs}, spawn::unix_process::UnixProcessServiceSpawnImpl, byte_stream::ByteStreamImpl};
 //use capnp::IntoResult;
 
 pub struct CapFsImpl;
@@ -27,15 +27,6 @@ impl cap_fs::Server for CapFsImpl {
         result.get().set_dir(capnp_rpc::new_client(dir));
         Promise::ok(())
     }
-    //fn dir_builder_new(&mut self, _: cap_fs::DirBuilderNewParams, mut result: cap_fs::DirBuilderNewResults) -> Promise<(), Error> {
-    //    result.get().set_builder(capnp_rpc::new_client(DirBuilderImpl{dir_builder: DirBuilder::new()}));
-    //    Promise::ok(())
-    //}
-    /*fn options(&mut self, _: cap_fs::OptionsParams, mut result: cap_fs::OptionsResults) -> Promise<(), Error> {
-        let _options = File::options();
-        result.get().set_options(capnp_rpc::new_client(OpenOptionsImpl{open_options: _options}));
-        Promise::ok(())
-    }*/
     /*
     fn temp_dir_new_in(&mut self, params: cap_fs::TempDirNewInParams, mut result: cap_fs::TempDirNewInResults) -> Promise<(), capnp::Error> {
         let dir_reader = pry!(params.get());
@@ -313,13 +304,6 @@ impl dir::Server for DirImpl {
         let Ok(_dir) = self.dir.create_dir_all(path) else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to create dir(all)")});
         };
-        Promise::ok(())
-    }
-    fn create_dir_builder_for_dir(&mut self, _: dir::CreateDirBuilderForDirParams, mut result: dir::CreateDirBuilderForDirResults) -> Promise<(), Error> {
-        let Ok(_dir) = self.dir.try_clone() else {
-            return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to clone underlying dir")});
-        };
-        result.get().set_dir_builder(capnp_rpc::new_client(DirBuilderImpl{dir: _dir, dir_builder: DirBuilder::new()}));
         Promise::ok(())
     }
     fn create(&mut self, params: dir::CreateParams, mut result: dir::CreateResults) -> Promise<(), Error> {
@@ -889,35 +873,6 @@ impl temp_file::Server for TempFileImpl<'_> {
     }*/
 }
 
-pub struct DirBuilderImpl {
-    dir: Dir,
-    dir_builder: DirBuilder
-}
-
-impl dir_builder::Server for DirBuilderImpl {
-    fn set_recursive(&mut self, params: dir_builder::SetRecursiveParams, _: dir_builder::SetRecursiveResults) -> Promise<(), Error> {
-        let params_reader = pry!(params.get());
-        let recursive = params_reader.get_recursive();
-        self.dir_builder.recursive(recursive);
-        Promise::ok(())
-    }
-    fn options(&mut self, _: dir_builder::OptionsParams, _: dir_builder::OptionsResults) -> Promise<(), Error> {
-        
-        todo!()
-    }
-    fn is_recursive(&mut self, _: dir_builder::IsRecursiveParams, mut result: dir_builder::IsRecursiveResults) -> Promise<(), Error> {
-        result.get().set_result(self.dir_builder.is_recursive());
-        Promise::ok(())
-    }
-    fn create_dir_with(&mut self, params: dir_builder::CreateDirWithParams, _: dir_builder::CreateDirWithResults) -> Promise<(), Error> {
-        let params_reader = pry!(params.get());
-        let path = pry!(params_reader.get_path());
-        let Ok(()) = self.dir.create_dir_with(path, &self.dir_builder) else {
-            return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to create dir with given builder")});
-        };
-        Promise::ok(())
-    }
-}
 
 /*pub struct OpenOptionsImpl {
     open_options: OpenOptions
@@ -1170,7 +1125,7 @@ mod tests {
     use capnp_rpc::pry;
     use capnp_macros::capnp_let;
     use tokio::io::{AsyncRead, AsyncReadExt};
-    use crate::{cap_std_capnp::{ambient_authority, cap_fs, dir, dir_builder, dir_entry, dir_options, duration, file, file_type, instant, metadata, monotonic_clock, open_options, permissions, project_dirs, read_dir, system_clock, system_time, system_time_error, temp_dir, temp_file, user_dirs}, spawn::unix_process::UnixProcessServiceSpawnImpl, byte_stream::ByteStreamImpl};
+    use crate::{cap_std_capnp::{ambient_authority, cap_fs, dir, dir_entry, duration, file, file_type, instant, metadata, monotonic_clock, open_options, permissions, project_dirs, read_dir, system_clock, system_time, system_time_error, temp_dir, temp_file, user_dirs}, spawn::unix_process::UnixProcessServiceSpawnImpl, byte_stream::ByteStreamImpl};
     
 
     #[test]

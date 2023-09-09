@@ -27,10 +27,10 @@ impl cap_fs::Server for CapFsImpl {
         result.get().set_dir(capnp_rpc::new_client(dir));
         Promise::ok(())
     }
-    fn dir_builder_new(&mut self, _: cap_fs::DirBuilderNewParams, mut result: cap_fs::DirBuilderNewResults) -> Promise<(), Error> {
-        result.get().set_builder(capnp_rpc::new_client(DirBuilderImpl{dir_builder: DirBuilder::new()}));
-        Promise::ok(())
-    }
+    //fn dir_builder_new(&mut self, _: cap_fs::DirBuilderNewParams, mut result: cap_fs::DirBuilderNewResults) -> Promise<(), Error> {
+    //    result.get().set_builder(capnp_rpc::new_client(DirBuilderImpl{dir_builder: DirBuilder::new()}));
+    //    Promise::ok(())
+    //}
     /*fn options(&mut self, _: cap_fs::OptionsParams, mut result: cap_fs::OptionsResults) -> Promise<(), Error> {
         let _options = File::options();
         result.get().set_options(capnp_rpc::new_client(OpenOptionsImpl{open_options: _options}));
@@ -315,8 +315,12 @@ impl dir::Server for DirImpl {
         };
         Promise::ok(())
     }
-    fn create_dir_with(&mut self, _: dir::CreateDirWithParams, _: dir::CreateDirWithResults) -> Promise<(), Error> {
-        todo!()
+    fn create_dir_builder_for_dir(&mut self, _: dir::CreateDirBuilderForDirParams, mut result: dir::CreateDirBuilderForDirResults) -> Promise<(), Error> {
+        let Ok(_dir) = self.dir.try_clone() else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to clone underlying dir")});
+        };
+        result.get().set_dir_builder(capnp_rpc::new_client(DirBuilderImpl{dir: _dir, dir_builder: DirBuilder::new()}));
+        Promise::ok(())
     }
     fn create(&mut self, params: dir::CreateParams, mut result: dir::CreateResults) -> Promise<(), Error> {
         let path_reader = pry!(params.get());
@@ -886,11 +890,33 @@ impl temp_file::Server for TempFileImpl<'_> {
 }
 
 pub struct DirBuilderImpl {
+    dir: Dir,
     dir_builder: DirBuilder
 }
 
 impl dir_builder::Server for DirBuilderImpl {
-
+    fn set_recursive(&mut self, params: dir_builder::SetRecursiveParams, _: dir_builder::SetRecursiveResults) -> Promise<(), Error> {
+        let params_reader = pry!(params.get());
+        let recursive = params_reader.get_recursive();
+        self.dir_builder.recursive(recursive);
+        Promise::ok(())
+    }
+    fn options(&mut self, _: dir_builder::OptionsParams, _: dir_builder::OptionsResults) -> Promise<(), Error> {
+        
+        todo!()
+    }
+    fn is_recursive(&mut self, _: dir_builder::IsRecursiveParams, mut result: dir_builder::IsRecursiveResults) -> Promise<(), Error> {
+        result.get().set_result(self.dir_builder.is_recursive());
+        Promise::ok(())
+    }
+    fn create_dir_with(&mut self, params: dir_builder::CreateDirWithParams, _: dir_builder::CreateDirWithResults) -> Promise<(), Error> {
+        let params_reader = pry!(params.get());
+        let path = pry!(params_reader.get_path());
+        let Ok(()) = self.dir.create_dir_with(path, &self.dir_builder) else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to create dir with given builder")});
+        };
+        Promise::ok(())
+    }
 }
 
 /*pub struct OpenOptionsImpl {

@@ -27,7 +27,7 @@ interface Dir {
   openWith @1 (path :Text, openOptions :OpenOptions) -> (file :File);
   createDir @2 (path :Text) -> ();
   createDirAll @3 (path :Text) -> ();
-  createDirWith @4 (path :Text, dirBuilder :DirBuilder) -> ();
+  createDirBuilderForDir @4 (path :Text) -> (dirBuilder :DirBuilder);
   create @5 (path :Text) -> (file :File);
   canonicalize @6 (path :Text) -> (pathBuf :Text);
   copy @7 (pathFrom :Text, pathTo :Text) -> (result :UInt64);
@@ -122,9 +122,10 @@ interface SystemTimeError {
 }
 
 interface DirBuilder {
-  recursive @0 (recursive :Bool) -> (builder :DirBuilder);
+  setRecursive @0 (recursive :Bool) -> (builder :DirBuilder);
   options @1 () -> (options :DirOptions);
   isRecursive @2 () -> (result :Bool);
+  createDirWith @3 (path :Text) -> ();
 }
 
 interface FileType {

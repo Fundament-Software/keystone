@@ -834,22 +834,22 @@ impl permissions::Server for PermissionsImpl {
         Promise::ok(())
     }
 }
-
+/* 
 pub struct TempDirImpl {
     temp_dir: TempDir
 }
-/*
+
 impl std::ops::Deref for TempDirImpl {
     type Target = DirImpl;
 
     fn deref(&self) -> &Self::Target {
-    
+        return self as &DirImpl
     }
+}
+
+impl temp_dir::Server for TempDirImpl {
+
 }*/
-
-//impl temp_dir::Server for TempDirImpl {
-
-//}
 pub struct TempFileImpl<'a> {
     temp_file: TempFile<'a>
 }
@@ -1214,7 +1214,7 @@ mod tests {
         let download_dir_request = ambient_authority.user_dirs_download_dir_request();
         let download_dir = futures::executor::block_on(download_dir_request.send().promise)?.get()?.get_dir()?;
 
-        //fails for some reason
+        //TODO font dir doesn't seem to exist on windows
         //let font_dir_request = ambient_authority.user_dirs_font_dir_request();
         //let font_dir = futures::executor::block_on(font_dir_request.send().promise)?.get()?.get_dir()?;
 
@@ -1235,7 +1235,36 @@ mod tests {
 
     #[test]
     fn test_project_dirs() -> eyre::Result<()> {
-        todo!()
+        //TODO maybe create some form of generic "dir" test
+        let cap: cap_fs::Client = capnp_rpc::new_client(crate::cap_std_capnproto::CapFsImpl);
+
+        let use_aa_request = cap.use_ambient_authority_request();
+        let ambient_authority = futures::executor::block_on(use_aa_request.send().promise)?.get()?.get_ambient_authority()?;
+
+        let mut project_dirs_from_request = ambient_authority.project_dirs_from_request();
+        let mut project_dirs_builder = project_dirs_from_request.get();
+        project_dirs_builder.set_qualifier("");
+        project_dirs_builder.set_organization("Fundament software");
+        project_dirs_builder.set_application("Keystone");
+        let project_dirs = futures::executor::block_on(project_dirs_from_request.send().promise)?.get()?.get_project_dirs()?;
+        
+        let cache_dir_request = project_dirs.cache_dir_request();
+        let cache_dir = futures::executor::block_on(cache_dir_request.send().promise)?.get()?.get_dir()?;
+
+        let config_dir_request = project_dirs.config_dir_request();
+        let config_dir = futures::executor::block_on(config_dir_request.send().promise)?.get()?.get_dir()?;
+
+        let data_dir_request = project_dirs.data_dir_request();
+        let data_dir = futures::executor::block_on(data_dir_request.send().promise)?.get()?.get_dir()?;
+
+        let data_local_dir_request = project_dirs.data_local_dir_request();
+        let data_local_dir = futures::executor::block_on(data_local_dir_request.send().promise)?.get()?.get_dir()?;
+
+        //TODO Runtime directory seems to not exist on windows
+        //let runtime_dir_request = project_dirs.runtime_dir_request();
+        //let runtime_dir = futures::executor::block_on(runtime_dir_request.send().promise)?.get()?.get_dir()?;
+
+        return Ok(())
     }
 
     #[test]

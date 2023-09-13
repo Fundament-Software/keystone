@@ -110,13 +110,10 @@ interface SystemTimeError {
   duration @0 () -> (duration :Duration);
 }
 
-interface FileType {
-  dir @0 () -> (fileType :FileType);
-  file @1 () -> (fileType :FileType);
-  unknown @2 () -> (fileType :FileType);
-  isDir @3 () -> (result :Bool);
-  isFile @4 () -> (result :Bool);
-  isSymlink @5 () -> (result :Bool);
+enum FileType {
+  dir @0;
+  file @1;
+  symlink @2;
 }
 
 interface ReadDir {

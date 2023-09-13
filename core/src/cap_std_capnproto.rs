@@ -1,13 +1,13 @@
 use std::{path::Path};
 
-use cap_std::{fs::{Dir, DirBuilder, File, Metadata, ReadDir, Permissions, OpenOptions, DirEntry, FileType}, time::{MonotonicClock, SystemClock, SystemTime, Duration, Instant}};
+use cap_std::{fs::{Dir, DirBuilder, File, Metadata, ReadDir, Permissions, OpenOptions, DirEntry}, time::{MonotonicClock, SystemClock, SystemTime, Duration, Instant}};
 use cap_tempfile::{TempFile, TempDir};
 use cap_directories::{self, UserDirs, ProjectDirs};
 use capnp::{capability::{Promise, Response}, ErrorKind, Error, io::Write};
 use capnp_rpc::pry;
 use capnp_macros::capnp_let;
 use tokio::io::{AsyncRead, AsyncReadExt};
-use crate::{cap_std_capnp::{ambient_authority, cap_fs, dir, dir_entry, duration, file, file_type, instant, metadata, monotonic_clock, open_options, permissions, project_dirs, read_dir, system_clock, system_time, system_time_error, temp_dir, temp_file, user_dirs}, spawn::unix_process::UnixProcessServiceSpawnImpl, byte_stream::ByteStreamImpl};
+use crate::{cap_std_capnp::{ambient_authority, cap_fs, dir, dir_entry, duration, file, FileType, instant, metadata, monotonic_clock, open_options, permissions, project_dirs, read_dir, system_clock, system_time, system_time_error, temp_dir, temp_file, user_dirs}, spawn::unix_process::UnixProcessServiceSpawnImpl, byte_stream::ByteStreamImpl};
 //use capnp::IntoResult;
 
 pub struct CapFsImpl;
@@ -641,7 +641,11 @@ impl dir_entry::Server for DirEntryImpl {
         let Ok(_file_type) = self.entry.file_type() else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to get file type")});
         };
-        result.get().set_type(capnp_rpc::new_client(FileTypeImpl{file_type: _file_type}));
+        let _type: FileType = if _file_type.is_dir() {FileType::Dir} else if _file_type.is_file() {FileType::File} else if _file_type.is_symlink() {FileType::Symlink} 
+        else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Unknown file type")})
+        };
+        result.get().set_type(_type);
         Promise::ok(())
     }
     fn file_name(&mut self, _: dir_entry::FileNameParams, mut result: dir_entry::FileNameResults) -> Promise<(), Error> {
@@ -728,8 +732,12 @@ pub struct MetadataImpl {
 
 impl metadata::Server for MetadataImpl {
     fn file_type(&mut self, _: metadata::FileTypeParams, mut result: metadata::FileTypeResults) -> Promise<(), Error> {
-        let _type = self.metadata.file_type();
-        result.get().set_file_type(capnp_rpc::new_client(FileTypeImpl{file_type: _type}));
+        let _file_type = self.metadata.file_type();
+        let _type: FileType = if _file_type.is_dir() {FileType::Dir} else if _file_type.is_file() {FileType::File} else if _file_type.is_symlink() {FileType::Symlink} 
+        else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Unknown file type")})
+        };
+        result.get().set_file_type(_type);
         Promise::ok(())
     }
     fn is_dir(&mut self, _: metadata::IsDirParams, mut result: metadata::IsDirResults) -> Promise<(), Error> {
@@ -779,7 +787,7 @@ impl metadata::Server for MetadataImpl {
         Promise::ok(())
     }
 }
-
+/* 
 pub struct FileTypeImpl {
     file_type: FileType
 }
@@ -815,7 +823,7 @@ impl file_type::Server for FileTypeImpl {
         result.get().set_result(is_symlink);
         Promise::ok(())
     }
-}
+}*/
 
 pub struct PermissionsImpl {
     permissions: Permissions
@@ -1119,13 +1127,13 @@ impl<T: capnp::introspect::Introspect> IntoResult for T {
 mod tests {
     use std::{path::Path};
 
-    use cap_std::{fs::{Dir, DirBuilder, File, Metadata, ReadDir, Permissions, OpenOptions, DirEntry, FileType}, time::{MonotonicClock, SystemClock, SystemTime, Duration, Instant}};
+    use cap_std::{fs::{Dir, DirBuilder, File, Metadata, ReadDir, Permissions, OpenOptions, DirEntry}, time::{MonotonicClock, SystemClock, SystemTime, Duration, Instant}};
     use cap_tempfile::{TempFile, TempDir};
     use cap_directories::{self, UserDirs, ProjectDirs};
     use capnp_rpc::pry;
     use capnp_macros::capnp_let;
     use tokio::io::{AsyncRead, AsyncReadExt};
-    use crate::{cap_std_capnp::{ambient_authority, cap_fs, dir, dir_entry, duration, file, file_type, instant, metadata, monotonic_clock, open_options, permissions, project_dirs, read_dir, system_clock, system_time, system_time_error, temp_dir, temp_file, user_dirs}, spawn::unix_process::UnixProcessServiceSpawnImpl, byte_stream::ByteStreamImpl};
+    use crate::{cap_std_capnp::{ambient_authority, cap_fs, dir, dir_entry, duration, file, FileType, instant, metadata, monotonic_clock, open_options, permissions, project_dirs, read_dir, system_clock, system_time, system_time_error, temp_dir, temp_file, user_dirs}, spawn::unix_process::UnixProcessServiceSpawnImpl, byte_stream::ByteStreamImpl};
     
 
     #[test]
@@ -1367,7 +1375,7 @@ mod tests {
         test_metadata(metadata)?;
 
         let file_type = futures::executor::block_on(entry.file_type_request().send().promise)?.get()?.get_type()?;
-        test_file_type(file_type)?;
+        println!("File type = {:?}", file_type);
 
         let result = futures::executor::block_on(entry.file_name_request().send().promise)?;
         let name = result.get()?.get_result()?;
@@ -1395,7 +1403,7 @@ mod tests {
 
         let file_type_request = metadata.file_type_request();
         let file_type =futures::executor::block_on(file_type_request.send().promise)?.get()?.get_file_type()?;
-        test_file_type(file_type)?;
+        println!("File type = {:?}", file_type);
 
         let permissions_request = metadata.permissions_request();
         let permissions = futures::executor::block_on(permissions_request.send().promise)?.get()?.get_permissions()?;
@@ -1443,7 +1451,7 @@ mod tests {
         println!("Duration since unix epoch: secs:{secs} nanos:{nanos}");
         return Ok(())
     }
-
+/* 
     fn test_file_type(file_type: file_type::Client) -> eyre::Result<()> {
         println!("\nFile type test:");
         //TODO test creating file types
@@ -1462,7 +1470,7 @@ mod tests {
 
 
         return Ok(())
-    }
+    }*/
 
     #[test]
     fn test_open_read() -> eyre::Result<()> {

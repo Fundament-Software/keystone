@@ -73,12 +73,6 @@ impl ambient_authority::Server for AmbientAuthorityImpl {
     }
     fn file_open_ambient_with(&mut self, params: ambient_authority::FileOpenAmbientWithParams, mut result: ambient_authority::FileOpenAmbientWithResults) -> Promise<(), Error> {
         let params_reader = pry!(params.get());
-        /*let read = params_reader.get_read();
-        let write = params_reader.get_write();
-        let append = params_reader.get_append();
-        let truncate = params_reader.get_truncate();
-        let create = params_reader.get_create();
-        let create_new = params_reader.get_create_new();*/
         capnp_let!({open_options : {read, write, append, truncate, create, create_new}} = params_reader);
         let mut options = OpenOptions::new();
         let path = pry!(params_reader.get_path());
@@ -129,9 +123,7 @@ impl ambient_authority::Server for AmbientAuthorityImpl {
     }
     fn project_dirs_from(&mut self, params: ambient_authority::ProjectDirsFromParams, mut result: ambient_authority::ProjectDirsFromResults) -> Promise<(), Error> {
         let params_reader = pry!(params.get());
-        let qualifier = pry!(params_reader.get_qualifier());
-        let organization = pry!(params_reader.get_organization());
-        let application = pry!(params_reader.get_application());
+        capnp_let!({qualifier, organization, application} = params_reader);
         let ambient_authority = cap_std::ambient_authority();
         let Some(_project_dirs) = ProjectDirs::from(qualifier, organization, application, ambient_authority) else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("No valid $HOME directory")});
@@ -274,12 +266,6 @@ impl dir::Server for DirImpl {
     }
     fn open_with(&mut self, params: dir::OpenWithParams, mut result: dir::OpenWithResults) -> Promise<(), Error> {
         let params_reader = pry!(params.get());
-        /*let read = params_reader.get_read();
-        let write = params_reader.get_write();
-        let append = params_reader.get_append();
-        let truncate = params_reader.get_truncate();
-        let create = params_reader.get_create();
-        let create_new = params_reader.get_create_new();*/
         capnp_let!({open_options : {read, write, append, truncate, create, create_new}} = params_reader);
         let mut options = OpenOptions::new();
         let path = pry!(params_reader.get_path());
@@ -596,12 +582,6 @@ impl dir_entry::Server for DirEntryImpl {
     
     fn open_with(&mut self, params: dir_entry::OpenWithParams, mut result: dir_entry::OpenWithResults) -> Promise<(), Error> {
         let params_reader = pry!(params.get());
-        /*let read = params_reader.get_read();
-        let write = params_reader.get_write();
-        let append = params_reader.get_append();
-        let truncate = params_reader.get_truncate();
-        let create = params_reader.get_create();
-        let create_new = params_reader.get_create_new();*/
         capnp_let!({open_options : {read, write, append, truncate, create, create_new}} = params_reader);
         let mut options = OpenOptions::new();
         options.read(read).write(write).append(append).truncate(truncate).create(create).create_new(create_new);
@@ -787,43 +767,6 @@ impl metadata::Server for MetadataImpl {
         Promise::ok(())
     }
 }
-/* 
-pub struct FileTypeImpl {
-    file_type: FileType
-}
-
-impl file_type::Server for FileTypeImpl {
-    fn dir(&mut self, _: file_type::DirParams, mut result: file_type::DirResults) -> Promise<(), Error> {
-        let ft = FileType::dir();
-        result.get().set_file_type(capnp_rpc::new_client(FileTypeImpl{file_type: ft}));
-        Promise::ok(())
-    }
-    fn file(&mut self, _: file_type::FileParams, mut result: file_type::FileResults) -> Promise<(), Error> {
-        let ft = FileType::file();
-        result.get().set_file_type(capnp_rpc::new_client(FileTypeImpl{file_type: ft}));
-        Promise::ok(())
-    }
-    fn unknown(&mut self, _: file_type::UnknownParams, mut result: file_type::UnknownResults) -> Promise<(), Error> {
-        let ft = FileType::unknown();
-        result.get().set_file_type(capnp_rpc::new_client(FileTypeImpl{file_type: ft}));
-        Promise::ok(())
-    }
-    fn is_dir(&mut self, _: file_type::IsDirParams, mut result: file_type::IsDirResults) -> Promise<(), Error> {
-        let is_dir = self.file_type.is_dir();
-        result.get().set_result(is_dir);
-        Promise::ok(())
-    }
-    fn is_file(&mut self, _: file_type::IsFileParams, mut result: file_type::IsFileResults) -> Promise<(), Error> {
-        let is_file = self.file_type.is_file();
-        result.get().set_result(is_file);
-        Promise::ok(())
-    }
-    fn is_symlink(&mut self, _: file_type::IsSymlinkParams, mut result: file_type::IsSymlinkResults) -> Promise<(), Error> {
-        let is_symlink = self.file_type.is_symlink();
-        result.get().set_result(is_symlink);
-        Promise::ok(())
-    }
-}*/
 
 pub struct PermissionsImpl {
     permissions: Permissions
@@ -881,15 +824,6 @@ impl temp_file::Server for TempFileImpl<'_> {
     }*/
 }
 
-
-/*pub struct OpenOptionsImpl {
-    open_options: OpenOptions
-}
-
-impl open_options::Server for OpenOptionsImpl {
-
-}*/
-
 pub struct SystemTimeImpl {
     system_time: SystemTime
 }
@@ -897,8 +831,6 @@ pub struct SystemTimeImpl {
 impl system_time::Server for SystemTimeImpl {
     fn duration_since(&mut self, params: system_time::DurationSinceParams, mut result: system_time::DurationSinceResults) -> Promise<(), Error> {
         let params_reader = pry!(params.get());
-        //let dur = params_reader.get_duration_since_unix_epoch();
-        //capnp_let!({duration_since_unix_epoch : {secs, nanos}} = params_reader);
         capnp_let!({duration_since_unix_epoch : {secs, nanos}} = params_reader);
         //Add duration since unix epoch to unix epoch to reconstruct a system time
         let earlier = cap_std::time::SystemTime::from_std(std::time::UNIX_EPOCH + Duration::new(secs, nanos));

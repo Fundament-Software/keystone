@@ -1,13 +1,15 @@
-use std::{path::Path};
+
+use std::{path::Path, io::Write};
 
 use cap_std::{fs::{Dir, DirBuilder, File, Metadata, ReadDir, Permissions, OpenOptions, DirEntry}, time::{MonotonicClock, SystemClock, SystemTime, Duration, Instant}};
 use cap_tempfile::{TempFile, TempDir};
 use cap_directories::{self, UserDirs, ProjectDirs};
-use capnp::{capability::{Promise, Response}, ErrorKind, Error, io::Write};
+use capnp::{capability::Promise, Error, traits::IntoInternalStructReader};
 use capnp_rpc::pry;
 use capnp_macros::capnp_let;
 use tokio::io::{AsyncRead, AsyncReadExt};
 use crate::{cap_std_capnp::{ambient_authority, cap_fs, dir, dir_entry, duration, file, FileType, instant, metadata, monotonic_clock, open_options, permissions, project_dirs, read_dir, system_clock, system_time, system_time_error, temp_dir, temp_file, user_dirs}, spawn::unix_process::UnixProcessServiceSpawnImpl, byte_stream::ByteStreamImpl};
+use filepath::FilePath;
 //use capnp::IntoResult;
 
 pub struct CapFsImpl;
@@ -250,11 +252,29 @@ impl ambient_authority::Server for AmbientAuthorityImpl {
 }
 
 pub struct DirImpl {
-    dir: Dir
+    pub dir: Dir
 }
 
-
-impl dir::Server for DirImpl {
+impl crate::sturdyref_capnp::saveable::Server for DirImpl {
+    fn save(&mut self, _: crate::sturdyref_capnp::saveable::SaveParams, mut result: crate::sturdyref_capnp::saveable::SaveResults) -> Promise<(), Error> {
+        let Ok(cloned) = self.dir.try_clone() else {
+            todo!()
+        };
+        //let client: dir::Client = capnp_rpc::new_client(DirImpl{dir: cloned});
+        let Ok(path) = cloned.into_std_file().path() else {
+            todo!()
+        };
+        let sturdyref = crate::sturdyref::Saved::Dir(path);
+        let Ok(signed_row) = crate::sturdyref::save_sturdyref(sturdyref) else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to save sturdyref")});
+        };
+        let Ok(()) = result.get().init_value().set_as(signed_row.as_slice()) else {
+            todo!()
+        };
+        Promise::ok(())
+    }
+}
+impl dir::Server for DirImpl { 
     fn open(&mut self, params: dir::OpenParams, mut result: dir::OpenResults) -> Promise<(), Error> {
         let path_reader = pry!(params.get());
         let path = pry!(path_reader.get_path());
@@ -549,6 +569,31 @@ impl dir::Server for DirImpl {
         Promise::ok(())
     }
 }
+
+/*
+impl keystone::sturdyref_capnp::saveable::Server for DirImpl {
+    fn save(&mut self, params: keystone::sturdyref_capnp::saveable::SaveParams, mut result: keystone::sturdyref_capnp::saveable::SaveResults) -> Promise<(), Error> {
+        
+        result.hook.//.get().into_reader().into_internal_struct_reader().//.unwrap().into_reader().get_attached_fd;
+        
+        //let row = crate::sturdyref::save_sturdyref();
+        //let signed = crate::sturdyref::sign(row);
+        //result.get().init_value().set_as(signed.as_slice());
+        todo!()
+    }
+}
+
+impl keystone::sturdyref_capnp::saveable::Server for dir::Client {
+    fn save(&mut self, _: keystone::sturdyref_capnp::saveable::SaveParams, mut result: keystone::sturdyref_capnp::saveable::SaveResults) -> Promise<(), Error> {
+        
+        self.client.hook.add_ref();
+        
+        //let row = crate::sturdyref::save_sturdyref();
+        //let signed = crate::sturdyref::sign(row);
+        //result.get().init_value().set_as(signed.as_slice());
+        todo!()
+    }
+}*/
 
 pub struct ReadDirImpl {
     iter: ReadDir
@@ -1056,7 +1101,7 @@ impl<T: capnp::introspect::Introspect> IntoResult for T {
 }*/
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use std::{path::Path};
 
     use cap_std::{fs::{Dir, DirBuilder, File, Metadata, ReadDir, Permissions, OpenOptions, DirEntry}, time::{MonotonicClock, SystemClock, SystemTime, Duration, Instant}};
@@ -1114,7 +1159,7 @@ mod tests {
         let stream = futures::executor::block_on(open_bytestream_request.send().promise)?.get()?.get_stream()?;
 
         let mut write_request = stream.write_request();
-        write_request.get().set_bytes(b" Writing some bytes test ");
+        write_request.get().set_bytes(b"Writing some bytes test ");
         let _res = futures::executor::block_on(write_request.send().promise)?;
 
         let mut file_metadata_request = dir.metadata_request();
@@ -1315,7 +1360,7 @@ mod tests {
         return Ok(())
     }
 
-    fn test_metadata(metadata: metadata::Client) -> eyre::Result<()> {
+    pub fn test_metadata(metadata: metadata::Client) -> eyre::Result<()> {
         println!("\nMetadata test:");
         let is_dir_request = metadata.is_dir_request();
         let result = futures::executor::block_on(is_dir_request.send().promise)?.get()?.get_result();

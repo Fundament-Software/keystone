@@ -39,10 +39,15 @@ hyper-tls = "0.5"
 log = { version = "0.4", features = ["kv_unstable"] }
 pretty_env_logger = "0.4.0"
 serde = "1.0"
-serde_json = "1.0"
+serde_json = "1.0.107"
 tokio = { version = "1.18", features = ["full"] }
 tokio-util = "0.7"
 url = "2.3.1"
+signature = "2.1.0"
+ed25519-dalek = { version = "2.0.0", features = ["rand_core"] }
+rand = "0.8.5"
+rand_core = "0.6.4"
+filepath = "0.1.2"
 
 [dev-dependencies]
 predicates = "2.1"

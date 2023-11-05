@@ -1,0 +1,122 @@
+    mod tests {
+        /*
+        #[tokio::test]
+        async fn test_test() {
+            println!("hi change");
+        }*/
+
+        use capnp::capability::Promise;
+        use tokio::task;
+        use crate::byte_stream::ByteStreamImpl;
+        use crate::spawn::unix_process::{UnixProcessServiceSpawnImpl, UnixProcessServiceSpawnClient};
+
+        use capnp_rpc::pry;
+        fn test_change() {
+            println!("hi change");
+        }
+        // https://stackoverflow.com/questions/21747136/how-do-i-print-in-rust-the-type-of-a-variable
+        fn print_type_of<T>(_: &T) {
+            println!("{}", std::any::type_name::<T>())
+        }
+        #[tokio::test]
+        async fn test_module_creation() {
+            let spawn_process_server = UnixProcessServiceSpawnImpl();
+            let spawn_process_client: UnixProcessServiceSpawnClient = capnp_rpc::new_client(spawn_process_server);
+
+            let e = task::LocalSet::new().run_until(async {
+                // Setting up stuff needed for RPC
+
+                println!("modulespawn start");
+
+                let stdout_server = ByteStreamImpl::new(|bytes| {
+                    println!("remote stdout: {}", std::str::from_utf8(bytes).unwrap());
+                    Promise::ok(())
+                });
+                let stdout_client = capnp_rpc::new_client(stdout_server);
+                let stderr_server = ByteStreamImpl::new(|bytes| {
+                    println!("remote stderr: {}", std::str::from_utf8(bytes).unwrap());
+                    Promise::ok(())
+                });
+                let stderr_client = capnp_rpc::new_client(stderr_server);
+
+                let process_client = spawn_process_client.request_spawn_process(
+                    "sh",
+                    //&["-c", r#"set; echo "Hello World!"; wait 10; exit 2"#],
+                    //&["-c", r#"set; sleep 1 ; echo "aaaa Hello World!"; wait 10; exit 2"#],
+                    //&["-c", r#"set; echo "Hello World!\n"; sleep(1); "Hello World!\n"; wait 10; exit 2"#],
+                    //&["-c", r#"set; cat > dumptext; cat dumptext; wait 10; exit 2"#],
+                    //&["-c", r#"set; cat > dumptext; cat > dumptext2; cat dumptext; cat dumptext2; sleep 1; wait 10; exit 2"#],
+                    //&["-c", r#"set; cat > dumptext; sleep 1; cat > dumptext2; echo "1"; cat dumptext; echo "2"; cat dumptext2; sleep 1; wait 10; exit 2"#],
+                    //&["-c", r#"set; cat; exit 2"#],
+                    &["-c", r#"set; cat;cat"#],
+                    //&["-c", r#"set; cat; sleep 1; cat"#],
+                    stdout_client,
+                    stderr_client).await?;
+
+                test_change();
+                let api_response = process_client.getapi_request().send().promise.await?;
+                //capnp::capability::Response<keystone::spawn_capnp::process::getapi_results::Owned<keystone::unix_process_capnp::unix_process_api::Owned, keystone::unix_process_capnp::unix_process_error::Owned>>
+                let api_reader = api_response.get()?.get_api()?;// keystone::unix_process_capnp::unix_process_api::Reader
+                let stdin_server = api_reader.get_stdin()?; // keystone::byte_stream_capnp::byte_stream::Client
+
+                let _ = stdin_server.write_bytes(b"testwrite").await;
+                let _ = stdin_server.write_bytes(b"testwrite2").await;
+                //let _ = stdin_server.write_bytes(&[104, 101, 108, 108, 111, 44, 32, 119, 111, 114, 108, 100, 33,0,33]).await;
+
+                //let _ = stdin_server.end().await;
+
+                /*
+                let api_response2 = process_client.getapi_request().send().promise.await?;
+                let api_reader2 = api_response2.get()?.get_api()?;
+                let stdin_server2 = api_reader2.get_stdin()?;
+                let _ = stdin_server2.write_bytes(b"testwrite2").await;
+                */
+                //let _ = stdin_server2.end().await;
+
+                //let _ = futures::executor::block_on(stdin_server.write_bytes(b"testwrite").await);
+
+                //println!("{}", stdin_server.closed);
+                /*
+                let mut write_request = stdin_server.write_request();
+                write_request.get().set_bytes(b"hi, world!");
+                let write_result =write_request.send().promise.await;
+                let unwrap1 = write_result.unwrap();
+                */
+                //println!("{}", stdin_server.closed);
+                //capnp::capability::Response<keystone::stream_capnp::stream_result::Owned>
+                /*
+                let reader = unwrap1.get()?;// keystone::stream_capnp::stream_result::Reader
+                print_type_of(&reader);
+                //println!("{}", unwrap1);
+
+                let mut write_request2 = stdin_server.write_request();
+                write_request2.get().set_bytes(b"hello, world, 2!");
+                let write_result2 = write_request2.send().promise.await;
+                let unwrap2 = write_result2.unwrap();
+                //println!("{}", unwrap2);
+                */
+
+                let geterror_response = process_client.geterror_request().send().promise.await?;
+                let error_reader = geterror_response.get()?.get_result()?;
+
+                let error_code = error_reader.get_error_code();
+                assert_eq!(error_code, 0);
+
+                let error_message = error_reader.get_error_message()?;
+                assert!(error_message.is_empty() == true);
+
+                Ok::<(), eyre::Error>(())
+            }).await;
+
+            println!("inside modulespawn");
+            e.unwrap();
+        }
+    }
+}
+
+
+/*
+    fn get_closed(&mut self) -> bool {
+        self.closed
+    }
+ */

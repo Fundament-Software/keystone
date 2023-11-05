@@ -2,5 +2,6 @@
 members = [
   "core",
   "modules/test",
+  "modules/hello_world",
 ]
 default-members = [ "core" ]

@@ -4,6 +4,7 @@ mod couchdb;
 mod database;
 mod node;
 mod spawn;
+mod module_spawn;
 
 capnp_import::capnp_import!("core/schema/**/*.capnp");
 
@@ -42,6 +43,7 @@ async fn main() -> Result<()> {
 
     let b = std::time::SystemTime::now();
 
+    /*
     let db = couchdb::CouchDB::new(DB_HOST, "fundament", "hunter2", "SYSLOG").await?;
     let node = node::Node::new(0, &db, &db, "KEYSTONE");
 
@@ -62,7 +64,7 @@ async fn main() -> Result<()> {
     if let Err(e) = graceful.await {
         eprintln!("server error: {}", e);
     }
-
+    */
     println!("Performing graceful shutdown...");
     Ok(())
 }

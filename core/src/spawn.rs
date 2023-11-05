@@ -100,14 +100,14 @@ pub mod unix_process {
         }
     }
 
-    type GetApiParams = process::GetapiParams<UnixProcessApi, UnixProcessError>;
-    type GetApiResults = process::GetapiResults<UnixProcessApi, UnixProcessError>;
-    type GetErrorParams = process::GeterrorParams<UnixProcessApi, UnixProcessError>;
-    type GetErrorResults = process::GeterrorResults<UnixProcessApi, UnixProcessError>;
-    type KillParams = process::KillParams<UnixProcessApi, UnixProcessError>;
-    type KillResults = process::KillResults<UnixProcessApi, UnixProcessError>;
+    type GetApiParams      = process::GetapiParams<UnixProcessApi, UnixProcessError>;
+    type GetApiResults     = process::GetapiResults<UnixProcessApi, UnixProcessError>;
+    type GetErrorParams    = process::GeterrorParams<UnixProcessApi, UnixProcessError>;
+    type GetErrorResults   = process::GeterrorResults<UnixProcessApi, UnixProcessError>;
+    type KillParams        = process::KillParams<UnixProcessApi, UnixProcessError>;
+    type KillResults       = process::KillResults<UnixProcessApi, UnixProcessError>;
     type UnixProcessClient = process::Client<UnixProcessApi, UnixProcessError>;
-    
+
     // You might ask why this trait is implementated for an `Rc` + `RefCell` of `UnixProcessImpl`
     // Well thats a very good question
     impl process::Server<UnixProcessApi, UnixProcessError> for Rc<RefCell<UnixProcessImpl>> {
@@ -150,11 +150,30 @@ pub mod unix_process {
                 let this_inner = this.clone();
                 let owned_bytes = bytes.to_owned();
                 Promise::from_future(async move {
-                    if let Some(mut stdin) = this_inner.borrow_mut().stdin.take() {
-                        match stdin.write_all(&owned_bytes).await {
-                            Ok(_) => Ok(()),
-                            Err(e) => Err(capnp::Error::failed(e.to_string()))
+                    // Borrow moved out so that it will be dropped when there are no more bytes to read
+                    let mut borrow = this_inner.borrow_mut();
+                    if let Some(mut stdin) = borrow.stdin.take() {
+                        println!("inside stdinstream server");
+                        println!("{:?}", &owned_bytes);
+                        // EOF signal, probably not the correct way to do things
+                        if &owned_bytes[..] == [255, 255]{
+                            println!("EOF found!");
+                            // we don't put stdin back, causing stdin to drop which closes the stream
+                            Ok(())
                         }
+                        else {
+                            let write_result = stdin.write_all(&owned_bytes).await;
+                            // Put the stdin back after using it.
+                            // If we don't do this then it isn't there when we go to
+                            // borrow it again later. So we have to put it back.
+                            borrow.stdin.replace(stdin);
+
+                            match write_result {
+                                Ok(_) => Ok(()),
+                                Err(e) => Err(capnp::Error::failed(e.to_string()))
+                            }
+                        }
+
                     } else {
                         Ok(())
                     }
@@ -176,7 +195,6 @@ pub mod unix_process {
     impl service_spawn::Server<capnp::text::Owned, UnixProcessArgs, UnixProcessApi, UnixProcessError> for UnixProcessServiceSpawnImpl {
         fn spawn(&mut self, params: SpawnParams, mut results: SpawnResults) -> Promise<(), capnp::Error> {
             let params_reader = pry!(params.get());
-            
             let program = pry!(params_reader.get_program());
             
             let args = pry!(params_reader.get_args());
@@ -258,7 +276,7 @@ pub mod unix_process {
             let e = task::LocalSet::new().run_until(async {
                 // Setting up stuff needed for RPC
                 let stdout_server = ByteStreamImpl::new(|bytes| {
-                    println!("remote stdout: {}", std::str::from_utf8(bytes).unwrap());
+                    //println!("remote stdout: {}", std::str::from_utf8(bytes).unwrap());
                     Promise::ok(())
                 });
                 let stdout_client = capnp_rpc::new_client(stdout_server);
@@ -285,7 +303,6 @@ pub mod unix_process {
 
                 Ok::<(), eyre::Error>(())
             }).await;
-
             e.unwrap();
         }
     }

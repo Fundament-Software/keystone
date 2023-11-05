@@ -46,6 +46,7 @@ where
         params: WriteParams,
         mut _results: WriteResults,
     ) -> Promise<(), capnp::Error> {
+        println!("write called with closed = {}", self.closed);
         if self.closed {
             return Promise::err(capnp::Error {
                 kind: ErrorKind::Failed,
@@ -56,6 +57,11 @@ where
         let byte_reader = pry!(params.get());
         let bytes = pry!(byte_reader.get_bytes());
 
+        println!("inside write");
+        println!("{:?}", bytes);
+        //for byte in &bytes[..read_size] {
+        //    print!("{:02x} ", *byte);
+        //}
         (self.consumer)(bytes)
     }
 
@@ -99,6 +105,7 @@ impl Client {
     pub async fn copy(&self, reader: &mut (impl AsyncRead + Unpin)) -> eyre::Result<usize> {
         let mut total_bytes = 0;
         let mut buffer = BytesMut::with_capacity(4096);
+        println!("inside copy");
 
         loop {
             let read_size = reader.read_buf(&mut buffer).await?;
@@ -106,6 +113,11 @@ impl Client {
             if read_size == 0 {
                 break;
             }
+
+            for byte in &buffer[..read_size] {
+                print!("{:02x} ", *byte);
+            }
+            println!();  // New line after printing all bytes of the current chunk
 
             total_bytes += read_size;
             self.write_bytes(&buffer[..read_size]).await?;

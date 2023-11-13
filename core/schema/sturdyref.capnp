@@ -9,5 +9,3 @@ interface Restorer {
   restore @0 [T] (value :SturdyRef) -> (cap :T);
   delete @1 (value :SturdyRef) -> ();
 }
-
-

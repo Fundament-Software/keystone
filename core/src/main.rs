@@ -2,6 +2,7 @@
 mod byte_stream;
 mod cap_std_capnproto;
 mod sturdyref;
+mod scheduler;
 mod couchdb;
 mod database;
 mod node;

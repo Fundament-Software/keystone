@@ -6,14 +6,14 @@ use capnp_rpc::pry;
 use tokio::{task::{JoinHandle, self}, time};
 use capnp::IntoResult;
 use keystone::sturdyref_capnp::saveable;
-use crate::{scheduler_capnp::{scheduler, cancelable, listener, get_scheduler, listener_test}, cap_std_capnp::cap_fs, cap_std_capnproto};
+use crate::{scheduler_capnp::{scheduler, cancelable, listener, create_scheduler, listener_test}, cap_std_capnp::cap_fs, cap_std_capnproto};
 
-struct GetSchedulerImpl {
+struct CreateSchedulerImpl {
 
 }
 
-impl get_scheduler::Server for GetSchedulerImpl {
-    fn get(&mut self, params: get_scheduler::GetParams, mut result: get_scheduler::GetResults) -> Promise<(), Error> {
+impl create_scheduler::Server for CreateSchedulerImpl {
+    fn create(&mut self, params: create_scheduler::CreateParams, mut result: create_scheduler::CreateResults) -> Promise<(), Error> {
         todo!()
     }
 }
@@ -181,6 +181,7 @@ async fn scheduler_test() -> eyre::Result<()> {
         //    print!("{int}");
         //}
     }
+    println!("test vec length: {}", listener_test_vec.borrow().len());
     if listener_test_vec.borrow().len() > 32 {
         return Ok(());
     } else {

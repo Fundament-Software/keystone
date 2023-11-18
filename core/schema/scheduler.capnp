@@ -1,7 +1,7 @@
 @0x94ea6962383b011a;
 
-interface GetScheduler {
-  get @0 () -> (scheduler :Scheduler);
+interface CreateScheduler {
+  create @0 () -> (scheduler :Scheduler);
 }
 
 interface Scheduler {
@@ -13,8 +13,7 @@ interface Cancelable {
 }
 
 interface Listener {
-  get @0 () -> (listener :Listener);
-  event @1 (id :UInt8) -> ();
+  event @0 (id :UInt8) -> ();
 }
 
 struct Duration {

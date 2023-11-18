@@ -5,8 +5,11 @@ interface GetScheduler {
 }
 
 interface Scheduler {
-  repeat @0 (listener :Listener, delay :Duration) -> (id :UInt8);
-  stop @1 (id :UInt8) -> ();
+  repeat @0 (listener :Listener, delay :Duration) -> (id :UInt8, cancelable :Cancelable);
+}
+
+interface Cancelable {
+  cancel @0 () -> ();
 }
 
 interface Listener {

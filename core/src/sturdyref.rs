@@ -18,7 +18,7 @@ thread_local!(
 #[derive(Serialize, Deserialize, Debug)]
 pub enum Saved {
     Dir(PathBuf),
-
+    Listener(Box<Saved>),
 }
 
 struct RestorerImpl;
@@ -34,7 +34,7 @@ impl restorer::Server for RestorerImpl {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to find saved sturdyref")});
         };
         let Ok(cap) = restore_helper(sturdyref) else {
-            todo!()
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to restore underlying object")});
         };
         result.get().init_cap().set_as_capability(cap);
         Promise::ok(())
@@ -61,6 +61,9 @@ pub fn restore_helper(saved: Saved) -> eyre::Result<Box<dyn ClientHook>> {
             let dir = cap_std::fs::Dir::open_ambient_dir(path, cap_std::ambient_authority())?;
             let cap: dir::Client = capnp_rpc::new_client(DirImpl{dir: dir});
             return Ok(cap.into_client_hook());
+        }
+        _ => {
+            todo!()
         }
     }
 }

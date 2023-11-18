@@ -5,8 +5,8 @@ use capnp_macros::capnp_let;
 use capnp_rpc::pry;
 use tokio::{task::{JoinHandle, self}, time};
 use capnp::IntoResult;
-
-use crate::{scheduler_capnp::{scheduler, listener, get_scheduler, listener_test}, cap_std_capnp::cap_fs, cap_std_capnproto};
+use keystone::sturdyref_capnp::saveable;
+use crate::{scheduler_capnp::{scheduler, cancelable, listener, get_scheduler, listener_test}, cap_std_capnp::cap_fs, cap_std_capnproto};
 
 struct GetSchedulerImpl {
 
@@ -32,7 +32,8 @@ struct SchedulerImpl {
 
 impl scheduler::Server for Rc<tokio::sync::RwLock<SchedulerImpl>> {
     fn repeat(&mut self, params: scheduler::RepeatParams, mut result: scheduler::RepeatResults) -> Promise<(), Error> {
-        return tokio::task::block_in_place(move || { 
+    return tokio::task::block_in_place(move || {
+    //Promise::from_future(async move {
         let mut write_guard = self.blocking_write();
         let params_reader = pry!(params.get());
         let listener = pry!(params_reader.get_listener());
@@ -45,12 +46,36 @@ impl scheduler::Server for Rc<tokio::sync::RwLock<SchedulerImpl>> {
         let handle = repeat_helper(dur, next_id, sender);
         write_guard.tasks.insert(next_id, handle);
         result.get().set_id(next_id);
+        result.get().set_cancelable(capnp_rpc::new_client(CancelableImpl{id: next_id, rc: self.clone()}));
         write_guard.next_id += 1;
         drop(write_guard);
-        
         return Promise::<(), Error>::ok(());
-    });
-        Promise::ok(())
+    })
+        //Promise::ok(())
+    
+    }
+}
+
+struct CancelableImpl {
+    id: u8,
+    rc: Rc<tokio::sync::RwLock<SchedulerImpl>>
+}
+
+impl cancelable::Server for CancelableImpl {
+    fn cancel(&mut self, params: cancelable::CancelParams, _: cancelable::CancelResults) -> Promise<(), Error> {
+        return tokio::task::block_in_place(move || { 
+            let mut write_guard = self.rc.blocking_write();
+            
+            let Some(handle) = write_guard.tasks.get(&self.id) else {
+                todo!()
+            };
+            handle.abort();
+            write_guard.listeners.remove(&self.id);
+            drop(write_guard);
+            
+            return Promise::<(), Error>::ok(());
+        });
+        //Promise::ok(())
     }
 }
 
@@ -147,8 +172,6 @@ async fn scheduler_test() -> eyre::Result<()> {
                 futures::executor::block_on(request.send().promise)?;
             }
         }
-    
-        
         
         drop(guard);
         do_once(done, listener_test.clone(), scheduler.clone());
@@ -181,4 +204,19 @@ fn do_once(done: bool, listener_test: listener_test::Client, scheduler: schedule
         let id = futures::executor::block_on(repeat_request.send().promise).unwrap().get().unwrap().get_id();
     }
 
+}
+
+
+impl <T, P, V>saveable::Server for ListenerImpl<T, P, V> {
+    fn save(&mut self, _: keystone::sturdyref_capnp::saveable::SaveParams, mut result: keystone::sturdyref_capnp::saveable::SaveResults) -> Promise<(), Error> {
+        
+        //let sturdyref = crate::sturdyref::Saved::Listener(Box::new(crate::sturdyref::Saved));
+        //let Ok(signed_row) = crate::sturdyref::save_sturdyref(sturdyref) else {
+        //    return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to save sturdyref")});
+        //};
+        //let Ok(()) = result.get().init_value().set_as(signed_row.as_slice()) else {
+        //    todo!()
+        //};
+        Promise::ok(())
+    }
 }

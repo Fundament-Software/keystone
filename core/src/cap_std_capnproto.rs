@@ -258,18 +258,18 @@ pub struct DirImpl {
 impl crate::sturdyref_capnp::saveable::Server for DirImpl {
     fn save(&mut self, _: crate::sturdyref_capnp::saveable::SaveParams, mut result: crate::sturdyref_capnp::saveable::SaveResults) -> Promise<(), Error> {
         let Ok(cloned) = self.dir.try_clone() else {
-            todo!()
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to clone underlying dir")});
         };
         //let client: dir::Client = capnp_rpc::new_client(DirImpl{dir: cloned});
         let Ok(path) = cloned.into_std_file().path() else {
-            todo!()
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to get path")});
         };
         let sturdyref = crate::sturdyref::Saved::Dir(path);
         let Ok(signed_row) = crate::sturdyref::save_sturdyref(sturdyref) else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to save sturdyref")});
         };
         let Ok(()) = result.get().init_value().set_as(signed_row.as_slice()) else {
-            todo!()
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Type incompatible with capnproto")});
         };
         Promise::ok(())
     }

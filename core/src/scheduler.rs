@@ -3,6 +3,7 @@ use std::{collections::HashMap, time::Duration, cell::RefCell, rc::Rc, sync::{Ar
 use capnp::{capability::{Promise, Request}, Error};
 use capnp_macros::capnp_let;
 use capnp_rpc::pry;
+use futures::FutureExt;
 use tokio::{task::{JoinHandle, self}, time};
 use capnp::IntoResult;
 use keystone::sturdyref_capnp::saveable;
@@ -174,41 +175,45 @@ async fn scheduler_test() -> eyre::Result<()> {
     let id = futures::executor::block_on(repeat_request.send().promise)?.get()?.get_id();
     //print!("{}", id);
 
-    let poll_rc = scheduler_rc.clone();
-    let mut done = false;
+    let mut poll_rc = scheduler_rc.clone();
     let mut system_time = std::time::SystemTime::now();
     let duration = Duration::from_secs(20);
+    let mut done = false;
     loop {
         if system_time.elapsed().unwrap() > duration {break;}
-        let guard = poll_rc.read().await;
-        
-        if let Some(i) = receiver.recv().await {
-            if let Some(client) = guard.listeners.get(&i) {
-                let mut request = client.event_request();
-                request.get().set_id(i);
-                futures::executor::block_on(request.send().promise)?;
-            }
-        }
-        drop(guard);
         if done == false {
-            do_once(listener_test.clone(), scheduler.clone()).await;
-            done = true;
+            tokio::join!(
+                create_and_send_test_request(listener_test.clone(), scheduler.clone()),
+                poll_scheduler(&mut poll_rc, &mut receiver),
+                create_and_send_test_request(listener_test.clone(), scheduler.clone())
+            );
+            done = true
         }
-        
-        //let test = test_rc.read().unwrap().clone();
-        //for int in test {
-        //    print!("{int}");
-        //}
+        poll_scheduler(&mut poll_rc, &mut receiver).await;
     }
     println!("test vec length: {}", listener_test_vec.borrow().len());
-    if listener_test_vec.borrow().len() > 32 {
+    if listener_test_vec.borrow().len() > 40 {
         return Ok(());
     } else {
         return Err(eyre::eyre!("not enough responses recieved"));
     }
 }
 
-fn do_once(listener_test: listener_test::Client, scheduler: scheduler::Client) -> Promise<capnp::capability::Response<crate::scheduler_capnp::scheduler::repeat_results::Owned>, capnp::Error> {
+async fn poll_scheduler(poll_rc: &Rc<tokio::sync::RwLock<SchedulerImpl>>, receiver: &mut tokio::sync::mpsc::Receiver<u8>) {
+    if let Some(i) = receiver.recv().await {
+        let guard = poll_rc.read().await;
+        if let Some(client) = guard.listeners.get(&i) {
+            let mut request = client.event_request();
+            request.get().set_id(i);
+            futures::executor::block_on(request.send().promise).unwrap();
+        }
+        drop(guard);
+    }
+    
+}
+
+
+async fn create_and_send_test_request(listener_test: listener_test::Client, scheduler: scheduler::Client) -> capnp::capability::Response<crate::scheduler_capnp::scheduler::repeat_results::Owned> {
     let closure = Box::new(|c: &listener_test::Client, p: u8| -> Result<u8, Error> {
         let mut request = c.do_stuff_request();
         request.get().set_test(p);
@@ -220,9 +225,8 @@ fn do_once(listener_test: listener_test::Client, scheduler: scheduler::Client) -
     builder.set_secs(4);
     builder.set_millis(0);
     repeat_request.get().set_listener(listener3);
-    return repeat_request.send().promise;
+    return repeat_request.send().promise.await.unwrap();
 }
-
 
 impl <T, P, V>saveable::Server for ListenerImpl<T, P, V> {
     fn save(&mut self, _: keystone::sturdyref_capnp::saveable::SaveParams, mut result: keystone::sturdyref_capnp::saveable::SaveResults) -> Promise<(), Error> {

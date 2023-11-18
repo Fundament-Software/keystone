@@ -32,7 +32,7 @@ struct SchedulerImpl {
 
 impl scheduler::Server for Rc<tokio::sync::RwLock<SchedulerImpl>> {
     fn repeat(&mut self, params: scheduler::RepeatParams, mut result: scheduler::RepeatResults) -> Promise<(), Error> {
-    return tokio::task::block_in_place(move || {
+    /*return tokio::task::block_in_place(move || {
     //Promise::from_future(async move {
         let mut write_guard = self.blocking_write();
         let params_reader = pry!(params.get());
@@ -50,10 +50,40 @@ impl scheduler::Server for Rc<tokio::sync::RwLock<SchedulerImpl>> {
         write_guard.next_id += 1;
         drop(write_guard);
         return Promise::<(), Error>::ok(());
-    })
+    })*/
         //Promise::ok(())
-    
+    let this = self.clone();
+    let params_reader = pry!(params.get());
+    let listener = pry!(params_reader.get_listener());
+    capnp_let!({delay : {secs, millis}} = params_reader);
+    return Promise::from_future(async move {
+        let mut write_guard = this.write().await;
+        let dur = Duration::from_secs(secs) + Duration::from_millis(millis);
+        let next_id = write_guard.next_id;
+        let sender = write_guard.channel.sender.clone();
+        write_guard.listeners.insert(next_id, listener);
+        let handle = repeat_helper(dur, next_id, sender);
+        write_guard.tasks.insert(next_id, handle);
+        result.get().set_id(next_id);
+        result.get().set_cancelable(capnp_rpc::new_client(CancelableImpl{id: next_id, rc: this.clone()}));
+        write_guard.next_id += 1;
+        drop(write_guard);
+        return Result::Ok(())
+    });
     }
+}
+
+fn repeat_helper(dur: Duration, id: u8, sender_channel: tokio::sync::mpsc::Sender<u8>) -> JoinHandle<()> {
+    let handle = tokio::task::spawn(async move {
+        let mut interval = time::interval(dur);
+        loop {
+            interval.tick().await;
+            let Ok(()) = sender_channel.send(id).await else {
+                todo!()
+            };
+        }
+    });
+    return handle
 }
 
 struct CancelableImpl {
@@ -77,19 +107,6 @@ impl cancelable::Server for CancelableImpl {
         });
         //Promise::ok(())
     }
-}
-
-fn repeat_helper(dur: Duration, id: u8, sender_channel: tokio::sync::mpsc::Sender<u8>) -> JoinHandle<()> {
-    let handle = tokio::task::spawn(async move {
-        let mut interval = time::interval(dur);
-        loop {
-            interval.tick().await;
-            let Ok(()) = sender_channel.send(id).await else {
-                todo!()
-            };
-        }
-    });
-    return handle
 }
 
 struct ListenerImpl<T, P, V> {
@@ -172,10 +189,12 @@ async fn scheduler_test() -> eyre::Result<()> {
                 futures::executor::block_on(request.send().promise)?;
             }
         }
-        
         drop(guard);
-        do_once(done, listener_test.clone(), scheduler.clone());
-        done = true;
+        if done == false {
+            do_once(listener_test.clone(), scheduler.clone()).await;
+            done = true;
+        }
+        
         //let test = test_rc.read().unwrap().clone();
         //for int in test {
         //    print!("{int}");
@@ -189,22 +208,19 @@ async fn scheduler_test() -> eyre::Result<()> {
     }
 }
 
-fn do_once(done: bool, listener_test: listener_test::Client, scheduler: scheduler::Client) {
-    if done == false {
-        let closure = Box::new(|c: &listener_test::Client, p: u8| -> Result<u8, Error> {
-            let mut request = c.do_stuff_request();
-            request.get().set_test(p);
-            return Ok(tokio::task::block_in_place(move || {tokio::runtime::Handle::current().block_on(request.send().promise)})?.get()?.get_result())
-        });
-        let listener3: listener::Client = capnp_rpc::new_client(ListenerImpl{client: listener_test, params: 4, requests: vec!(closure), results: Vec::new()});
-        let mut repeat_request = scheduler.repeat_request();
-        let mut builder = repeat_request.get().init_delay();
-        builder.set_secs(4);
-        builder.set_millis(0);
-        repeat_request.get().set_listener(listener3);
-        let id = futures::executor::block_on(repeat_request.send().promise).unwrap().get().unwrap().get_id();
-    }
-
+fn do_once(listener_test: listener_test::Client, scheduler: scheduler::Client) -> Promise<capnp::capability::Response<crate::scheduler_capnp::scheduler::repeat_results::Owned>, capnp::Error> {
+    let closure = Box::new(|c: &listener_test::Client, p: u8| -> Result<u8, Error> {
+        let mut request = c.do_stuff_request();
+        request.get().set_test(p);
+        return Ok(tokio::task::block_in_place(move || {tokio::runtime::Handle::current().block_on(request.send().promise)})?.get()?.get_result())
+    });
+    let listener3: listener::Client = capnp_rpc::new_client(ListenerImpl{client: listener_test, params: 4, requests: vec!(closure), results: Vec::new()});
+    let mut repeat_request = scheduler.repeat_request();
+    let mut builder = repeat_request.get().init_delay();
+    builder.set_secs(4);
+    builder.set_millis(0);
+    repeat_request.get().set_listener(listener3);
+    return repeat_request.send().promise;
 }
 
 

@@ -72,6 +72,84 @@ impl scheduler::Server for Rc<tokio::sync::RwLock<SchedulerImpl>> {
         return Result::Ok(())
     });
     }
+    fn schedule_for(&mut self, params: scheduler::ScheduleForParams, mut result: scheduler::ScheduleForResults) -> Promise<(), Error> {
+        let this = self.clone();
+        let params_reader = pry!(params.get());
+        let listener = pry!(params_reader.get_listener());
+        capnp_let!({schedule_for : {year, month, day, hour, min}} = params_reader);
+        return Promise::from_future(async move {
+            let mut write_guard = this.write().await;
+            let Some(utc_date) = chrono::NaiveDate::from_ymd_opt(year, month, day) else {
+                todo!()
+            };
+            let Some(utc_time) = chrono::NaiveTime::from_hms_opt(hour, min, 0) else {
+                todo!()
+            };
+            let utc_date_time = chrono::NaiveDateTime::new(utc_date, utc_time).and_utc();
+            let current = chrono::offset::Utc::now();
+            let Ok(dur) = (utc_date_time - current).to_std() else {
+                todo!()
+            };
+            let next_id = write_guard.next_id;
+            let sender_channel = write_guard.channel.sender.clone();
+            write_guard.listeners.insert(next_id, listener);
+            let handle = tokio::task::spawn (async move {
+                let id = next_id;
+                tokio::time::sleep(dur).await;
+                let Ok(()) = sender_channel.send(id).await else {
+                    todo!()
+                };
+            });
+            write_guard.tasks.insert(next_id, handle);
+            result.get().set_id(next_id);
+            result.get().set_cancelable(capnp_rpc::new_client(CancelableImpl{id: next_id, rc: this.clone()}));
+            write_guard.next_id += 1;
+            drop(write_guard);
+            return Result::Ok(())
+        });
+    }
+    fn schedule_for_then_repeat(&mut self, params: scheduler::ScheduleForThenRepeatParams, mut result: scheduler::ScheduleForThenRepeatResults) -> Promise<(), Error> {
+        let this = self.clone();
+        let params_reader = pry!(params.get());
+        let listener = pry!(params_reader.get_listener());
+        capnp_let!({start : {year, month, day, hour, min}} = params_reader);
+        capnp_let!({delay : {secs, millis}} = params_reader);
+        return Promise::from_future(async move {
+            let mut write_guard = this.write().await;
+            let Some(utc_date) = chrono::NaiveDate::from_ymd_opt(year, month, day) else {
+                todo!()
+            };
+            let Some(utc_time) = chrono::NaiveTime::from_hms_opt(hour, min, 0) else {
+                todo!()
+            };
+            let utc_date_time = chrono::NaiveDateTime::new(utc_date, utc_time).and_utc();
+            let current = chrono::offset::Utc::now();
+            let Ok(duration_until_start) = (utc_date_time - current).to_std() else {
+                todo!()
+            };
+            let duration_between_repeats = Duration::from_secs(secs) + Duration::from_millis(millis);
+            let next_id = write_guard.next_id;
+            let sender_channel = write_guard.channel.sender.clone();
+            write_guard.listeners.insert(next_id, listener);
+            let handle = tokio::task::spawn (async move {
+                let id = next_id;
+                tokio::time::sleep(duration_until_start).await;
+                let mut interval = time::interval(duration_between_repeats);
+                loop {
+                    interval.tick().await;
+                    let Ok(()) = sender_channel.send(id).await else {
+                        todo!()
+                    };
+                }
+            });
+            write_guard.tasks.insert(next_id, handle);
+            result.get().set_id(next_id);
+            result.get().set_cancelable(capnp_rpc::new_client(CancelableImpl{id: next_id, rc: this.clone()}));
+            write_guard.next_id += 1;
+            drop(write_guard);
+            return Result::Ok(())
+        });
+    }
 }
 
 fn repeat_helper(dur: Duration, id: u8, sender_channel: tokio::sync::mpsc::Sender<u8>) -> JoinHandle<()> {
@@ -231,7 +309,7 @@ async fn create_and_send_test_request(listener_test: listener_test::Client, sche
 impl <T, P, V>saveable::Server for ListenerImpl<T, P, V> {
     fn save(&mut self, _: keystone::sturdyref_capnp::saveable::SaveParams, mut result: keystone::sturdyref_capnp::saveable::SaveResults) -> Promise<(), Error> {
         
-        //let sturdyref = crate::sturdyref::Saved::Listener(Box::new(crate::sturdyref::Saved));
+        //let sturdyref = crate::sturdyref::Saved::Listener(Box::new(self.client.try_into().unwrap().save()));
         //let Ok(signed_row) = crate::sturdyref::save_sturdyref(sturdyref) else {
         //    return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to save sturdyref")});
         //};

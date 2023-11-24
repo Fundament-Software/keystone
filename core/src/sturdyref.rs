@@ -18,7 +18,7 @@ thread_local!(
 #[derive(Serialize, Deserialize, Debug)]
 pub enum Saved {
     Dir(PathBuf),
-    Listener(Box<Saved>),
+    Listener(Vec<u8>),
 }
 
 struct RestorerImpl;
@@ -62,8 +62,11 @@ pub fn restore_helper(saved: Saved) -> eyre::Result<Box<dyn ClientHook>> {
             let cap: dir::Client = capnp_rpc::new_client(DirImpl{dir: dir});
             return Ok(cap.into_client_hook());
         }
-        _ => {
-            todo!()
+        Saved::Listener(key) => {
+            let verified = verify(key.as_slice())?;
+            let sturdyref = get_sturdyref(&verified)?;
+            let cap = restore_helper(sturdyref)?;
+            return Ok(cap);
         }
     }
 }

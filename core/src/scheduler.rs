@@ -80,15 +80,15 @@ impl scheduler::Server for Rc<tokio::sync::RwLock<SchedulerImpl>> {
         return Promise::from_future(async move {
             let mut write_guard = this.write().await;
             let Some(utc_date) = chrono::NaiveDate::from_ymd_opt(year, month, day) else {
-                todo!()
+                return Err(capnp::Error{kind: capnp::ErrorKind::Failed, extra: String::from("Date out of range")});
             };
             let Some(utc_time) = chrono::NaiveTime::from_hms_opt(hour, min, 0) else {
-                todo!()
+                return Err(capnp::Error{kind: capnp::ErrorKind::Failed, extra: String::from("Invalid hour or minute")});
             };
             let utc_date_time = chrono::NaiveDateTime::new(utc_date, utc_time).and_utc();
             let current = chrono::offset::Utc::now();
             let Ok(dur) = (utc_date_time - current).to_std() else {
-                todo!()
+                return Err(capnp::Error{kind: capnp::ErrorKind::Failed, extra: String::from("Scheduled date time before current")});
             };
             let next_id = write_guard.next_id;
             let sender_channel = write_guard.channel.sender.clone();
@@ -97,7 +97,7 @@ impl scheduler::Server for Rc<tokio::sync::RwLock<SchedulerImpl>> {
                 let id = next_id;
                 tokio::time::sleep(dur).await;
                 let Ok(()) = sender_channel.send(id).await else {
-                    todo!()
+                    return;
                 };
             });
             write_guard.tasks.insert(next_id, handle);
@@ -117,15 +117,15 @@ impl scheduler::Server for Rc<tokio::sync::RwLock<SchedulerImpl>> {
         return Promise::from_future(async move {
             let mut write_guard = this.write().await;
             let Some(utc_date) = chrono::NaiveDate::from_ymd_opt(year, month, day) else {
-                todo!()
+                return Err(capnp::Error{kind: capnp::ErrorKind::Failed, extra: String::from("Date out of range")});
             };
             let Some(utc_time) = chrono::NaiveTime::from_hms_opt(hour, min, 0) else {
-                todo!()
+                return Err(capnp::Error{kind: capnp::ErrorKind::Failed, extra: String::from("Invalid hour or minute")});
             };
             let utc_date_time = chrono::NaiveDateTime::new(utc_date, utc_time).and_utc();
             let current = chrono::offset::Utc::now();
             let Ok(duration_until_start) = (utc_date_time - current).to_std() else {
-                todo!()
+                return Err(capnp::Error{kind: capnp::ErrorKind::Failed, extra: String::from("Scheduled date time before current")});
             };
             let duration_between_repeats = Duration::from_secs(secs) + Duration::from_millis(millis);
             let next_id = write_guard.next_id;
@@ -138,7 +138,7 @@ impl scheduler::Server for Rc<tokio::sync::RwLock<SchedulerImpl>> {
                 loop {
                     interval.tick().await;
                     let Ok(()) = sender_channel.send(id).await else {
-                        todo!()
+                        break;
                     };
                 }
             });
@@ -158,7 +158,7 @@ fn repeat_helper(dur: Duration, id: u8, sender_channel: tokio::sync::mpsc::Sende
         loop {
             interval.tick().await;
             let Ok(()) = sender_channel.send(id).await else {
-                todo!()
+                break;
             };
         }
     });
@@ -176,7 +176,7 @@ impl cancelable::Server for CancelableImpl {
             let mut write_guard = self.rc.blocking_write();
             
             let Some(handle) = write_guard.tasks.get(&self.id) else {
-                todo!()
+                return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Task no longer running")});
             };
             handle.abort();
             write_guard.listeners.remove(&self.id);
@@ -195,7 +195,7 @@ struct ListenerImpl<T, P, V> {
     results: Vec<Result<V, Error>>
 }
 
-impl <T, P: Clone, V>listener::Server for ListenerImpl<T, P, V> {
+impl <T : capnp::capability::FromClientHook + Clone, P : Clone, V>listener::Server for ListenerImpl<T, P, V> {
     fn event(&mut self, params: listener::EventParams, _: listener::EventResults) -> Promise<(), Error> {
         //let params_reader = pry!(params.get());
         //let id = params_reader.get_id();
@@ -306,16 +306,19 @@ async fn create_and_send_test_request(listener_test: listener_test::Client, sche
     return repeat_request.send().promise.await.unwrap();
 }
 
-impl <T, P, V>saveable::Server for ListenerImpl<T, P, V> {
+impl <T : capnp::capability::FromClientHook + Clone, P : Clone, V>saveable::Server for ListenerImpl<T, P, V> {
     fn save(&mut self, _: keystone::sturdyref_capnp::saveable::SaveParams, mut result: keystone::sturdyref_capnp::saveable::SaveResults) -> Promise<(), Error> {
-        
-        //let sturdyref = crate::sturdyref::Saved::Listener(Box::new(self.client.try_into().unwrap().save()));
-        //let Ok(signed_row) = crate::sturdyref::save_sturdyref(sturdyref) else {
-        //    return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to save sturdyref")});
-        //};
-        //let Ok(()) = result.get().init_value().set_as(signed_row.as_slice()) else {
-        //    todo!()
-        //};
+        let underlying_save_request = self.client.clone().cast_to::<crate::sturdyref_capnp::saveable::Client>().save_request();
+        let saved = futures::executor::block_on(underlying_save_request.send().promise).unwrap();
+        let underlying_sturdyref = saved.get().unwrap().get_value();
+        let slice = underlying_sturdyref.get_as::<&[u8]>().unwrap();
+        let sturdyref = crate::sturdyref::Saved::Listener(slice.to_vec());
+        let Ok(signed_row) = crate::sturdyref::save_sturdyref(sturdyref) else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to save sturdyref")});
+        };
+        let Ok(()) = result.get().init_value().set_as(signed_row.as_slice()) else {
+            todo!()
+        };
         Promise::ok(())
     }
 }

@@ -570,31 +570,6 @@ impl dir::Server for DirImpl {
     }
 }
 
-/*
-impl keystone::sturdyref_capnp::saveable::Server for DirImpl {
-    fn save(&mut self, params: keystone::sturdyref_capnp::saveable::SaveParams, mut result: keystone::sturdyref_capnp::saveable::SaveResults) -> Promise<(), Error> {
-        
-        result.hook.//.get().into_reader().into_internal_struct_reader().//.unwrap().into_reader().get_attached_fd;
-        
-        //let row = crate::sturdyref::save_sturdyref();
-        //let signed = crate::sturdyref::sign(row);
-        //result.get().init_value().set_as(signed.as_slice());
-        todo!()
-    }
-}
-
-impl keystone::sturdyref_capnp::saveable::Server for dir::Client {
-    fn save(&mut self, _: keystone::sturdyref_capnp::saveable::SaveParams, mut result: keystone::sturdyref_capnp::saveable::SaveResults) -> Promise<(), Error> {
-        
-        self.client.hook.add_ref();
-        
-        //let row = crate::sturdyref::save_sturdyref();
-        //let signed = crate::sturdyref::sign(row);
-        //result.get().init_value().set_as(signed.as_slice());
-        todo!()
-    }
-}*/
-
 pub struct ReadDirImpl {
     iter: ReadDir
 }

@@ -4,7 +4,7 @@ use capnp_rpc::pry;
 use capnp::private::capability::ClientHook;
 use serde::{Serialize, Deserialize};
 use signature::Signer;
-use crate::{sturdyref_capnp::restorer, cap_std_capnp::{ambient_authority, dir}, cap_std_capnproto::{self, DirImpl}};
+use crate::{sturdyref_capnp::restorer, scheduler_capnp::{listener, listener_test}, cap_std_capnp::{ambient_authority, dir}, cap_std_capnproto::{self, DirImpl}, scheduler::{Listener, ListenerTestImpl}};
 use rand::rngs::OsRng;
 use ed25519_dalek::{SigningKey, SignatureError};
 use ed25519_dalek::Signature;
@@ -19,6 +19,7 @@ thread_local!(
 pub enum Saved {
     Dir(PathBuf),
     Listener(Vec<u8>),
+    ListenerTest(Vec<u8>),
 }
 
 struct RestorerImpl;
@@ -52,12 +53,9 @@ impl restorer::Server for RestorerImpl {
     }
 }
 
-pub fn restore_helper(saved: Saved) -> eyre::Result<Box<dyn ClientHook>> {
+fn restore_helper(saved: Saved) -> eyre::Result<Box<dyn ClientHook>> {
     match saved {
         Saved::Dir(path) => {
-            //let aa: ambient_authority::Client = capnp_rpc::new_client(cap_std_capnproto::AmbientAuthorityImpl);
-            //let mut open_ambient_request = aa.dir_open_ambient_request();
-            //open_ambient_request.get().set_path(path.as_str());
             let dir = cap_std::fs::Dir::open_ambient_dir(path, cap_std::ambient_authority())?;
             let cap: dir::Client = capnp_rpc::new_client(DirImpl{dir: dir});
             return Ok(cap.into_client_hook());
@@ -65,11 +63,28 @@ pub fn restore_helper(saved: Saved) -> eyre::Result<Box<dyn ClientHook>> {
         Saved::Listener(key) => {
             let verified = verify(key.as_slice())?;
             let sturdyref = get_sturdyref(&verified)?;
-            let cap = restore_helper(sturdyref)?;
+            let cap = restore_as_listener_helper(sturdyref)?;
+            //let listener: listener::Client = capnp_rpc::new_client(Box::new(cap) as Box<dyn Listener>);
             return Ok(cap);
         }
+        Saved::ListenerTest(test_vec) => {
+            let cap: listener_test::Client = capnp_rpc::new_client(ListenerTestImpl{test: test_vec});
+            return Ok(cap.into_client_hook())
+        },
     }
 }
+//TODO this is probably possible to replace with 1 function
+
+fn restore_as_listener_helper(saved: Saved) -> eyre::Result<Box<dyn ClientHook>> {
+    match saved {
+        Saved::ListenerTest(test_vec) => {
+            let cap: listener_test::Client = capnp_rpc::new_client(ListenerTestImpl{test: test_vec});
+            return Ok(cap.into_client_hook())
+        },
+        _ => Err({eyre::eyre!("Restore as listener not implemented for underlying cap")})
+    }
+}
+
 //TODO save the signing key in database/file
 pub fn sign(row: u8) -> Vec<u8> {
     return SIGNING_KEY.with(|key| {

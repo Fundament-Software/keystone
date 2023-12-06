@@ -33,4 +33,5 @@ struct UtcDateTime {
 
 interface ListenerTest {
   doStuff @0 (test :UInt8) -> (result :UInt8);
+  retrieveTestVec @1 () -> (result :Data);
 }

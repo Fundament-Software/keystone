@@ -1,54 +1,21 @@
 
-use std::{path::Path, io::Write};
+use std::{path::Path, io::Write, cell::RefCell};
 
 use cap_std::{fs::{Dir, DirBuilder, File, Metadata, ReadDir, Permissions, OpenOptions, DirEntry}, time::{MonotonicClock, SystemClock, SystemTime, Duration, Instant}};
 use cap_tempfile::{TempFile, TempDir};
 use cap_directories::{self, UserDirs, ProjectDirs};
 use capnp::{capability::Promise, Error, traits::IntoInternalStructReader};
-use capnp_rpc::pry;
+use capnp_rpc::{pry, CapabilityServerSet};
 use capnp_macros::capnp_let;
 use tokio::io::{AsyncRead, AsyncReadExt};
-use crate::{cap_std_capnp::{ambient_authority, cap_fs, dir, dir_entry, duration, file, FileType, instant, metadata, monotonic_clock, open_options, permissions, project_dirs, read_dir, system_clock, system_time, system_time_error, temp_dir, temp_file, user_dirs}, spawn::unix_process::UnixProcessServiceSpawnImpl, byte_stream::ByteStreamImpl};
+use crate::{cap_std_capnp::{ambient_authority, dir, dir_entry, duration, file, FileType, instant, metadata, monotonic_clock, open_options, permissions, project_dirs, read_dir, system_clock, system_time, temp_dir, temp_file, user_dirs}, spawn::unix_process::UnixProcessServiceSpawnImpl, byte_stream::ByteStreamImpl};
 use filepath::FilePath;
-//use capnp::IntoResult;
+use capnp::IntoResult;
 
-pub struct CapFsImpl;
-
-impl cap_fs::Server for CapFsImpl {
-    fn use_ambient_authority(&mut self, _: cap_fs::UseAmbientAuthorityParams, mut result: cap_fs::UseAmbientAuthorityResults) -> Promise<(), Error> {
-        result.get().set_ambient_authority(capnp_rpc::new_client(AmbientAuthorityImpl{}));
-        Promise::ok(())
-    }
-    fn dir_open(&mut self, params: cap_fs::DirOpenParams, mut result: cap_fs::DirOpenResults) -> Promise<(), Error> {
-        let path_reader = pry!(params.get());
-        let path = pry!(path_reader.get_path());
-        let Ok(file) = std::fs::File::open(Path::new(path)) else {
-            return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to open file")});
-        };
-        let dir = DirImpl{dir: Dir::from_std_file(file)};
-        result.get().set_dir(capnp_rpc::new_client(dir));
-        Promise::ok(())
-    }
-    /*
-    fn temp_dir_new_in(&mut self, params: cap_fs::TempDirNewInParams, mut result: cap_fs::TempDirNewInResults) -> Promise<(), capnp::Error> {
-        let dir_reader = pry!(params.get());
-        let dir = pry!(dir_reader.get_dir());
-        //cap_tempfile::TempDir::new_in(dir);
-        todo!()
-    }
-    fn temp_file_new(&mut self,  params: cap_fs::TempFileNewParams, mut result: cap_fs::TempFileNewResults) -> Promise<(), capnp::Error> {
-        let dir_reader = pry!(params.get());
-        let dir = pry!(dir_reader.get_dir());
-
-        todo!()
-    }
-    fn temp_file_new_anonymous(&mut self, params: cap_fs::TempFileNewAnonymousParams, mut result: cap_fs::TempFileNewAnonymousResults) -> Promise<(), capnp::Error> {
-        let dir_reader = pry!(params.get());
-        let dir = pry!(dir_reader.get_dir());
-
-        todo!()
-    } */
-}
+thread_local! (
+    static DIR_SET: RefCell<CapabilityServerSet<DirImpl, dir::Client>> = RefCell::new(CapabilityServerSet::new());
+    static INSTANT_SET: RefCell<CapabilityServerSet<InstantImpl, instant::Client>> = RefCell::new(CapabilityServerSet::new());
+);
 
 pub struct AmbientAuthorityImpl;
 
@@ -93,17 +60,23 @@ impl ambient_authority::Server for AmbientAuthorityImpl {
         let Ok(_dir) = Dir::open_ambient_dir(path, ambient_authority) else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to open dir using ambient authority")});
         };
-        result.get().set_result(capnp_rpc::new_client(DirImpl{dir: _dir}));
+        result.get().set_result(DIR_SET.with_borrow_mut(|set| set.new_client(DirImpl{dir: _dir})));
         Promise::ok(())
-    }/*
-    fn dir_open_parent(&mut self, _: ambient_authority::DirOpenParentParams, mut result: ambient_authority::DirOpenParentResults) -> Promise<(), Error> {
+    }
+    fn dir_open_parent(&mut self, params: ambient_authority::DirOpenParentParams, mut result: ambient_authority::DirOpenParentResults) -> Promise<(), Error> {
+        let params_reader = pry!(params.get());
+        let dir_cap = pry!(params_reader.get_dir());
+        let Some(dir_impl) = DIR_SET.with_borrow(|set| set.get_local_server_of_resolved(&dir_cap)) else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Dir not from the same machine")});
+        };
         let ambient_authority = cap_std::ambient_authority();
-        let Ok(_dir) = Dir::open_parent_dir(ambient_authority) else {
+        let dir = &dir_impl.borrow().dir;
+        let Ok(_dir) = dir.open_parent_dir(ambient_authority) else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to open parent dir using ambient authority")});
         };
-        result.get().set_result(capnp_rpc::new_client(DirImpl{dir: _dir}));
-        todo!()
-    }*/
+        result.get().set_result(DIR_SET.with_borrow_mut(|set| set.new_client(DirImpl{dir: _dir})));
+        Promise::ok(())
+    }
     fn dir_create_ambient_all(&mut self, params: ambient_authority::DirCreateAmbientAllParams, mut result: ambient_authority::DirCreateAmbientAllResults) -> Promise<(), Error> {
         let params_reader = pry!(params.get());
         let path = pry!(params_reader.get_path());
@@ -141,7 +114,7 @@ impl ambient_authority::Server for AmbientAuthorityImpl {
         let Ok(_dir) = UserDirs::home_dir(&user_dirs, ambient_authority) else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to open home dir")});
         };
-        result.get().set_dir(capnp_rpc::new_client(DirImpl{dir: _dir}));
+        result.get().set_dir(DIR_SET.with_borrow_mut(|set| set.new_client(DirImpl{dir: _dir})));
         Promise::ok(())
     }
     fn user_dirs_audio_dir(&mut self, _: ambient_authority::UserDirsAudioDirParams, mut result: ambient_authority::UserDirsAudioDirResults) -> Promise<(), Error> {
@@ -152,7 +125,7 @@ impl ambient_authority::Server for AmbientAuthorityImpl {
         let Ok(_dir) = UserDirs::audio_dir(&user_dirs, ambient_authority) else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to open audio dir")});
         };
-        result.get().set_dir(capnp_rpc::new_client(DirImpl{dir: _dir}));
+        result.get().set_dir(DIR_SET.with_borrow_mut(|set| set.new_client(DirImpl{dir: _dir})));
         Promise::ok(())
     }
     fn user_dirs_desktop_dir(&mut self, _: ambient_authority::UserDirsDesktopDirParams, mut result: ambient_authority::UserDirsDesktopDirResults) -> Promise<(), Error> {
@@ -163,7 +136,7 @@ impl ambient_authority::Server for AmbientAuthorityImpl {
         let Ok(_dir) = UserDirs::desktop_dir(&user_dirs, ambient_authority) else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to open desktop dir")});
         };
-        result.get().set_dir(capnp_rpc::new_client(DirImpl{dir: _dir}));
+        result.get().set_dir(DIR_SET.with_borrow_mut(|set| set.new_client(DirImpl{dir: _dir})));
         Promise::ok(())
     }
     fn user_dirs_document_dir(&mut self, _: ambient_authority::UserDirsDocumentDirParams, mut result: ambient_authority::UserDirsDocumentDirResults) -> Promise<(), Error> {
@@ -174,7 +147,7 @@ impl ambient_authority::Server for AmbientAuthorityImpl {
         let Ok(_dir) = UserDirs::document_dir(&user_dirs, ambient_authority) else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to open document dir")});
         };
-        result.get().set_dir(capnp_rpc::new_client(DirImpl{dir: _dir}));
+        result.get().set_dir(DIR_SET.with_borrow_mut(|set| set.new_client(DirImpl{dir: _dir})));
         Promise::ok(())
     }
     fn user_dirs_download_dir(&mut self, _: ambient_authority::UserDirsDownloadDirParams, mut result: ambient_authority::UserDirsDownloadDirResults) -> Promise<(), Error> {
@@ -185,7 +158,7 @@ impl ambient_authority::Server for AmbientAuthorityImpl {
         let Ok(_dir) = UserDirs::download_dir(&user_dirs, ambient_authority) else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to open download dir")});
         };
-        result.get().set_dir(capnp_rpc::new_client(DirImpl{dir: _dir}));
+        result.get().set_dir(DIR_SET.with_borrow_mut(|set| set.new_client(DirImpl{dir: _dir})));
         Promise::ok(())
     }
     fn user_dirs_font_dir(&mut self, _: ambient_authority::UserDirsFontDirParams, mut result: ambient_authority::UserDirsFontDirResults) -> Promise<(), Error> {
@@ -196,7 +169,7 @@ impl ambient_authority::Server for AmbientAuthorityImpl {
         let Ok(_dir) = UserDirs::font_dir(&user_dirs, ambient_authority) else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to open font dir")});
         };
-        result.get().set_dir(capnp_rpc::new_client(DirImpl{dir: _dir}));
+        result.get().set_dir(DIR_SET.with_borrow_mut(|set| set.new_client(DirImpl{dir: _dir})));
         Promise::ok(())
     }
     fn user_dirs_picture_dir(&mut self, _: ambient_authority::UserDirsPictureDirParams, mut result: ambient_authority::UserDirsPictureDirResults) -> Promise<(), Error> {
@@ -207,7 +180,7 @@ impl ambient_authority::Server for AmbientAuthorityImpl {
         let Ok(_dir) = UserDirs::picture_dir(&user_dirs, ambient_authority) else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to open picture dir")});
         };
-        result.get().set_dir(capnp_rpc::new_client(DirImpl{dir: _dir}));
+        result.get().set_dir(DIR_SET.with_borrow_mut(|set| set.new_client(DirImpl{dir: _dir})));
         Promise::ok(())
     }
     fn user_dirs_public_dir(&mut self, _: ambient_authority::UserDirsPublicDirParams, mut result: ambient_authority::UserDirsPublicDirResults) -> Promise<(), Error> {
@@ -218,7 +191,7 @@ impl ambient_authority::Server for AmbientAuthorityImpl {
         let Ok(_dir) = UserDirs::public_dir(&user_dirs, ambient_authority) else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to open user's public dir")});
         };
-        result.get().set_dir(capnp_rpc::new_client(DirImpl{dir: _dir}));
+        result.get().set_dir(DIR_SET.with_borrow_mut(|set| set.new_client(DirImpl{dir: _dir})));
         Promise::ok(())
     }
     fn user_dirs_template_dir(&mut self, _: ambient_authority::UserDirsTemplateDirParams, mut result: ambient_authority::UserDirsTemplateDirResults) -> Promise<(), Error> {
@@ -229,7 +202,7 @@ impl ambient_authority::Server for AmbientAuthorityImpl {
         let Ok(_dir) = UserDirs::template_dir(&user_dirs, ambient_authority) else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to open template dir")});
         };
-        result.get().set_dir(capnp_rpc::new_client(DirImpl{dir: _dir}));
+        result.get().set_dir(DIR_SET.with_borrow_mut(|set| set.new_client(DirImpl{dir: _dir})));
         Promise::ok(())
     }
     fn user_dirs_video_dir(&mut self, _: ambient_authority::UserDirsVideoDirParams, mut result: ambient_authority::UserDirsVideoDirResults) -> Promise<(), Error> {
@@ -240,14 +213,17 @@ impl ambient_authority::Server for AmbientAuthorityImpl {
         let Ok(_dir) = UserDirs::video_dir(&user_dirs, ambient_authority) else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to open video dir")});
         };
-        result.get().set_dir(capnp_rpc::new_client(DirImpl{dir: _dir}));
+        result.get().set_dir(DIR_SET.with_borrow_mut(|set| set.new_client(DirImpl{dir: _dir})));
         Promise::ok(())
-    }/*
+    }
     fn temp_dir_new(&mut self, _: ambient_authority::TempDirNewParams, mut result: ambient_authority::TempDirNewResults) -> Promise<(), Error> {
-        
-        result.get().set_temp_dir(capnp_rpc::new_client(...));
-        todo!()
-    }*/
+        let ambient_authority = cap_std::ambient_authority();
+        let Ok(dir) = TempDir::new(ambient_authority) else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to create temp dir")});
+        };
+        result.get().set_temp_dir(capnp_rpc::new_client(TempDirImpl{temp_dir: Some(dir)}));
+        Promise::ok(())
+    }
     
 }
 
@@ -260,7 +236,6 @@ impl crate::sturdyref_capnp::saveable::Server for DirImpl {
         let Ok(cloned) = self.dir.try_clone() else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to clone underlying dir")});
         };
-        //let client: dir::Client = capnp_rpc::new_client(DirImpl{dir: cloned});
         let Ok(path) = cloned.into_std_file().path() else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to get path")});
         };
@@ -337,8 +312,12 @@ impl dir::Server for DirImpl {
         let params_reader = pry!(params.get());
         let from = pry!(params_reader.get_path_from()) ;
         let to = pry!(params_reader.get_path_to());
-        let this = &self.dir;
-        let Ok(bytes) = self.dir.copy(from, this, to) else {
+        let dir_to_cap = pry!(params_reader.get_dir_to());
+        let Some(dir_impl) = DIR_SET.with_borrow(|set| set.get_local_server_of_resolved(&dir_to_cap)) else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Dir not from the same machine")});
+        };
+        let dir_to = &dir_impl.borrow().dir;
+        let Ok(bytes) = self.dir.copy(from, dir_to, to) else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to copy file contents")});
         };
         result.get().set_result(bytes);
@@ -348,8 +327,12 @@ impl dir::Server for DirImpl {
         let params_reader = pry!(params.get());
         let src = pry!(params_reader.get_src_path());
         let dst = pry!(params_reader.get_dst_path());
-        let this = &self.dir;
-        let Ok(()) = self.dir.hard_link(src, this, dst) else {
+        let dst_dir_cap = pry!(params_reader.get_dst_dir());
+        let Some(dir_impl) = DIR_SET.with_borrow(|set| set.get_local_server_of_resolved(&dst_dir_cap)) else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Dir not from the same machine")});
+        };
+        let dst_dir = &dir_impl.borrow().dir;
+        let Ok(()) = self.dir.hard_link(src, dst_dir, dst) else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to create hard link")});
         };
         Promise::ok(())
@@ -543,29 +526,32 @@ impl dir::Server for DirImpl {
         Promise::ok(())
     }
 
-/*
+
     fn temp_dir_new_in(&mut self, _: dir::TempDirNewInParams, mut result: dir::TempDirNewInResults) -> Promise<(), Error> {
         let Ok(temp_dir) = cap_tempfile::TempDir::new_in(&self.dir) else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to create temp dir")});
         };
-        //result.get().set_temp_dir(capnp_rpc::new_client(temp_dir));
-        todo!()
-    }*/
-    /*fn temp_file_new(&mut self,  _: dir::TempFileNewParams, mut result: dir::TempFileNewResults) -> Promise<(), Error> {
-        //let Ok(_dir) = self.dir.try_clone() else {
-        //    return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to make an owned copy of the underlying dir")});
-        //};
-        let Ok(temp_file) = cap_tempfile::TempFile::new(&self.dir) else {
+        result.get().set_temp_dir(capnp_rpc::new_client(TempDirImpl{temp_dir: Some(temp_dir)}));
+        Promise::ok(())
+    }/* 
+    fn temp_file_new(&mut self,  params: dir::TempFileNewParams, mut result: dir::TempFileNewResults) -> Promise<(), Error> {
+        let params_reader = pry!(params.get());
+        let dir_cap = pry!(params_reader.get_dir());
+        let Some(underlying_dir) = DIR_SET.with_borrow(|set| set.get_local_server_of_resolved(&dir_cap)) else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Dir not from the same machine")});
+        };
+        let dir = underlying_dir.borrow().dir.try_clone().unwrap();
+        let Ok(temp_file) = cap_tempfile::TempFile::new(&dir) else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to create temp file")});
         };
-        result.get().set_temp_file(capnp_rpc::new_client(TempFileImpl{temp_file: temp_file}));
+        result.get().set_temp_file(capnp_rpc::new_client(TempFileImpl{temp_file: Some(temp_file)}));
         Promise::ok(())
     }*/
     fn temp_file_new_anonymous(&mut self, _: dir::TempFileNewAnonymousParams, mut result: dir::TempFileNewAnonymousResults) -> Promise<(), Error> {
         let Ok(file) = cap_tempfile::TempFile::new_anonymous(&self.dir) else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to create anonymous temp file")});
         };
-        result.get().set_file(capnp_rpc::new_client(FileImpl{file}));
+        result.get().set_file(capnp_rpc::new_client(FileImpl{file: file}));
         Promise::ok(())
     }
 }
@@ -615,7 +601,7 @@ impl dir_entry::Server for DirEntryImpl {
         let Ok(_dir) = self.entry.open_dir() else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to open the entry as a dir")});
         };
-        result.get().set_dir(capnp_rpc::new_client(DirImpl{dir: _dir}));
+        result.get().set_dir(DIR_SET.with_borrow_mut(|set| set.new_client(DirImpl{dir: _dir})));
         Promise::ok(())
     }
     fn remove_file(&mut self, _: dir_entry::RemoveFileParams, _: dir_entry::RemoveFileResults) -> Promise<(), Error> {
@@ -805,43 +791,60 @@ impl permissions::Server for PermissionsImpl {
         Promise::ok(())
     }
 }
-/* 
+
 pub struct TempDirImpl {
-    temp_dir: TempDir
-}
-
-impl std::ops::Deref for TempDirImpl {
-    type Target = DirImpl;
-
-    fn deref(&self) -> &Self::Target {
-        return self as &DirImpl
-    }
+    temp_dir: Option<TempDir>
 }
 
 impl temp_dir::Server for TempDirImpl {
-
-}*/
+    fn close(&mut self, _: temp_dir::CloseParams, _: temp_dir::CloseResults) -> Promise<(), Error> {
+        let Some(dir) = self.temp_dir.take() else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Temp dir already closed")});
+        };
+        let Ok(()) = dir.close() else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to close temp dir")});
+        };
+        Promise::ok(())
+    }
+    fn get_as_dir(&mut self, _: temp_dir::GetAsDirParams, mut result: temp_dir::GetAsDirResults) -> Promise<(), Error> {
+        let Some(dir) = self.temp_dir.take() else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Temp dir already closed")});
+        };
+        let Ok(cloned) = dir.try_clone() else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to get an owned version of the underlying dir")});
+        };
+        self.temp_dir = Some(dir);
+        result.get().set_dir(DIR_SET.with_borrow_mut(|set| set.new_client(DirImpl{dir: cloned})));
+        Promise::ok(())
+    }
+}
 pub struct TempFileImpl<'a> {
-    temp_file: TempFile<'a>
+    temp_file: Option<TempFile<'a>>
 }
 
 impl temp_file::Server for TempFileImpl<'_> {
     fn as_file(&mut self, _: temp_file::AsFileParams, mut result: temp_file::AsFileResults) -> Promise<(), Error> {
-        let _file = self.temp_file.as_file_mut();
-        let Ok(_cloned) = _file.try_clone() else {
+        let Some(_file) = self.temp_file.take() else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Temp file already removed")});
+        };
+        let Ok(_cloned) = _file.as_file().try_clone() else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to get an owned version of the underlying file")});
         };
+        self.temp_file = Some(_file);
         result.get().set_file(capnp_rpc::new_client(FileImpl{file: _cloned}));
         Promise::ok(())
-    }/*
+    }
     fn replace(&mut self, params: temp_file::ReplaceParams, _: temp_file::ReplaceResults) -> Promise<(), Error> {
         let params_reader = pry!(params.get());
         let dest = pry!(params_reader.get_dest());
-        let Ok(()) = self.temp_file.replace(dest) else {
+        let Some(temp_file) = self.temp_file.take() else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Temp file already removed")});
+        };
+        let Ok(()) = temp_file.replace(dest) else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to write file to the target location")});
         };
         Promise::ok(())
-    }*/
+    }
 }
 
 pub struct SystemTimeImpl {
@@ -851,7 +854,12 @@ pub struct SystemTimeImpl {
 impl system_time::Server for SystemTimeImpl {
     fn duration_since(&mut self, params: system_time::DurationSinceParams, mut result: system_time::DurationSinceResults) -> Promise<(), Error> {
         let params_reader = pry!(params.get());
-        capnp_let!({duration_since_unix_epoch : {secs, nanos}} = params_reader);
+        let earlier = pry!(params_reader.get_earlier());
+        let Ok(earlier_duration_since_unix_epoch) = tokio::task::block_in_place(move ||tokio::runtime::Handle::current().block_on(earlier.get_duration_since_unix_epoch_request().send().promise)) else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to convert to unix time")});
+        };
+        let reader = pry!(earlier_duration_since_unix_epoch.get());
+        capnp_let!({duration : {secs, nanos}} = reader);
         //Add duration since unix epoch to unix epoch to reconstruct a system time
         let earlier = cap_std::time::SystemTime::from_std(std::time::UNIX_EPOCH + Duration::new(secs, nanos));
         let Ok(_duration_since) = self.system_time.duration_since(earlier) else {
@@ -905,15 +913,47 @@ pub struct InstantImpl {
 }
 
 impl instant::Server for InstantImpl {
-    /*fn duration_since(&mut self, _: DurationSinceParams, _: DurationSinceResults) -> Promise<(), Error> {
-        
+    fn duration_since(&mut self, params: instant::DurationSinceParams, mut result: instant::DurationSinceResults) -> Promise<(), Error> {
+        let params_reader = pry!(params.get());
+        let instant_cap = pry!(params_reader.get_earlier());
+        let Some(instant_impl) = INSTANT_SET.with_borrow(|set| set.get_local_server_of_resolved(&instant_cap)) else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Earlier instant not from the same machine")});
+        };
+        let earlier = instant_impl.borrow().instant.clone();
+        let dur = self.instant.duration_since(earlier);
+        let mut response = result.get().init_duration();
+        response.set_secs(dur.as_secs());
+        response.set_nanos(dur.subsec_nanos());
+        Promise::ok(())
     }
-    fn checked_duration_since(&mut self, _: CheckedDurationSinceParams, _: CheckedDurationSinceResults) -> Promise<(), Error> {
-        
+    fn checked_duration_since(&mut self, params: instant::CheckedDurationSinceParams, mut result: instant::CheckedDurationSinceResults) -> Promise<(), Error> {
+        let params_reader = pry!(params.get());
+        let instant_cap = pry!(params_reader.get_earlier());
+        let Some(instant_impl) = INSTANT_SET.with_borrow(|set| set.get_local_server_of_resolved(&instant_cap)) else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Earlier instant not from the same machine")});
+        };
+        let earlier = instant_impl.borrow().instant.clone();
+        let Some(dur) = self.instant.checked_duration_since(earlier) else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Earlier instant not from the same machine")});
+        };
+        let mut response = result.get().init_duration();
+        response.set_secs(dur.as_secs());
+        response.set_nanos(dur.subsec_nanos());
+        Promise::ok(())
     }
-    fn saturating_duration_since(&mut self, _: SaturatingDurationSinceParams, _: SaturatingDurationSinceResults) -> Promise<(), Error> {
-        
-    }*/
+    fn saturating_duration_since(&mut self, params: instant::SaturatingDurationSinceParams, mut result: instant::SaturatingDurationSinceResults) -> Promise<(), Error> {
+        let params_reader = pry!(params.get());
+        let instant_cap = pry!(params_reader.get_earlier());
+        let Some(instant_impl) = INSTANT_SET.with_borrow(|set| set.get_local_server_of_resolved(&instant_cap)) else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Earlier instant not from the same machine")});
+        };
+        let earlier = instant_impl.borrow().instant.clone();
+        let dur = self.instant.saturating_duration_since(earlier);
+        let mut response = result.get().init_duration();
+        response.set_secs(dur.as_secs());
+        response.set_nanos(dur.subsec_nanos());
+        Promise::ok(())
+    }
     fn checked_add(&mut self, params: instant::CheckedAddParams, mut result: instant::CheckedAddResults) -> Promise<(), Error> {
         let params_reader = pry!(params.get());
         let duration_reader = pry!(params_reader.get_duration());
@@ -923,7 +963,7 @@ impl instant::Server for InstantImpl {
         let Some(_instant) = self.instant.checked_add(duration) else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to add duration to instant")});
         };
-        result.get().set_instant(capnp_rpc::new_client(InstantImpl{instant: _instant}));
+        result.get().set_instant(INSTANT_SET.with_borrow_mut(|set| set.new_client(InstantImpl{instant: _instant})));
         Promise::ok(())
     }
     fn checked_sub(&mut self, params: instant::CheckedSubParams, mut result: instant::CheckedSubResults) -> Promise<(), Error> {
@@ -935,18 +975,9 @@ impl instant::Server for InstantImpl {
         let Some(_instant) = self.instant.checked_sub(duration) else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to subtract duration from instant")});
         };
-        result.get().set_instant(capnp_rpc::new_client(InstantImpl{instant: _instant}));
+        result.get().set_instant(INSTANT_SET.with_borrow_mut(|set| set.new_client(InstantImpl{instant: _instant})));
         Promise::ok(())
     }
-    //fn get_duration_since_unix_epoch(&mut self, _: instant::GetDurationSinceUnixEpochParams, mut result: instant::GetDurationSinceUnixEpochResults) -> Promise<(), Error> {
-    //    let Ok(_duration) = self.instant + std::time::UNIX_EPOCH else {
-    //        return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to get duration since unix epoch")});
-    //    };
-    //    let mut response = result.get().init_duration();
-    //    response.set_secs(_duration.as_secs());
-    //    response.set_nanos(_duration.subsec_nanos());
-    //    Promise::ok(())
-    //}
 }
 
 pub struct MonotonicClockImpl {
@@ -956,12 +987,22 @@ pub struct MonotonicClockImpl {
 impl monotonic_clock::Server for MonotonicClockImpl {
     fn now(&mut self, _: monotonic_clock::NowParams, mut result: monotonic_clock::NowResults) -> Promise<(), Error> {
         let _instant = self.monotonic_clock.now();
-        result.get().set_instant(capnp_rpc::new_client(InstantImpl{instant: _instant}));
+        result.get().set_instant(INSTANT_SET.with_borrow_mut(|set| set.new_client(InstantImpl{instant: _instant})));
         Promise::ok(())
     }
-    //fn elapsed(&mut self, _: monotonic_clock::ElapsedParams, _: monotonic_clock::ElapsedResults) -> Promise<(), Error> {
-//
-    //}
+    fn elapsed(&mut self, params: monotonic_clock::ElapsedParams, mut result: monotonic_clock::ElapsedResults) -> Promise<(), Error> {
+        let params_reader = pry!(params.get());
+        let instant_cap = pry!(params_reader.get_instant());
+        let Some(instant_impl) = INSTANT_SET.with_borrow(|set| set.get_local_server_of_resolved(&instant_cap)) else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Earlier instant not from the same machine")});
+        };
+        let instant = instant_impl.borrow().instant.clone();
+        let dur = self.monotonic_clock.elapsed(instant);
+        let mut response = result.get().init_duration();
+        response.set_secs(dur.as_secs());
+        response.set_nanos(dur.subsec_nanos());
+        Promise::ok(())
+    }
 }
 
 pub struct SystemClockImpl {
@@ -998,82 +1039,38 @@ impl project_dirs::Server for ProjectDirsImpl {
         let Ok(_dir) = self.project_dirs.cache_dir() else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to retrieve cache directory")});
         };
-        result.get().set_dir(capnp_rpc::new_client(DirImpl{dir: _dir}));
+        result.get().set_dir(DIR_SET.with_borrow_mut(|set| set.new_client(DirImpl{dir: _dir})));
         Promise::ok(())
     }
     fn config_dir( &mut self, _: project_dirs::ConfigDirParams, mut result: project_dirs::ConfigDirResults) -> Promise<(), Error> {
         let Ok(_dir) = self.project_dirs.config_dir() else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to retrieve config directory")});
         };
-        result.get().set_dir(capnp_rpc::new_client(DirImpl{dir: _dir}));
+        result.get().set_dir(DIR_SET.with_borrow_mut(|set| set.new_client(DirImpl{dir: _dir})));
         Promise::ok(())
     }
     fn data_dir(&mut self, _: project_dirs::DataDirParams, mut result: project_dirs::DataDirResults) -> Promise<(), Error> {
         let Ok(_dir) = self.project_dirs.data_dir() else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to retrieve data directory")});
         };
-        result.get().set_dir(capnp_rpc::new_client(DirImpl{dir: _dir}));
+        result.get().set_dir(DIR_SET.with_borrow_mut(|set| set.new_client(DirImpl{dir: _dir})));
         Promise::ok(())
     }
     fn data_local_dir(&mut self, _: project_dirs::DataLocalDirParams, mut result: project_dirs::DataLocalDirResults) -> Promise<(), Error> {
         let Ok(_dir) = self.project_dirs.data_local_dir() else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to retrieve local data directory")});
         };
-        result.get().set_dir(capnp_rpc::new_client(DirImpl{dir: _dir}));
+        result.get().set_dir(DIR_SET.with_borrow_mut(|set| set.new_client(DirImpl{dir: _dir})));
         Promise::ok(())
     }
     fn runtime_dir(&mut self, _: project_dirs::RuntimeDirParams, mut result: project_dirs::RuntimeDirResults) -> Promise<(), Error> {
         let Ok(_dir) = self.project_dirs.runtime_dir() else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to retrieve runtime directory")});
         };
-        result.get().set_dir(capnp_rpc::new_client(DirImpl{dir: _dir}));
+        result.get().set_dir(DIR_SET.with_borrow_mut(|set| set.new_client(DirImpl{dir: _dir})));
         Promise::ok(())
     }
 }
-
-
-//Importing IntoResult from capnp causes weird things with rust analyzer for some reason but seemingly builds/works fine
-pub type Result<T> = ::core::result::Result<T, Error>;
-
-pub trait IntoResult {
-    type InnerType;
-    fn into_result(self) -> Result<Self::InnerType>;
-}
-
-impl<T> IntoResult for Result<T> {
-    type InnerType = T;
-    fn into_result(self) -> Result<Self::InnerType> {
-        self
-    }
-}
-
-impl IntoResult for u64 {
-    type InnerType = u64;
-    fn into_result(self) -> Result<Self::InnerType> {
-        Ok(self)
-    }
-}
-
-impl IntoResult for u32 {
-    type InnerType = u32;
-    fn into_result(self) -> Result<Self::InnerType> {
-        Ok(self)
-    }
-}
-
-impl IntoResult for bool {
-    type InnerType = bool;
-    fn into_result(self) -> Result<Self::InnerType> {
-        Ok(self)
-    }
-}
-/*
-impl<T: capnp::introspect::Introspect> IntoResult for T {
-    type InnerType = Self;
-    fn into_result(self) -> Result<Self::InnerType> {
-        Ok::<Self::InnerType, Error>(self)
-    }
-}*/
 
 #[cfg(test)]
 pub mod tests {
@@ -1085,16 +1082,12 @@ pub mod tests {
     use capnp_rpc::pry;
     use capnp_macros::capnp_let;
     use tokio::io::{AsyncRead, AsyncReadExt};
-    use crate::{cap_std_capnp::{ambient_authority, cap_fs, dir, dir_entry, duration, file, FileType, instant, metadata, monotonic_clock, open_options, permissions, project_dirs, read_dir, system_clock, system_time, system_time_error, temp_dir, temp_file, user_dirs}, spawn::unix_process::UnixProcessServiceSpawnImpl, byte_stream::ByteStreamImpl};
+    use crate::{cap_std_capnp::{ambient_authority, dir, dir_entry, duration, file, FileType, instant, metadata, monotonic_clock, open_options, permissions, project_dirs, read_dir, system_clock, system_time, temp_dir, temp_file, user_dirs}, spawn::unix_process::UnixProcessServiceSpawnImpl, byte_stream::ByteStreamImpl, cap_std_capnproto::AmbientAuthorityImpl};
     
 
     #[test]
     fn create_dir_all_canonicalize_test() -> eyre::Result<()> {
-
-        let cap: cap_fs::Client = capnp_rpc::new_client(crate::cap_std_capnproto::CapFsImpl);
-
-        let mut use_aa_request = cap.use_ambient_authority_request();
-        let ambient_authority = futures::executor::block_on(use_aa_request.send().promise)?.get()?.get_ambient_authority()?;
+        let ambient_authority: ambient_authority::Client = capnp_rpc::new_client(AmbientAuthorityImpl{});
         
         let mut open_ambient_request = ambient_authority.dir_open_ambient_request();
         let mut path = std::env::temp_dir();
@@ -1116,10 +1109,7 @@ pub mod tests {
     #[test]
     fn test_create_write_getmetadata() -> eyre::Result<()> {
         //use ambient authority to open a dir, create a file(Or open it in write mode if it already exists), open a bytestream, use the bytestream to write some bytes, get file metadata
-        let cap: cap_fs::Client = capnp_rpc::new_client(crate::cap_std_capnproto::CapFsImpl);
-
-        let mut use_aa_request = cap.use_ambient_authority_request();
-        let ambient_authority = futures::executor::block_on(use_aa_request.send().promise)?.get()?.get_ambient_authority()?;
+        let ambient_authority: ambient_authority::Client = capnp_rpc::new_client(AmbientAuthorityImpl{});
 
         let mut open_ambient_request = ambient_authority.dir_open_ambient_request();
         let mut path = std::env::temp_dir();
@@ -1154,10 +1144,7 @@ pub mod tests {
     #[test]
     fn test_user_dirs() -> eyre::Result<()> {
         //idk what to do with all these dirs to test that they are right but I guess it's up to cap directories
-        let cap: cap_fs::Client = capnp_rpc::new_client(crate::cap_std_capnproto::CapFsImpl);
-
-        let use_aa_request = cap.use_ambient_authority_request();
-        let ambient_authority = futures::executor::block_on(use_aa_request.send().promise)?.get()?.get_ambient_authority()?;
+        let ambient_authority: ambient_authority::Client = capnp_rpc::new_client(AmbientAuthorityImpl{});
 
         let home_dir_request = ambient_authority.user_dirs_home_dir_request();
         let home_dir = futures::executor::block_on(home_dir_request.send().promise)?.get()?.get_dir()?;
@@ -1174,9 +1161,11 @@ pub mod tests {
         let download_dir_request = ambient_authority.user_dirs_download_dir_request();
         let download_dir = futures::executor::block_on(download_dir_request.send().promise)?.get()?.get_dir()?;
 
-        //TODO font dir doesn't seem to exist on windows
-        //let font_dir_request = ambient_authority.user_dirs_font_dir_request();
-        //let font_dir = futures::executor::block_on(font_dir_request.send().promise)?.get()?.get_dir()?;
+        //font dir doesn't seem to exist on windows
+        #[cfg(not(target_os = "windows"))]
+        let font_dir_request = ambient_authority.user_dirs_font_dir_request();
+        #[cfg(not(target_os = "windows"))]
+        let font_dir = futures::executor::block_on(font_dir_request.send().promise)?.get()?.get_dir()?;
 
         let picture_dir_request = ambient_authority.user_dirs_picture_dir_request();
         let picture_dir = futures::executor::block_on(picture_dir_request.send().promise)?.get()?.get_dir()?;
@@ -1196,10 +1185,7 @@ pub mod tests {
     #[test]
     fn test_project_dirs() -> eyre::Result<()> {
         //TODO maybe create some form of generic "dir" test
-        let cap: cap_fs::Client = capnp_rpc::new_client(crate::cap_std_capnproto::CapFsImpl);
-
-        let use_aa_request = cap.use_ambient_authority_request();
-        let ambient_authority = futures::executor::block_on(use_aa_request.send().promise)?.get()?.get_ambient_authority()?;
+        let ambient_authority: ambient_authority::Client = capnp_rpc::new_client(AmbientAuthorityImpl{});
 
         let mut project_dirs_from_request = ambient_authority.project_dirs_from_request();
         let mut project_dirs_builder = project_dirs_from_request.get();
@@ -1220,19 +1206,18 @@ pub mod tests {
         let data_local_dir_request = project_dirs.data_local_dir_request();
         let data_local_dir = futures::executor::block_on(data_local_dir_request.send().promise)?.get()?.get_dir()?;
 
-        //TODO Runtime directory seems to not exist on windows
-        //let runtime_dir_request = project_dirs.runtime_dir_request();
-        //let runtime_dir = futures::executor::block_on(runtime_dir_request.send().promise)?.get()?.get_dir()?;
+        //TODO Runtime directory seems to not exist on 
+        #[cfg(not(target_os = "windows"))]
+        let runtime_dir_request = project_dirs.runtime_dir_request();
+        #[cfg(not(target_os = "windows"))]
+        let runtime_dir = futures::executor::block_on(runtime_dir_request.send().promise)?.get()?.get_dir()?;
 
         return Ok(())
     }
 
     #[test]
     fn test_system_clock() -> eyre::Result<()> {
-        let cap: cap_fs::Client = capnp_rpc::new_client(crate::cap_std_capnproto::CapFsImpl);
-
-        let use_aa_request = cap.use_ambient_authority_request();
-        let ambient_authority = futures::executor::block_on(use_aa_request.send().promise)?.get()?.get_ambient_authority()?;
+        let ambient_authority: ambient_authority::Client = capnp_rpc::new_client(AmbientAuthorityImpl{});
 
         let system_clock_request = ambient_authority.system_clock_new_request();
         let system_clock = futures::executor::block_on(system_clock_request.send().promise)?.get()?.get_clock()?;
@@ -1277,9 +1262,7 @@ pub mod tests {
         path.push("dir2");
         std::fs::create_dir_all(path)?;
 
-        let cap: cap_fs::Client = capnp_rpc::new_client(crate::cap_std_capnproto::CapFsImpl);
-        let mut use_aa_request = cap.use_ambient_authority_request();
-        let ambient_authority = futures::executor::block_on(use_aa_request.send().promise)?.get()?.get_ambient_authority()?;
+        let ambient_authority: ambient_authority::Client = capnp_rpc::new_client(AmbientAuthorityImpl{});
         
         let mut open_ambient_request = ambient_authority.dir_open_ambient_request();
         let mut path = std::env::temp_dir();
@@ -1403,26 +1386,6 @@ pub mod tests {
         println!("Duration since unix epoch: secs:{secs} nanos:{nanos}");
         return Ok(())
     }
-/* 
-    fn test_file_type(file_type: file_type::Client) -> eyre::Result<()> {
-        println!("\nFile type test:");
-        //TODO test creating file types
-
-        let mut is_dir_request = file_type.is_dir_request();
-        let result = futures::executor::block_on(is_dir_request.send().promise)?.get()?.get_result();
-        println!("Is dir: {result}");
-
-        let mut is_file_request = file_type.is_file_request();
-        let result = futures::executor::block_on(is_file_request.send().promise)?.get()?.get_result();
-        println!("Is file: {result}");
-
-        let mut is_symlink_request = file_type.is_symlink_request();
-        let result = futures::executor::block_on(is_symlink_request.send().promise)?.get()?.get_result();
-        println!("Is symlink: {result}");
-
-
-        return Ok(())
-    }*/
 
     #[test]
     fn test_open_read() -> eyre::Result<()> {
@@ -1436,9 +1399,7 @@ pub mod tests {
         writer.write_all(b"Just a test file ")?;
         writer.flush()?;
 
-        let cap: cap_fs::Client = capnp_rpc::new_client(crate::cap_std_capnproto::CapFsImpl);
-        let mut use_aa_request = cap.use_ambient_authority_request();
-        let ambient_authority = futures::executor::block_on(use_aa_request.send().promise)?.get()?.get_ambient_authority()?;
+        let ambient_authority: ambient_authority::Client = capnp_rpc::new_client(AmbientAuthorityImpl{});
         
         let mut open_ambient_request = ambient_authority.dir_open_ambient_request();
         let mut path = std::env::temp_dir();

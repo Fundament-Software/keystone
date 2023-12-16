@@ -4,7 +4,7 @@ use capnp_rpc::pry;
 use capnp::private::capability::ClientHook;
 use serde::{Serialize, Deserialize};
 use signature::Signer;
-use crate::{sturdyref_capnp::restorer, scheduler_capnp::{listener, listener_test}, cap_std_capnp::{ambient_authority, dir}, cap_std_capnproto::{self, DirImpl}, scheduler::{Listener, ListenerTestImpl}};
+use crate::{sturdyref_capnp::restorer, scheduler_capnp::{listener, listener_test}, cap_std_capnp::{ambient_authority, dir}, cap_std_capnproto::{self, DirImpl, AmbientAuthorityImpl}, scheduler::{Listener, ListenerTestImpl}};
 use rand::rngs::OsRng;
 use ed25519_dalek::{SigningKey, SignatureError};
 use ed25519_dalek::Signature;
@@ -133,12 +133,10 @@ pub fn save_sturdyref(sturdyref: Saved) -> eyre::Result<Vec<u8>> {
 #[test]
 fn sturdyref_dir_test() -> eyre::Result<()> {
     use crate::cap_std_capnproto;
-    use crate::cap_std_capnp::cap_fs;
     use crate::sturdyref_capnp::saveable;
     use crate::sturdyref_capnp::saveable::Server;
-    let cap: cap_fs::Client = capnp_rpc::new_client(cap_std_capnproto::CapFsImpl);
 
-    let ambient_authority = futures::executor::block_on(cap.use_ambient_authority_request().send().promise)?.get()?.get_ambient_authority()?;
+    let ambient_authority: ambient_authority::Client = capnp_rpc::new_client(AmbientAuthorityImpl{});
         
     let mut open_ambient_request = ambient_authority.dir_open_ambient_request();
     open_ambient_request.get().set_path(std::env::temp_dir().to_str().unwrap());

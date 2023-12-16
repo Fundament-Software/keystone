@@ -1,13 +1,5 @@
 @0xd5b73ad4256c863f;
 
-interface CapFs {
-  useAmbientAuthority @0 () -> (ambientAuthority :AmbientAuthority);
-  dirOpen @1 (path :Text) -> (dir :Dir);
-  #tempDirNewIn @2 (dir :Dir) -> (tempDir :TempDir);
-  #tempFileNew @3 (dir :Dir) -> (tempFile :TempFile);
-  #tempFileNewAnonymous @4 (dir :Dir) -> (file :File);
-}
-
 using Stream = import "std/byte_stream.capnp".ByteStream;
 
 interface File {
@@ -28,8 +20,8 @@ interface Dir extends(Saveable) {
   createDirAll @3 (path :Text) -> ();
   create @4 (path :Text) -> (file :File);
   canonicalize @5 (path :Text) -> (pathBuf :Text);
-  copy @6 (pathFrom :Text, pathTo :Text) -> (result :UInt64);
-  hardLink @7 (srcPath :Text, dstPath :Text) -> ();
+  copy @6 (pathFrom :Text, dirTo :Dir, pathTo :Text) -> (result :UInt64);
+  hardLink @7 (srcPath :Text, dstDir :Dir, dstPath :Text) -> ();
   metadata @8 (path :Text) -> (metadata :Metadata);
   dirMetadata @9 () -> (metadata :Metadata);
   entries @10 () -> (iter :ReadDir);
@@ -55,7 +47,7 @@ interface Dir extends(Saveable) {
   isFile @27 (path :Text) -> (result :Bool);
   isDir @28 (path :Text) -> (result :Bool);
   tempDirNewIn @29 () -> (tempDir :TempDir);
-  tempFileNew @30 () -> (tempFile :TempFile);
+  tempFileNew @30 (dir :Dir) -> (tempFile :TempFile);
   tempFileNewAnonymous @31 () -> (file :File);
 }
 
@@ -82,12 +74,11 @@ struct Duration {
 }
 
 interface Instant {
-  durationSince @0 (earlierDurationSinceUnixEpoch :Duration) -> (duration :Duration);
-  checkedDurationSince @1 (earlierDurationSinceUnixEpoch :Duration) -> (duration :Duration);
-  saturatingDurationSince @2 (earlierDurationSinceUnixEpoch :Duration) -> (duration :Duration);
+  durationSince @0 (earlier :Instant) -> (duration :Duration);
+  checkedDurationSince @1 (earlier :Instant) -> (duration :Duration);
+  saturatingDurationSince @2 (earlier :Instant) -> (duration :Duration);
   checkedAdd @3 (duration :Duration) -> (instant :Instant);
   checkedSub @4 (duration :Duration) -> (instant :Instant);
-  getDurationSinceUnixEpoch @5 () -> (duration :Duration);
 }
 
 interface MonotonicClock {
@@ -101,14 +92,10 @@ interface SystemClock {
 }
 
 interface SystemTime {
-  durationSince @0 (durationSinceUnixEpoch :Duration) -> (duration :Duration);
+  durationSince @0 (earlier :SystemTime) -> (duration :Duration);
   checkedAdd @1 (duration :Duration) -> (result :SystemTime);
   checkedSub @2 (duration :Duration) -> (result :SystemTime);
   getDurationSinceUnixEpoch @3 () -> (duration :Duration);
-}
-
-interface SystemTimeError {
-  duration @0 () -> (duration :Duration);
 }
 
 enum FileType {
@@ -130,15 +117,6 @@ struct OpenOptions {
   createNew @5 :Bool;
 }
 
-#interface OpenOptions {
-#  read @0 (read :Bool) -> (openOptions :OpenOptions);
-#  write @1 (write :Bool) -> (openOptions :OpenOptions);
-#  append @2 (append :Bool) -> (openOptions :OpenOptions);
-#  truncate @3 (truncate :Bool) -> (openOptions :OpenOptions);
-#  create @4 (create :Bool) -> (openOptions :OpenOptions);
-#  createNew @5 (createNew :Bool) -> (openOptions :OpenOptions);
-#}
-
 interface DirEntry {
   open @0 () -> (file :File);
   openWith @1 (openOptions :OpenOptions) -> (file :File);
@@ -155,7 +133,7 @@ interface AmbientAuthority {
   fileCreateAmbient @1 (path :Text) -> (file :File);
   fileOpenAmbientWith @2 (path :Text, openOptions :OpenOptions) -> (file :File);
   dirOpenAmbient @3 (path :Text) -> (result :Dir);
-  dirOpenParent @4 () -> (result :Dir);
+  dirOpenParent @4 (dir :Dir) -> (result :Dir);
   dirCreateAmbientAll @5 (path :Text) -> ();
   monotonicClockNew @6 () -> (clock :MonotonicClock);
   systemClockNew @7 () -> (clock :SystemClock);
@@ -185,8 +163,9 @@ interface UserDirs {
   new @0 () -> (userDirs :UserDirs);
 }
 
-interface TempDir extends(Dir) {
+interface TempDir {
   close @0 () -> ();
+  getAsDir @1 () -> (dir :Dir);
 }
 
 interface TempFile {

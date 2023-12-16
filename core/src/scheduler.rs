@@ -7,7 +7,7 @@ use futures::FutureExt;
 use tokio::{task::{JoinHandle, self}, time};
 use capnp::IntoResult;
 use keystone::sturdyref_capnp::saveable;
-use crate::{scheduler_capnp::{scheduler, cancelable, listener, create_scheduler, listener_test}, cap_std_capnp::cap_fs, cap_std_capnproto};
+use crate::{scheduler_capnp::{scheduler, cancelable, listener, create_scheduler, listener_test}, cap_std_capnproto};
 use capnp::capability::FromClientHook;
 
 struct CreateSchedulerImpl {
@@ -29,7 +29,8 @@ struct SchedulerImpl {
     tasks: HashMap<u8, JoinHandle<()>>,
     next_id: u8,
     channel: Channel,
-    listeners: HashMap<u8, crate::scheduler_capnp::listener::Client>
+    listeners: HashMap<u8, crate::scheduler_capnp::listener::Client>,
+    sturdyrefs: HashMap<u8, Vec<u8>>
 }
 
 impl scheduler::Server for Rc<tokio::sync::RwLock<SchedulerImpl>> {
@@ -335,7 +336,7 @@ impl <T : capnp::capability::FromClientHook + Clone, P : Clone, V>saveable::Serv
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to save sturdyref")});
         };
         let Ok(()) = result.get().init_value().set_as(signed_row.as_slice()) else {
-            todo!()
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to save sturdyref")});
         };
         Promise::ok(())
     }
@@ -353,7 +354,7 @@ impl saveable::Server for ListenerTestImpl {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to save sturdyref")});
         };
         let Ok(()) = result.get().init_value().set_as(signed_row.as_slice()) else {
-            todo!()
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to save underlying sturdyref")});
         };
         Promise::ok(())
     }
@@ -407,10 +408,10 @@ impl Listener for Rc<RefCell<ListenerTestImpl>> {
 impl crate::sturdyref_capnp::saveable::Server for Box<dyn Listener> {
     fn save(&mut self, _: crate::sturdyref_capnp::saveable::SaveParams, mut result: crate::sturdyref_capnp::saveable::SaveResults) -> Promise<(), Error> {
         let Ok(signed_row) = self.as_mut().save() else {
-            todo!()
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to save underlying sturdyref")});
         };
         let Ok(()) = result.get().init_value().set_as(signed_row.as_slice()) else {
-            todo!()
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to save underlying sturdyref")});
         };
         Promise::ok(())
     }
@@ -427,7 +428,7 @@ impl listener::Server for Box<dyn Listener> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn scheduler_test() -> eyre::Result<()> {
     let (sender, mut receiver) = tokio::sync::mpsc::channel(100);
-    let scheduler_rc = Rc::new(tokio::sync::RwLock::new(SchedulerImpl{tasks: HashMap::new(), next_id: 1, channel: Channel{sender: sender}, listeners: HashMap::new()}));
+    let scheduler_rc = Rc::new(tokio::sync::RwLock::new(SchedulerImpl{tasks: HashMap::new(), next_id: 1, channel: Channel{sender: sender}, listeners: HashMap::new(), sturdyrefs: HashMap::new()}));
     let scheduler: scheduler::Client = capnp_rpc::new_client(scheduler_rc.clone());
     //let listener_test_rc = Rc::new(RefCell::new(ListenerTestImpl{test: Vec::new()}));
     let listener_test: listener_test::Client = capnp_rpc::new_client(ListenerTestImpl{test: Vec::new()});

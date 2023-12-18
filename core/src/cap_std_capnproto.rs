@@ -1,4 +1,3 @@
-
 use std::{path::Path, io::Write, cell::RefCell};
 
 use cap_std::{fs::{Dir, DirBuilder, File, Metadata, ReadDir, Permissions, OpenOptions, DirEntry}, time::{MonotonicClock, SystemClock, SystemTime, Duration, Instant}};
@@ -1437,12 +1436,4 @@ pub mod tests {
         }
         return Ok(())
     }
-
-
-
-
-
-
-
-
 }

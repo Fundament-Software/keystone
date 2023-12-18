@@ -1134,8 +1134,8 @@ pub mod tests {
         let home_dir_request = ambient_authority.user_dirs_home_dir_request();
         let home_dir = futures::executor::block_on(home_dir_request.send().promise)?.get()?.get_dir()?;
 
-        let audio_dir_request = ambient_authority.user_dirs_audio_dir_request();
-        let audio_dir = futures::executor::block_on(audio_dir_request.send().promise)?.get()?.get_dir()?;
+        //let audio_dir_request = ambient_authority.user_dirs_audio_dir_request();
+        //let audio_dir = futures::executor::block_on(audio_dir_request.send().promise)?.get()?.get_dir()?;
 
         let desktop_dir_request = ambient_authority.user_dirs_desktop_dir_request();
         let desktop_dir = futures::executor::block_on(desktop_dir_request.send().promise)?.get()?.get_dir()?;

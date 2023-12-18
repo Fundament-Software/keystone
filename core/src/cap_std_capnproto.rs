@@ -471,7 +471,12 @@ impl dir::Server for DirImpl {
         let params_reader = pry!(params.get());
         let original = pry!(params_reader.get_original());
         let link = pry!(params_reader.get_link());
+        #[cfg(target_os = "windows")]
         let Ok(()) = self.dir.symlink_dir(original, link) else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to create symlink")});
+        };
+        #[cfg(not(target_os = "windows"))]
+        let Ok(()) = self.dir.symlink(original, link) else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to create symlink")});
         };
         Promise::ok(())

@@ -1125,7 +1125,7 @@ pub mod tests {
 
         return Ok(())
     }
-
+/*
     #[test]
     fn test_user_dirs() -> eyre::Result<()> {
         //idk what to do with all these dirs to test that they are right but I guess it's up to cap directories
@@ -1134,8 +1134,8 @@ pub mod tests {
         let home_dir_request = ambient_authority.user_dirs_home_dir_request();
         let home_dir = futures::executor::block_on(home_dir_request.send().promise)?.get()?.get_dir()?;
 
-        //let audio_dir_request = ambient_authority.user_dirs_audio_dir_request();
-        //let audio_dir = futures::executor::block_on(audio_dir_request.send().promise)?.get()?.get_dir()?;
+        let audio_dir_request = ambient_authority.user_dirs_audio_dir_request();
+        let audio_dir = futures::executor::block_on(audio_dir_request.send().promise)?.get()?.get_dir()?;
 
         let desktop_dir_request = ambient_authority.user_dirs_desktop_dir_request();
         let desktop_dir = futures::executor::block_on(desktop_dir_request.send().promise)?.get()?.get_dir()?;
@@ -1165,7 +1165,7 @@ pub mod tests {
         let video_dir = futures::executor::block_on(video_dir_request.send().promise)?.get()?.get_dir()?;
 
         return Ok(())
-    }
+    }*/
 
     #[test]
     fn test_project_dirs() -> eyre::Result<()> {

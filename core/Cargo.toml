@@ -20,11 +20,14 @@ doctest = false
 async-trait = "0.1.57"
 atomic-counter = "1.0"
 bytes = "1.4.0"
-cap-std = "0.26"
+cap-std = "2.0.0"
+cap-tempfile = "2.0.0"
+cap-directories = "2.0.0"
 capnp = { git = "https://github.com/Fundament-Software/capnproto-rust" }
 capnp-futures = { git = "https://github.com/Fundament-Software/capnproto-rust" }
 capnp-import = { git = "https://github.com/Fundament-Software/capnproto-rust" }
 capnp-rpc = { git = "https://github.com/Fundament-Software/capnproto-rust" }
+capnp-macros = { git = "https://github.com/Fundament-Software/capnproto-rust" }
 chrono = "0.4"
 color-eyre = "0.6"
 couch_rs = "0.9"

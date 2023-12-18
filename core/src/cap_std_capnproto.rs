@@ -8,7 +8,6 @@ use capnp_rpc::{pry, CapabilityServerSet};
 use capnp_macros::capnp_let;
 use tokio::io::{AsyncRead, AsyncReadExt};
 use crate::{cap_std_capnp::{ambient_authority, dir, dir_entry, duration, file, FileType, instant, metadata, monotonic_clock, open_options, permissions, project_dirs, read_dir, system_clock, system_time, temp_dir, temp_file, user_dirs}, spawn::unix_process::UnixProcessServiceSpawnImpl, byte_stream::ByteStreamImpl};
-use filepath::FilePath;
 use capnp::IntoResult;
 
 thread_local! (

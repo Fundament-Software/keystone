@@ -1396,16 +1396,4 @@ pub mod tests {
         }
         return Ok(())
     }
-
-    #[test]
-    fn cap_std_test_open_read() -> eyre::Result<()> {
-        
-        use std::io::{BufWriter, Write};
-        use super::FileImpl;
-
-        let mut path = std::env::temp_dir();
-        path.push("capnp_test.txt");
-        let _f = std::fs::File::create(path)?;
-        let mut writer = BufWriter::new(_f);
-        writer.write_all(b"Just a test file ")?;
-        writer
+}

@@ -489,7 +489,12 @@ impl dir::Server for DirImpl {
         let params_reader = pry!(params.get());
         let original = pry!(params_reader.get_original());
         let link = pry!(params_reader.get_link());
+        #[cfg(target_os = "windows")]
         let Ok(()) = self.dir.symlink_dir(original, link) else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to create symlink")});
+        };
+        #[cfg(not(target_os = "windows"))]
+        let Ok(()) = self.dir.symlink(original, link) else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to create symlink")});
         };
         Promise::ok(())
@@ -1141,12 +1146,17 @@ pub mod tests {
     }
 
     #[test]
-    fn test_user_dirs() -> eyre::Result<()> {
-        //idk what to do with all these dirs to test that they are right but I guess it's up to cap directories
+    fn test_home_dir() -> eyre::Result<()> {
         let ambient_authority: ambient_authority::Client = capnp_rpc::new_client(AmbientAuthorityImpl{});
 
         let home_dir_request = ambient_authority.user_dirs_home_dir_request();
         let home_dir = futures::executor::block_on(home_dir_request.send().promise)?.get()?.get_dir()?;
+        return Ok(())
+    }
+    #[cfg(not(target_os = "linux"))]
+    #[test]
+    fn test_user_dirs() -> eyre::Result<()> {
+        let ambient_authority: ambient_authority::Client = capnp_rpc::new_client(AmbientAuthorityImpl{});
 
         let audio_dir_request = ambient_authority.user_dirs_audio_dir_request();
         let audio_dir = futures::executor::block_on(audio_dir_request.send().promise)?.get()?.get_dir()?;
@@ -1160,7 +1170,6 @@ pub mod tests {
         let download_dir_request = ambient_authority.user_dirs_download_dir_request();
         let download_dir = futures::executor::block_on(download_dir_request.send().promise)?.get()?.get_dir()?;
 
-        //font dir doesn't seem to exist on windows
         #[cfg(not(target_os = "windows"))]
         let font_dir_request = ambient_authority.user_dirs_font_dir_request();
         #[cfg(not(target_os = "windows"))]

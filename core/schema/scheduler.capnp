@@ -5,9 +5,13 @@ interface CreateScheduler {
 }
 
 interface Scheduler {
-  repeat @0 (listener :Listener, delay :Duration) -> (id :UInt8, cancelable :Cancelable);
-  scheduleFor @1 (listener :Listener, scheduleFor :UtcDateTime) -> (id :UInt8, cancelable :Cancelable);
-  scheduleForThenRepeat @2 (listener :Listener, start :UtcDateTime, delay :Duration) -> (id :UInt8, cancelable :Cancelable);
+  #repeat @0 (listener :Listener, delay :Duration) -> (id :UInt8, cancelable :Cancelable);
+  scheduleFor @0 (listener :Listener, scheduleForUnixTimestampMillis :Int64, missedEventBehavior: MissedEventBehavior) -> (id :UInt8, cancelable :Cancelable);
+  scheduleForThenRepeat @1 (listener :Listener, startUnixTimestampMillis :Int64, every :Every, missedEventBehavior: MissedEventBehavior) -> (id :UInt8, cancelable :Cancelable);
+}
+
+enum MissedEventBehavior {
+  sendAll @0;
 }
 
 interface Cancelable {
@@ -16,6 +20,21 @@ interface Cancelable {
 
 interface Listener {
   event @0 (id :UInt8) -> ();
+}
+
+struct UnixTimestamp {
+  secs @0 :Int64;
+  nanos @1 :UInt32;
+}
+
+struct Every {
+  months @0 :UInt32;
+  days @1 :UInt64;
+  hours @2 :Int64;
+  mins @3 :Int64;
+  secs @4 :Int64;
+  millis @5 :Int64;
+  tzIdentifier @6 :Text;
 }
 
 struct Duration {

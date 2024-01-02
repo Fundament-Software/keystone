@@ -12,7 +12,7 @@ use filepath::FilePath;
 use capnp::IntoResult;
 
 thread_local! (
-    static DIR_SET: RefCell<CapabilityServerSet<DirImpl, dir::Client>> = RefCell::new(CapabilityServerSet::new());
+    pub static DIR_SET: RefCell<CapabilityServerSet<DirImpl, dir::Client>> = RefCell::new(CapabilityServerSet::new());
     static INSTANT_SET: RefCell<CapabilityServerSet<InstantImpl, instant::Client>> = RefCell::new(CapabilityServerSet::new());
 );
 

@@ -1,14 +1,20 @@
-use std::{collections::HashMap, time::Duration, cell::RefCell, rc::Rc, sync::{Arc, RwLock}};
+use std::{collections::HashMap, time::{Duration, SystemTime, UNIX_EPOCH}, cell::RefCell, rc::Rc, sync::{Arc, RwLock}};
 
 use capnp::{capability::{Promise, Request}, Error};
 use capnp_macros::capnp_let;
-use capnp_rpc::pry;
+//use capnp_macros::capnp_build;
+use capnp_rpc::{pry, CapabilityServerSet};
+use chrono::{DateTime, TimeZone};
+use chrono_tz::Tz;
 use futures::FutureExt;
-use tokio::{task::{JoinHandle, self}, time};
+use serde::{Deserialize, Serialize};
+use tokio::{task::{JoinHandle, self, LocalSet}, time};
 use capnp::IntoResult;
 use keystone::sturdyref_capnp::saveable;
-use crate::{scheduler_capnp::{scheduler, cancelable, listener, create_scheduler, listener_test}, cap_std_capnproto};
+use tokio_util::time::{DelayQueue, delay_queue::Key};
+use crate::{scheduler_capnp::{scheduler, cancelable, listener, create_scheduler, listener_test}, cap_std_capnproto, cap_std_capnp::ambient_authority::MonotonicClockNewResults};
 use capnp::capability::FromClientHook;
+use tokio_stream::StreamExt;
 
 struct CreateSchedulerImpl {
 
@@ -19,16 +25,12 @@ impl create_scheduler::Server for CreateSchedulerImpl {
         todo!()
     }
 }
-
-struct Channel {
-    sender: tokio::sync::mpsc::Sender<u8>,
-    //receiver: tokio::sync::mpsc::Receiver<u8>
-}
-
+    
+/*
 struct SchedulerImpl {
     tasks: HashMap<u8, JoinHandle<()>>,
     next_id: u8,
-    channel: Channel,
+    channel: sender: tokio::sync::mpsc::Sender<u8>,
     listeners: HashMap<u8, crate::scheduler_capnp::listener::Client>,
     sturdyrefs: HashMap<u8, Vec<u8>>
 }
@@ -166,18 +168,20 @@ fn repeat_helper(dur: Duration, id: u8, sender_channel: tokio::sync::mpsc::Sende
     });
     return handle
 }
-
+*//* 
 struct CancelableImpl {
     id: u8,
-    rc: Rc<tokio::sync::RwLock<SchedulerImpl>>
-}
-
+    key: Key,
+    //rc: Rc<tokio::sync::RwLock<SchedulerImpl>>
+    rc: Rc<tokio::sync::Mutex<Scheduler2>>
+}*/
+/*
 impl cancelable::Server for CancelableImpl {
     fn cancel(&mut self, params: cancelable::CancelParams, _: cancelable::CancelResults) -> Promise<(), Error> {
         return tokio::task::block_in_place(move || { 
-            let mut write_guard = self.rc.blocking_write();
+            let mut write_guard = self.rc.blocking_lock();
             
-            let Some(handle) = write_guard.tasks.get(&self.id) else {
+            let Some(handle) = write_guard.task_handles.get(&self.id) else {
                 return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Task no longer running")});
             };
             handle.abort();
@@ -187,7 +191,7 @@ impl cancelable::Server for CancelableImpl {
             return Promise::<(), Error>::ok(());
         });
     }
-}
+}*/
 /*
 struct ListenerImpl<T, P, V> {
     client: T,
@@ -324,7 +328,7 @@ async fn create_and_send_test_request(listener_test: listener_test::Client, sche
     repeat_request.get().set_listener(listener3);
     return repeat_request.send().promise.await.unwrap();
 }
-
+*//* 
 impl <T : capnp::capability::FromClientHook + Clone, P : Clone, V>saveable::Server for ListenerImpl<T, P, V> {
     fn save(&mut self, _: keystone::sturdyref_capnp::saveable::SaveParams, mut result: keystone::sturdyref_capnp::saveable::SaveResults) -> Promise<(), Error> {
         let underlying_save_request = self.client.clone().cast_to::<crate::sturdyref_capnp::saveable::Client>().save_request();
@@ -424,7 +428,7 @@ impl listener::Server for Box<dyn Listener> {
         Promise::ok(())
     }
 }
-
+/* 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn scheduler_test() -> eyre::Result<()> {
     let (sender, mut receiver) = tokio::sync::mpsc::channel(100);
@@ -481,4 +485,205 @@ async fn create_and_send_test_request(listener_test: Box<dyn Listener>, schedule
     repeat_request.get().set_listener(listener);
     let id = repeat_request.send().promise.await.unwrap().get().unwrap().get_id();
     return id;
+}
+*/
+#[derive(Serialize, Deserialize)]
+struct Scheduled {
+    next: i64,
+    every: Option<Every>,
+    missed_event_behaviour: MissedEventBehaviour
+}
+
+impl Scheduled {
+    fn update(&mut self) -> Option<i64> {
+        let Some(every) = &self.every else {
+            return None
+        };
+        let tz: Tz = every.tz_identifier.parse().unwrap();
+        let dt = tz.timestamp_millis_opt(self.next).earliest().unwrap();
+        let dt = dt.checked_add_months(chrono::Months::new(every.months)).unwrap();
+        let dt = dt.checked_add_days(chrono::Days::new(every.days)).unwrap();
+        let dt = dt.checked_add_signed(chrono::Duration::hours(every.hours) + chrono::Duration::minutes(every.mins) + chrono::Duration::seconds(every.secs) + chrono::Duration::milliseconds(every.millis)).unwrap();
+        self.next = dt.timestamp_millis();
+        return Some(dt.timestamp_millis());
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+enum MissedEventBehaviour {
+    SendAll
+}
+
+#[derive(Serialize, Deserialize)]
+struct Every {
+    months: u32,
+    days: u64,
+    hours: i64,
+    mins: i64,
+    secs: i64,
+    millis: i64,
+    tz_identifier: String
+}
+
+pub struct SchedulerImpl {
+    scheduled: HashMap<u8, Scheduled>,
+    next_id: u8,
+    queue: tokio_util::time::delay_queue::DelayQueue<u8>,
+    keys: HashMap<u8, tokio_util::time::delay_queue::Key>,
+    listeners: HashMap<u8, crate::scheduler_capnp::listener::Client>,
+    sturdyrefs: HashMap<u8, Vec<u8>>
+}
+
+thread_local! (
+    pub static SCHEDULER_SET: RefCell<CapabilityServerSet<Rc<tokio::sync::Mutex<SchedulerImpl>>, scheduler::Client>> = RefCell::new(CapabilityServerSet::new());
+);
+
+impl scheduler::Server for Rc<tokio::sync::Mutex<SchedulerImpl>> {
+    fn schedule_for(&mut self, params: scheduler::ScheduleForParams, mut result: scheduler::ScheduleForResults) -> Promise<(), Error> {
+        let this = self.clone();
+        let params_reader = pry!(params.get());
+        let listener = pry!(params_reader.get_listener());
+        let start_timestamp = params_reader.get_schedule_for_unix_timestamp_millis();
+        return Promise::from_future(async move {
+            let mut guard = this.lock().await;
+            let next_id = guard.next_id;
+            guard.scheduled.insert(next_id, Scheduled{next: start_timestamp, every: None, missed_event_behaviour: MissedEventBehaviour::SendAll});
+            guard.listeners.insert(next_id, listener);
+            let Some(dur) = Duration::from_millis(start_timestamp as u64).checked_sub(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap()) else {
+                return Err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Start timestamp before current time")});
+            };
+            let key = guard.queue.insert(next_id, dur);
+            guard.keys.insert(next_id, key);
+
+            result.get().set_id(next_id);
+            result.get().set_cancelable(capnp_rpc::new_client(CancelableImpl{id: next_id, rc: this.clone()}));
+            guard.next_id += 1;
+            drop(guard);
+            return Result::Ok(())
+        });
+    }
+    fn schedule_for_then_repeat(&mut self, params: scheduler::ScheduleForThenRepeatParams, mut result: scheduler::ScheduleForThenRepeatResults) -> Promise<(), Error> {
+        let this = self.clone();
+        let params_reader = pry!(params.get());
+        let listener = pry!(params_reader.get_listener());
+        let start_timestamp = params_reader.get_start_unix_timestamp_millis();
+        capnp_let!({every : {months, days, hours, mins, secs, millis, tz_identifier}} = params_reader);
+        let tz = tz_identifier.to_string();
+        return Promise::from_future(async move {
+            let mut guard = this.lock().await;
+            let next_id = guard.next_id;
+            guard.scheduled.insert(next_id, Scheduled{next: start_timestamp, every: Some(Every { months: months, days: days, hours: hours, mins: mins, secs: secs, millis: millis, tz_identifier: tz }), missed_event_behaviour: MissedEventBehaviour::SendAll});
+            guard.listeners.insert(next_id, listener);
+            let Some(dur) = Duration::from_millis(start_timestamp as u64).checked_sub(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap()) else {
+                return Err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Start timestamp before current time")});
+            };
+            let key = guard.queue.insert(next_id, dur);
+            guard.keys.insert(next_id, key);
+
+            result.get().set_id(next_id);
+            result.get().set_cancelable(capnp_rpc::new_client(CancelableImpl{id: next_id, rc: this.clone()}));
+            guard.next_id += 1;
+            drop(guard);
+            return Result::Ok(())
+        });
+    }
+}
+
+struct CancelableImpl {
+    id: u8,
+    rc: Rc<tokio::sync::Mutex<SchedulerImpl>>
+}
+
+impl cancelable::Server for CancelableImpl {
+    fn cancel(&mut self, _: cancelable::CancelParams, _: cancelable::CancelResults) -> Promise<(), Error> {
+        let this = self.rc.clone();
+        let id = self.id.clone();
+        return Promise::from_future(async move  {
+            let mut guard = this.lock().await;
+            let Some(key) = guard.keys.remove(&id) else {
+                return Err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Task no longer running")});
+            };
+            guard.queue.remove(&key);
+            drop(guard);
+            
+            return Result::Ok(())
+        });
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn scheduler2_test() -> eyre::Result<()> {
+    let scheduler_rc = Rc::new(tokio::sync::Mutex::new(SchedulerImpl{scheduled: HashMap::new(), queue: DelayQueue::new(), keys: HashMap::new(), next_id: 1, listeners: HashMap::new(), sturdyrefs: HashMap::new()}));
+    let scheduler: scheduler::Client = capnp_rpc::new_client(scheduler_rc.clone());
+    let listener_test: listener_test::Client = capnp_rpc::new_client(ListenerTestImpl{test: Vec::new()});
+    let start = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as i64 + 2000;
+    create_and_send_test_request(Box::new(listener_test.clone()) as Box<dyn Listener>, scheduler.clone(), 1, start).await;
+    create_and_send_test_request(Box::new(listener_test.clone()) as Box<dyn Listener>, scheduler.clone(), 2, start).await;
+    let mut poll_rc = scheduler_rc.clone();
+    let system_time = std::time::SystemTime::now();
+    let duration = Duration::from_secs(22);
+    let mut done = false;
+    loop {
+        if system_time.elapsed().unwrap() >= duration {break;}
+        if done == false {
+            tokio::join!(
+                create_and_send_test_request(Box::new(listener_test.clone()) as Box<dyn Listener>, scheduler.clone(), 4, start),
+                poll_scheduler(&mut poll_rc),
+                create_and_send_test_request(Box::new(listener_test.clone()) as Box<dyn Listener>, scheduler.clone(), 4, start)
+            );
+            done = true
+        }
+        poll_scheduler(&mut poll_rc).await;
+    }
+    let result = futures::executor::block_on(listener_test.retrieve_test_vec_request().send().promise)?;
+    let test = result.get()?.get_result()?;
+    println!("test vec length: {}", test.len());
+    if test.len() >= 40 {
+        return Ok(());
+    } else {
+        return Err(eyre::eyre!("not enough responses recieved"));
+    }
+}
+
+async fn create_and_send_test_request(listener_test: Box<dyn Listener>, scheduler: scheduler::Client, every_secs: u64, start: i64) -> u8 {
+    let listener: listener::Client = capnp_rpc::new_client(listener_test);
+    let mut repeat_request = scheduler.schedule_for_then_repeat_request();
+    let mut builder_every = repeat_request.get().init_every();
+    builder_every.set_months(0);
+    builder_every.set_days(0);
+    builder_every.set_hours(0);
+    builder_every.set_mins(0);
+    builder_every.set_secs(every_secs as i64);
+    builder_every.set_millis(0);
+    builder_every.set_tz_identifier("EST");
+    repeat_request.get().set_start_unix_timestamp_millis(start);
+
+    repeat_request.get().set_listener(listener);
+    let id = repeat_request.send().promise.await.unwrap().get().unwrap().get_id();
+    return id;
+}
+
+async fn poll_scheduler(poll_rc: &mut Rc<tokio::sync::Mutex<SchedulerImpl>>) {
+        tokio::task::yield_now().await;
+        let mut guard = poll_rc.lock().await;
+        //guard.queue.insert(value, timeout)
+        if let Some(i) = guard.queue.next().await {
+            let i = i.into_inner();
+            if let Some(client) = guard.listeners.get(&i) {
+                let mut request = client.event_request();
+                request.get().set_id(i.clone());
+                futures::executor::block_on(request.send().promise).unwrap();
+            }
+            let Some(scheduled) = guard.scheduled.get_mut(&i) else {
+                todo!()
+            };
+            
+            if let Some(next) = scheduled.update() {
+                let dur = Duration::from_millis(next as u64) - std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap();
+                let key = guard.queue.insert(i.clone(), dur);
+                guard.keys.insert(i, key);
+            };
+        }
+        //guard.tasks;
+        drop(guard);
 }

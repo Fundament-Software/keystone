@@ -57,7 +57,7 @@ fn restore_helper(saved: Saved) -> eyre::Result<Box<dyn ClientHook>> {
     match saved {
         Saved::Dir(path) => {
             let dir = cap_std::fs::Dir::open_ambient_dir(path, cap_std::ambient_authority())?;
-            let cap: dir::Client = capnp_rpc::new_client(DirImpl{dir: dir});
+            let cap: dir::Client = cap_std_capnproto::DIR_SET.with_borrow_mut(|set| set.new_client(DirImpl{dir: dir}));
             return Ok(cap.into_client_hook());
         }
         Saved::Listener(key) => {

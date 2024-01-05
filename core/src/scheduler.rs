@@ -1,4 +1,4 @@
-use std::{collections::HashMap, time::{Duration, SystemTime, UNIX_EPOCH}, cell::RefCell, rc::Rc, sync::{Arc, RwLock}};
+use std::{collections::HashMap, time::{Duration, SystemTime, UNIX_EPOCH}, cell::RefCell, rc::Rc, sync::{Arc, RwLock}, f32::consts::E};
 
 use capnp::{capability::{Promise, Request}, Error};
 use capnp_macros::capnp_let;
@@ -25,7 +25,7 @@ impl create_scheduler::Server for CreateSchedulerImpl {
         todo!()
     }
 }
-    
+
 /*
 struct SchedulerImpl {
     tasks: HashMap<u8, JoinHandle<()>>,
@@ -382,33 +382,9 @@ impl Listener for listener_test::Client {
         let Ok(signed_row) = crate::sturdyref::save_sturdyref(sturdyref) else {
             return Err(eyre::eyre!("Failed to save sturdyref"));
         };
-        return Ok(signed_row)   
-    }
+        return Ok(signed_row)
+    } 
 }
-/* 
-impl Listener for Rc<RefCell<ListenerTestImpl>> {
-    fn send_requests(&mut self, id: u8) {
-        let mut client: listener_test::Client = capnp_rpc::new_client(self.clone());
-        let mut request = client.do_stuff_request();
-        match id {
-            _ => {
-                request.get().set_test(id);
-                tokio::task::block_in_place(move ||tokio::runtime::Handle::current().block_on(request.send().promise).unwrap().get().unwrap().get_result());
-            }
-        }
-    }
-    fn save(&mut self) -> eyre::Result<Vec<u8>> {
-        let cloned = self.borrow_mut().clone();
-        let mut client: saveable::Client = capnp_rpc::new_client(cloned);
-        let result = futures::executor::block_on(client.save_request().send().promise)?;
-        let underlying_sturdyref = result.get()?.get_value().get_as::<&[u8]>()?;
-        let sturdyref = crate::sturdyref::Saved::Listener(underlying_sturdyref.to_vec());
-        let Ok(signed_row) = crate::sturdyref::save_sturdyref(sturdyref) else {
-            return Err(eyre::eyre!("Failed to save sturdyref"));
-        };
-        return Ok(signed_row)   
-    }
-}*/
 impl crate::sturdyref_capnp::saveable::Server for Box<dyn Listener> {
     fn save(&mut self, _: crate::sturdyref_capnp::saveable::SaveParams, mut result: crate::sturdyref_capnp::saveable::SaveResults) -> Promise<(), Error> {
         let Ok(signed_row) = self.as_mut().save() else {
@@ -487,15 +463,15 @@ async fn create_and_send_test_request(listener_test: Box<dyn Listener>, schedule
     return id;
 }
 */
-#[derive(Serialize, Deserialize)]
-struct Scheduled {
-    next: i64,
+#[derive(Serialize, Deserialize, Clone)]
+pub struct Scheduled {
+    pub next: i64,
     every: Option<Every>,
-    missed_event_behaviour: MissedEventBehaviour
+    pub missed_event_behaviour: MissedEventBehaviour
 }
 
 impl Scheduled {
-    fn update(&mut self) -> Option<i64> {
+    pub fn update(&mut self) -> Option<i64> {
         let Some(every) = &self.every else {
             return None
         };
@@ -509,12 +485,12 @@ impl Scheduled {
     }
 }
 
-#[derive(Serialize, Deserialize)]
-enum MissedEventBehaviour {
+#[derive(Serialize, Deserialize, Clone)]
+pub enum MissedEventBehaviour {
     SendAll
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 struct Every {
     months: u32,
     days: u64,
@@ -526,12 +502,34 @@ struct Every {
 }
 
 pub struct SchedulerImpl {
-    scheduled: HashMap<u8, Scheduled>,
-    next_id: u8,
-    queue: tokio_util::time::delay_queue::DelayQueue<u8>,
-    keys: HashMap<u8, tokio_util::time::delay_queue::Key>,
-    listeners: HashMap<u8, crate::scheduler_capnp::listener::Client>,
-    sturdyrefs: HashMap<u8, Vec<u8>>
+    pub scheduled: HashMap<u8, Scheduled>,
+    pub next_id: u8,
+    pub queue: tokio_util::time::delay_queue::DelayQueue<u8>,
+    pub keys: HashMap<u8, tokio_util::time::delay_queue::Key>,
+    pub listeners: HashMap<u8, crate::scheduler_capnp::listener::Client>,
+    pub sturdyrefs: HashMap<u8, Vec<u8>>
+}
+
+impl saveable::Server for SchedulerImpl {
+    fn save(&mut self, _: keystone::sturdyref_capnp::saveable::SaveParams, mut result: keystone::sturdyref_capnp::saveable::SaveResults) -> Promise<(), Error> {
+        let mut scheduled_vec = Vec::new();
+        let mut sturdyrefs_vec = Vec::new();
+        for (id, scheduled) in self.scheduled.iter() {
+            scheduled_vec.push((id.clone(), scheduled.clone()));
+        }
+        for (id, signed) in self.sturdyrefs.iter() {
+            sturdyrefs_vec.push((id.clone(), signed.clone()));
+        }
+        
+        let sturdyref = crate::sturdyref::Saved::Scheduler(scheduled_vec, sturdyrefs_vec);
+        let Ok(signed_row) = crate::sturdyref::save_sturdyref(sturdyref) else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to save sturdyref")});
+        };
+        let Ok(()) = result.get().init_value().set_as(signed_row.as_slice()) else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to save sturdyref")});
+        };
+        Promise::ok(())
+    }
 }
 
 thread_local! (
@@ -548,6 +546,15 @@ impl scheduler::Server for Rc<tokio::sync::Mutex<SchedulerImpl>> {
             let mut guard = this.lock().await;
             let next_id = guard.next_id;
             guard.scheduled.insert(next_id, Scheduled{next: start_timestamp, every: None, missed_event_behaviour: MissedEventBehaviour::SendAll});
+            if let Ok(listener_save_request_response) = listener.clone().cast_to::<crate::sturdyref_capnp::saveable::Client>().save_request().send().promise.await {
+                let Ok(listener_save_request_response_reader) = listener_save_request_response.get() else {
+                    todo!()
+                };
+                let Ok(listener_sturdyref) = listener_save_request_response_reader.get_value().get_as::<&[u8]>() else {
+                    todo!()
+                };
+                guard.sturdyrefs.insert(next_id, listener_sturdyref.to_owned());
+            };
             guard.listeners.insert(next_id, listener);
             let Some(dur) = Duration::from_millis(start_timestamp as u64).checked_sub(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap()) else {
                 return Err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Start timestamp before current time")});
@@ -573,7 +580,19 @@ impl scheduler::Server for Rc<tokio::sync::Mutex<SchedulerImpl>> {
             let mut guard = this.lock().await;
             let next_id = guard.next_id;
             guard.scheduled.insert(next_id, Scheduled{next: start_timestamp, every: Some(Every { months: months, days: days, hours: hours, mins: mins, secs: secs, millis: millis, tz_identifier: tz }), missed_event_behaviour: MissedEventBehaviour::SendAll});
+            
+            if let Ok(listener_save_request_response) = listener.clone().cast_to::<crate::sturdyref_capnp::saveable::Client>().save_request().send().promise.await {
+                let Ok(listener_save_request_response_reader) = listener_save_request_response.get() else {
+                    todo!()
+                };
+                let Ok(listener_sturdyref) = listener_save_request_response_reader.get_value().get_as::<&[u8]>() else {
+                    todo!()
+                };
+                guard.sturdyrefs.insert(next_id, listener_sturdyref.to_owned());
+            };
+            
             guard.listeners.insert(next_id, listener);
+            
             let Some(dur) = Duration::from_millis(start_timestamp as u64).checked_sub(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap()) else {
                 return Err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Start timestamp before current time")});
             };
@@ -666,13 +685,12 @@ async fn create_and_send_test_request(listener_test: Box<dyn Listener>, schedule
 async fn poll_scheduler(poll_rc: &mut Rc<tokio::sync::Mutex<SchedulerImpl>>) {
         tokio::task::yield_now().await;
         let mut guard = poll_rc.lock().await;
-        //guard.queue.insert(value, timeout)
         if let Some(i) = guard.queue.next().await {
             let i = i.into_inner();
             if let Some(client) = guard.listeners.get(&i) {
                 let mut request = client.event_request();
                 request.get().set_id(i.clone());
-                futures::executor::block_on(request.send().promise).unwrap();
+                futures::executor::block_on(request.send().promise);
             }
             let Some(scheduled) = guard.scheduled.get_mut(&i) else {
                 todo!()
@@ -684,6 +702,5 @@ async fn poll_scheduler(poll_rc: &mut Rc<tokio::sync::Mutex<SchedulerImpl>>) {
                 guard.keys.insert(i, key);
             };
         }
-        //guard.tasks;
         drop(guard);
 }

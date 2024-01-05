@@ -1,10 +1,13 @@
-use std::{collections::HashMap, cell::{RefCell, Cell, OnceCell}, path::PathBuf};
+
+use std::{collections::HashMap, cell::{RefCell, Cell, OnceCell}, path::PathBuf, rc::Rc, time::Duration};
 use capnp::{capability::{Promise, FromClientHook}, Error};
 use capnp_rpc::pry;
 use capnp::private::capability::ClientHook;
+use keystone::sturdyref_capnp::saveable;
 use serde::{Serialize, Deserialize};
 use signature::Signer;
-use crate::{sturdyref_capnp::restorer, scheduler_capnp::{listener, listener_test}, cap_std_capnp::{ambient_authority, dir}, cap_std_capnproto::{self, DirImpl, AmbientAuthorityImpl}, scheduler::{Listener, ListenerTestImpl}};
+use tokio_util::time::DelayQueue;
+use crate::{sturdyref_capnp::restorer, scheduler_capnp::{scheduler, listener, listener_test}, cap_std_capnp::{ambient_authority, dir}, cap_std_capnproto::{self, DirImpl, AmbientAuthorityImpl}, scheduler::{Listener, ListenerTestImpl, SchedulerImpl, Scheduled, MissedEventBehaviour}};
 use rand::rngs::OsRng;
 use ed25519_dalek::{SigningKey, SignatureError};
 use ed25519_dalek::Signature;
@@ -15,9 +18,10 @@ thread_local!(
     static STURDYREFS: RefCell<HashMap<u8, String>> = RefCell::new(HashMap::new());
     static SIGNING_KEY: OnceCell<SigningKey> = OnceCell::new();
 );
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize)]
 pub enum Saved {
     Dir(PathBuf),
+    Scheduler(Vec<(u8, Scheduled)>, Vec<(u8, Vec<u8>)>),
     Listener(Vec<u8>),
     ListenerTest(Vec<u8>),
 }
@@ -63,7 +67,7 @@ fn restore_helper(saved: Saved) -> eyre::Result<Box<dyn ClientHook>> {
         Saved::Listener(key) => {
             let verified = verify(key.as_slice())?;
             let sturdyref = get_sturdyref(&verified)?;
-            let cap = restore_as_listener_helper(sturdyref)?;
+            let cap = restore_as_listener_helper(sturdyref)?.into_client_hook();
             //let listener: listener::Client = capnp_rpc::new_client(Box::new(cap) as Box<dyn Listener>);
             return Ok(cap);
         }
@@ -71,15 +75,44 @@ fn restore_helper(saved: Saved) -> eyre::Result<Box<dyn ClientHook>> {
             let cap: listener_test::Client = capnp_rpc::new_client(ListenerTestImpl{test: test_vec});
             return Ok(cap.into_client_hook())
         },
+        Saved::Scheduler(scheduled_vec, listener_sturdyref_vec) => {
+            //TODO a bit weird with cancelable
+            let mut sc = SchedulerImpl{scheduled: HashMap::new(), next_id: 0, queue: DelayQueue::new(), keys: HashMap::new(), listeners: HashMap::new(), sturdyrefs: HashMap::new()};
+            for mut scheduled in scheduled_vec {
+                match scheduled.1.missed_event_behaviour {
+                    MissedEventBehaviour::SendAll => {
+                        while let None = Duration::from_millis(scheduled.1.next as u64).checked_sub(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap()) {
+                            let key = sc.queue.insert(scheduled.0, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap());
+                            sc.keys.insert(scheduled.0, key);
+                            scheduled.1.update();
+                        }
+                    },
+                }
+                sc.scheduled.insert(scheduled.0, scheduled.1);
+                if scheduled.0 >= sc.next_id {
+                    sc.next_id = scheduled.0 + 1;
+                }
+            }
+            for unverified_sturdyref in listener_sturdyref_vec {
+                sc.sturdyrefs.insert(unverified_sturdyref.0, unverified_sturdyref.1.clone());
+                let verified = verify(unverified_sturdyref.1.as_slice())?;
+                let sturdyref = get_sturdyref(&verified)?;
+                let cap: listener::Client = restore_as_listener_helper(sturdyref)?;
+                sc.listeners.insert(unverified_sturdyref.0, cap);
+            }
+            let cap: scheduler::Client = crate::scheduler::SCHEDULER_SET.with_borrow_mut(|set| set.new_client(Rc::new(tokio::sync::Mutex::new(sc))));
+            return Ok(cap.into_client_hook());
+        }
     }
 }
 //TODO this is probably possible to replace with 1 function
 
-fn restore_as_listener_helper(saved: Saved) -> eyre::Result<Box<dyn ClientHook>> {
+fn restore_as_listener_helper(saved: Saved) -> eyre::Result<listener::Client> {
     match saved {
         Saved::ListenerTest(test_vec) => {
-            let cap: listener_test::Client = capnp_rpc::new_client(ListenerTestImpl{test: test_vec});
-            return Ok(cap.into_client_hook())
+            let listener_test_cap: listener_test::Client = capnp_rpc::new_client(ListenerTestImpl{test: test_vec});
+            let cap: listener::Client = capnp_rpc::new_client(Box::new(listener_test_cap) as Box<dyn Listener>);
+            return Ok(cap)
         },
         _ => Err({eyre::eyre!("Restore as listener not implemented for underlying cap")})
     }

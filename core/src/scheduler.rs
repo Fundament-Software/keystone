@@ -1,4 +1,4 @@
-use std::{collections::HashMap, time::{Duration, SystemTime, UNIX_EPOCH}, cell::RefCell, rc::Rc, sync::{Arc, RwLock}, f32::consts::E};
+use std::{collections::HashMap, time::{Duration, SystemTime, UNIX_EPOCH}, cell::RefCell, rc::Rc, sync::{RwLock}, f32::consts::E};
 
 use capnp::{capability::{Promise, Request}, Error};
 use capnp_macros::capnp_let;
@@ -403,7 +403,7 @@ impl listener::Server for Box<dyn Listener> {
         self.send_requests(id);
         Promise::ok(())
     }
-} 
+}
 /* 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn scheduler_test() -> eyre::Result<()> {
@@ -504,7 +504,7 @@ struct Every {
 pub struct SchedulerImpl {
     pub scheduled: HashMap<u8, Scheduled>,
     pub next_id: u8,
-    pub queue: tokio_util::time::delay_queue::DelayQueue<u8>,
+    pub queue: DelayQueue<u8>,
     pub keys: HashMap<u8, tokio_util::time::delay_queue::Key>,
     pub listeners: HashMap<u8, crate::scheduler_capnp::listener::Client>,
     pub sturdyrefs: HashMap<u8, Vec<u8>>

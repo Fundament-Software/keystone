@@ -106,7 +106,6 @@ fn restore_helper(saved: Saved) -> eyre::Result<Box<dyn ClientHook>> {
     }
 }
 //TODO this is probably possible to replace with 1 function
-
 fn restore_as_listener_helper(saved: Saved) -> eyre::Result<listener::Client> {
     match saved {
         Saved::ListenerTest(test_vec) => {

@@ -31,10 +31,10 @@ impl restorer::Server for RestorerImpl {
         let Ok(key) = verify(signed) else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to verify sturdyref authenticity")});
         };
-        let Ok(sturdyref) = get_sturdyref(&key) else {
+        let Ok(mut sturdyref) = get_sturdyref(&key) else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to find saved sturdyref")});
         };
-        let Ok(cap) = restore_helper(sturdyref) else {
+        let Ok(cap) = sturdyref.restore() else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to restore underlying object")});
         };
         result.get().init_cap().set_as_capability(cap);
@@ -50,16 +50,6 @@ impl restorer::Server for RestorerImpl {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to find correspodning sturdyref")});
         };
         return Promise::ok(())
-    }
-}
-
-fn restore_helper(saved: Saved) -> eyre::Result<Box<dyn ClientHook>> {
-    match saved {
-        Saved::Dir(path) => {
-            let dir = cap_std::fs::Dir::open_ambient_dir(path, cap_std::ambient_authority())?;
-            let cap: dir::Client = cap_std_capnproto::DIR_SET.with_borrow_mut(|set| set.new_client(DirImpl{dir: dir}));
-            return Ok(cap.into_client_hook());
-        }
     }
 }
 
@@ -89,7 +79,7 @@ fn verify(signed: &[u8]) -> Result<u8, SignatureError> {
     });
 }
 
-fn get_sturdyref(key: &u8) -> eyre::Result<Saved> {
+fn get_sturdyref(key: &u8) -> eyre::Result<Box<dyn Restore>> {
     return Ok(serde_json::from_str(STURDYREFS.with_borrow_mut(|map| map.remove(key)).ok_or_else(|| eyre::eyre!("Failed to find corresponding sturdyref"))?.as_str())?);
 }
 
@@ -99,7 +89,12 @@ fn delete_sturdyref(key: &u8) -> Option<()> {
     return Some(())
 }
 
-pub fn save_sturdyref(sturdyref: Saved) -> eyre::Result<Vec<u8>> {
+#[typetag::serde(tag = "type")]
+pub trait Restore {
+    fn restore(&mut self) -> eyre::Result<Box<dyn ClientHook>>;
+}
+
+pub fn save_sturdyref(sturdyref: Box<dyn Restore>) -> eyre::Result<Vec<u8>> {
     //TODO make more generic/save to database
     let key = NEXT_ROW.get();
     NEXT_ROW.replace(key + 1);

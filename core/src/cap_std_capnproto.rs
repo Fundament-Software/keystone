@@ -229,7 +229,19 @@ impl ambient_authority::Server for AmbientAuthorityImpl {
 pub struct DirImpl {
     pub dir: Dir
 }
-
+#[derive(Serialize, Deserialize)]
+struct SavedDir {
+    path: PathBuf
+}
+#[typetag::serde]
+impl crate::sturdyref::Restore for SavedDir {
+    fn restore(&mut self) -> eyre::Result<Box<dyn ClientHook>> {
+        //TODO may be messing up permissions
+        let dir = cap_std::fs::Dir::open_ambient_dir(self.path.clone(), cap_std::ambient_authority())?;
+        let cap: dir::Client = DIR_SET.with_borrow_mut(|set| set.new_client(DirImpl{dir: dir}));
+        return Ok(cap.into_client_hook());
+    }
+}
 impl crate::sturdyref_capnp::saveable::Server for DirImpl {
     fn save(&mut self, _: crate::sturdyref_capnp::saveable::SaveParams, mut result: crate::sturdyref_capnp::saveable::SaveResults) -> Promise<(), Error> {
         let Ok(cloned) = self.dir.try_clone() else {
@@ -238,7 +250,7 @@ impl crate::sturdyref_capnp::saveable::Server for DirImpl {
         let Ok(path) = cloned.into_std_file().path() else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to get path")});
         };
-        let sturdyref = crate::sturdyref::Saved::Dir(path);
+        let sturdyref = Box::new(SavedDir{path: path}) as Box<dyn crate::sturdyref::Restore>;
         let Ok(signed_row) = crate::sturdyref::save_sturdyref(sturdyref) else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to save sturdyref")});
         };

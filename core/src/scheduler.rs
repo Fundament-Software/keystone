@@ -1,18 +1,17 @@
-use std::{collections::HashMap, time::{Duration, SystemTime, UNIX_EPOCH}, cell::RefCell, rc::Rc, sync::{RwLock}, f32::consts::E};
+use std::{collections::HashMap, time::{Duration, SystemTime, UNIX_EPOCH}, cell::RefCell, rc::Rc, sync::{RwLock, Arc}, f32::consts::E};
 
-use capnp::{capability::{Promise, Request}, Error};
+use capnp::{capability::{Promise, Request, FromServer}, Error, private::capability::ClientHook};
 use capnp_macros::capnp_let;
-//use capnp_macros::capnp_build;
 use capnp_rpc::{pry, CapabilityServerSet};
 use chrono::{DateTime, TimeZone};
 use chrono_tz::Tz;
 use futures::FutureExt;
 use serde::{Deserialize, Serialize};
-use tokio::{task::{JoinHandle, self, LocalSet}, time};
+use tokio::{task::{JoinHandle, self, LocalSet}, time, sync::Mutex};
 use capnp::IntoResult;
 use keystone::sturdyref_capnp::saveable;
 use tokio_util::time::{DelayQueue, delay_queue::Key};
-use crate::{scheduler_capnp::{scheduler, cancelable, listener, create_scheduler, listener_test}, cap_std_capnproto, cap_std_capnp::ambient_authority::MonotonicClockNewResults};
+use crate::{scheduler_capnp::{scheduler, cancelable, listener, create_scheduler, listener_test}, cap_std_capnproto, cap_std_capnp::ambient_authority::MonotonicClockNewResults, sturdyref::Restore};
 use capnp::capability::FromClientHook;
 use tokio_stream::StreamExt;
 
@@ -168,30 +167,7 @@ fn repeat_helper(dur: Duration, id: u8, sender_channel: tokio::sync::mpsc::Sende
     });
     return handle
 }
-*//* 
-struct CancelableImpl {
-    id: u8,
-    key: Key,
-    //rc: Rc<tokio::sync::RwLock<SchedulerImpl>>
-    rc: Rc<tokio::sync::Mutex<Scheduler2>>
-}*/
-/*
-impl cancelable::Server for CancelableImpl {
-    fn cancel(&mut self, params: cancelable::CancelParams, _: cancelable::CancelResults) -> Promise<(), Error> {
-        return tokio::task::block_in_place(move || { 
-            let mut write_guard = self.rc.blocking_lock();
-            
-            let Some(handle) = write_guard.task_handles.get(&self.id) else {
-                return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Task no longer running")});
-            };
-            handle.abort();
-            write_guard.listeners.remove(&self.id);
-            drop(write_guard);
-            
-            return Promise::<(), Error>::ok(());
-        });
-    }
-}*/
+*/
 /*
 struct ListenerImpl<T, P, V> {
     client: T,
@@ -213,9 +189,49 @@ impl <T : capnp::capability::FromClientHook + Clone, P : Clone, V>listener::Serv
     }
 }*/
 #[derive(Clone)]
-pub struct ListenerTestImpl{
-    pub test: Vec<u8>
+pub struct ListenerTestImpl {
+    test: Vec<u8>
 }
+
+#[derive(Serialize, Deserialize)]
+struct SavedListenerTest {
+    test_vec: Vec<u8>
+}
+
+#[typetag::serde]
+impl crate::sturdyref::Restore for SavedListenerTest {
+    fn restore(&mut self) -> eyre::Result<Box<dyn ClientHook>> {
+        let cap: listener_test::Client = capnp_rpc::new_client(ListenerTestImpl{test: self.test_vec.clone()});
+        return Ok(cap.into_client_hook())
+    }
+}
+#[derive(Serialize, Deserialize)]
+struct SavedListenerTestAsListener {
+    underlying_sturdyref: Vec<u8>
+}
+#[typetag::serde]
+impl crate::sturdyref::Restore for SavedListenerTestAsListener {
+    fn restore(&mut self) -> eyre::Result<Box<dyn ClientHook>> {
+        let mut restore_request = get_restorer().restore_request();
+        restore_request.get().init_value().set_as(self.underlying_sturdyref.as_slice())?;
+        let underlying_listener_test_cap: listener_test::Client = tokio::task::block_in_place(move ||tokio::runtime::Handle::current().block_on(restore_request.send().promise))?.get()?.get_cap()?.get_as_capability()?;
+        let listener_cap: listener::Client = capnp_rpc::new_client(Box::new(underlying_listener_test_cap) as Box<dyn Listener>); 
+        return Ok(listener_cap.into_client_hook())
+    }
+}
+impl saveable::Server for ListenerTestImpl {
+    fn save(&mut self, _: keystone::sturdyref_capnp::saveable::SaveParams, mut result: keystone::sturdyref_capnp::saveable::SaveResults) -> Promise<(), Error> {
+        let sturdyref = Box::new(SavedListenerTest{test_vec: self.test.clone()}) as Box<dyn crate::sturdyref::Restore>;
+        let Ok(signed_row) = crate::sturdyref::save_sturdyref(sturdyref) else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to save sturdyref")});
+        };
+        let Ok(()) = result.get().init_value().set_as(signed_row.as_slice()) else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to save underlying sturdyref")});
+        };
+        Promise::ok(())
+    }
+}
+
 impl listener_test::Server for ListenerTestImpl {
     fn do_stuff(&mut self, params: listener_test::DoStuffParams, mut result: listener_test::DoStuffResults) -> Promise<(), Error> {
         let params_reader = pry!(params.get());
@@ -230,21 +246,6 @@ impl listener_test::Server for ListenerTestImpl {
         Promise::ok(())
     }
 }
-/* 
-impl listener_test::Server for Rc<RefCell<ListenerTestImpl>> {
-    fn do_stuff(&mut self, params: listener_test::DoStuffParams, mut result: listener_test::DoStuffResults) -> Promise<(), Error> {
-        let params_reader = pry!(params.get());
-        let id = params_reader.get_test();
-        println!("{id}");
-        self.borrow_mut().test.push(id);
-        result.get().set_result(id);
-        Promise::ok(())
-    }
-    fn retrieve_test_vec(&mut self, _: listener_test::RetrieveTestVecParams, mut result: listener_test::RetrieveTestVecResults) -> Promise<(), Error> {
-        result.get().set_result(self.borrow().test.clone().as_slice());
-        Promise::ok(())
-    }
-}*/
 /* 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn scheduler_test() -> eyre::Result<()> {
@@ -267,14 +268,12 @@ async fn scheduler_test() -> eyre::Result<()> {
     builder.set_millis(0);
     repeat_request.get().set_listener(listener.clone());
     let id = futures::executor::block_on(repeat_request.send().promise)?.get()?.get_id();
-    //print!("{}", id);
     let mut repeat_request = scheduler.repeat_request();
     let mut builder = repeat_request.get().init_delay();
     builder.set_secs(2);
     builder.set_millis(0);
     repeat_request.get().set_listener(listener2);
     let id = futures::executor::block_on(repeat_request.send().promise)?.get()?.get_id();
-    //print!("{}", id);
 
     let mut poll_rc = scheduler_rc.clone();
     let mut system_time = std::time::SystemTime::now();
@@ -313,7 +312,6 @@ async fn poll_scheduler(poll_rc: &Rc<tokio::sync::RwLock<SchedulerImpl>>, receiv
     
 }
 
-
 async fn create_and_send_test_request(listener_test: listener_test::Client, scheduler: scheduler::Client) -> capnp::capability::Response<crate::scheduler_capnp::scheduler::repeat_results::Owned> {
     let closure = Box::new(|c: &listener_test::Client, p: u8| -> Result<u8, Error> {
         let mut request = c.do_stuff_request();
@@ -328,7 +326,6 @@ async fn create_and_send_test_request(listener_test: listener_test::Client, sche
     repeat_request.get().set_listener(listener3);
     return repeat_request.send().promise.await.unwrap();
 }
-*//* 
 impl <T : capnp::capability::FromClientHook + Clone, P : Clone, V>saveable::Server for ListenerImpl<T, P, V> {
     fn save(&mut self, _: keystone::sturdyref_capnp::saveable::SaveParams, mut result: keystone::sturdyref_capnp::saveable::SaveResults) -> Promise<(), Error> {
         let underlying_save_request = self.client.clone().cast_to::<crate::sturdyref_capnp::saveable::Client>().save_request();
@@ -345,23 +342,25 @@ impl <T : capnp::capability::FromClientHook + Clone, P : Clone, V>saveable::Serv
         Promise::ok(())
     }
 }*/
-
 pub trait Listener {
     fn send_requests(&mut self, id: u8);
-    fn save(&mut self) -> eyre::Result<Vec<u8>>;
+    fn get_restorable(&mut self) -> eyre::Result<Box<dyn Restore>>;
 }
 
-impl saveable::Server for ListenerTestImpl {
-    fn save(&mut self, _: keystone::sturdyref_capnp::saveable::SaveParams, mut result: keystone::sturdyref_capnp::saveable::SaveResults) -> Promise<(), Error> {
-        let sturdyref = crate::sturdyref::Saved::ListenerTest(self.test.clone());
-        let Ok(signed_row) = crate::sturdyref::save_sturdyref(sturdyref) else {
-            return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to save sturdyref")});
-        };
-        let Ok(()) = result.get().init_value().set_as(signed_row.as_slice()) else {
-            return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to save underlying sturdyref")});
-        };
-        Promise::ok(())
+#[derive(Serialize, Deserialize)]
+struct SavedListener {
+    underlying: Box<dyn Restore>
+}
+#[typetag::serde]
+impl crate::sturdyref::Restore for SavedListener {
+    fn restore(&mut self) -> eyre::Result<Box<dyn ClientHook>> {
+        return self.underlying.restore();
     }
+}
+
+pub fn get_restorer() -> crate::sturdyref_capnp::restorer::Client {
+    //TODO Idk where we get the actual restorer for the keystone instance from
+    todo!()
 }
 
 impl Listener for listener_test::Client {
@@ -374,20 +373,19 @@ impl Listener for listener_test::Client {
             }
         }
     }
-
-    fn save(&mut self) -> eyre::Result<Vec<u8>> {
+    fn get_restorable(&mut self) -> eyre::Result<Box<dyn Restore>> {
         let result = tokio::task::block_in_place(move ||tokio::runtime::Handle::current().block_on(self.clone().cast_to::<saveable::Client>().save_request().send().promise))?;
         let underlying_sturdyref = result.get()?.get_value().get_as::<&[u8]>()?;
-        let sturdyref = crate::sturdyref::Saved::Listener(underlying_sturdyref.to_vec());
-        let Ok(signed_row) = crate::sturdyref::save_sturdyref(sturdyref) else {
-            return Err(eyre::eyre!("Failed to save sturdyref"));
-        };
-        return Ok(signed_row)
-    } 
+        let restorable_listener = Box::new(SavedListenerTestAsListener{underlying_sturdyref: underlying_sturdyref.to_vec()}) as Box<dyn Restore>;
+        return Ok(restorable_listener)
+    }
 }
 impl crate::sturdyref_capnp::saveable::Server for Box<dyn Listener> {
     fn save(&mut self, _: crate::sturdyref_capnp::saveable::SaveParams, mut result: crate::sturdyref_capnp::saveable::SaveResults) -> Promise<(), Error> {
-        let Ok(signed_row) = self.as_mut().save() else {
+        let Ok(restorable) = self.get_restorable() else {
+            todo!()
+        };
+        let Ok(signed_row) = crate::sturdyref::save_sturdyref(restorable) else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to save underlying sturdyref")});
         };
         let Ok(()) = result.get().init_value().set_as(signed_row.as_slice()) else {
@@ -405,42 +403,6 @@ impl listener::Server for Box<dyn Listener> {
     }
 }
 /* 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn scheduler_test() -> eyre::Result<()> {
-    let (sender, mut receiver) = tokio::sync::mpsc::channel(100);
-    let scheduler_rc = Rc::new(tokio::sync::RwLock::new(SchedulerImpl{tasks: HashMap::new(), next_id: 1, channel: Channel{sender: sender}, listeners: HashMap::new(), sturdyrefs: HashMap::new()}));
-    let scheduler: scheduler::Client = capnp_rpc::new_client(scheduler_rc.clone());
-    //let listener_test_rc = Rc::new(RefCell::new(ListenerTestImpl{test: Vec::new()}));
-    let listener_test: listener_test::Client = capnp_rpc::new_client(ListenerTestImpl{test: Vec::new()});
-    let id = create_and_send_test_request(Box::new(listener_test.clone()) as Box<dyn Listener>, scheduler.clone(), 1).await;
-    let id = create_and_send_test_request(Box::new(listener_test.clone()) as Box<dyn Listener>, scheduler.clone(), 2).await;
-    let mut poll_rc = scheduler_rc.clone();
-    let mut system_time = std::time::SystemTime::now();
-    let duration = Duration::from_secs(20);
-    let mut done = false;
-    loop {
-        if system_time.elapsed().unwrap() > duration {break;}
-        if done == false {
-            tokio::join!(
-                create_and_send_test_request(Box::new(listener_test.clone()) as Box<dyn Listener>, scheduler.clone(), 4),
-                poll_scheduler(&mut poll_rc, &mut receiver),
-                create_and_send_test_request(Box::new(listener_test.clone()) as Box<dyn Listener>, scheduler.clone(), 4)
-            );
-            done = true
-        }
-        poll_scheduler(&mut poll_rc, &mut receiver).await;
-    }
-    //let listener: listener_test::Client = capnp_rpc::new_client(listener_test_rc);
-    let result = futures::executor::block_on(listener_test.retrieve_test_vec_request().send().promise)?;
-    let test = result.get()?.get_result()?;
-    println!("test vec length: {}", test.len());
-    if test.len() >= 40 {
-        return Ok(());
-    } else {
-        return Err(eyre::eyre!("not enough responses recieved"));
-    }
-}
-
 async fn poll_scheduler(poll_rc: &Rc<tokio::sync::RwLock<SchedulerImpl>>, receiver: &mut tokio::sync::mpsc::Receiver<u8>) {
     if let Some(i) = receiver.recv().await {
         let guard = poll_rc.read().await;
@@ -451,16 +413,6 @@ async fn poll_scheduler(poll_rc: &Rc<tokio::sync::RwLock<SchedulerImpl>>, receiv
         }
         drop(guard);
     }
-}
-async fn create_and_send_test_request(listener_test: Box<dyn Listener>, scheduler: scheduler::Client, every_secs: u64) -> u8 {
-    let listener: listener::Client = capnp_rpc::new_client(listener_test);
-    let mut repeat_request = scheduler.repeat_request();
-    let mut builder = repeat_request.get().init_delay();
-    builder.set_secs(every_secs);
-    builder.set_millis(0);
-    repeat_request.get().set_listener(listener);
-    let id = repeat_request.send().promise.await.unwrap().get().unwrap().get_id();
-    return id;
 }
 */
 #[derive(Serialize, Deserialize, Clone)]
@@ -510,6 +462,44 @@ pub struct SchedulerImpl {
     pub sturdyrefs: HashMap<u8, Vec<u8>>
 }
 
+#[derive(Serialize, Deserialize)]
+struct SavedScheduler {
+    scheduled_vec: Vec<(u8, Scheduled)>,
+    listener_sturdyref_vec: Vec<(u8, Vec<u8>)>
+}
+
+#[typetag::serde]
+impl crate::sturdyref::Restore for SavedScheduler {
+    fn restore(&mut self) -> eyre::Result<Box<dyn ClientHook>> {
+        //TODO a bit weird with cancelable
+        let mut sc = SchedulerImpl{scheduled: HashMap::new(), next_id: 0, queue: DelayQueue::new(), keys: HashMap::new(), listeners: HashMap::new(), sturdyrefs: HashMap::new()};
+        for mut scheduled in &mut self.scheduled_vec {
+            match scheduled.1.missed_event_behaviour {
+                MissedEventBehaviour::SendAll => {
+                    while let None = Duration::from_millis(scheduled.1.next as u64).checked_sub(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap()) {
+                        let key = sc.queue.insert(scheduled.0, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap());
+                        sc.keys.insert(scheduled.0, key);
+                        scheduled.1.update();
+                    }
+                },
+            }
+            sc.scheduled.insert(scheduled.0, scheduled.1.clone());
+            if scheduled.0 >= sc.next_id {
+                sc.next_id = scheduled.0 + 1;
+            }
+        }
+        for sturdyref in &self.listener_sturdyref_vec {
+            sc.sturdyrefs.insert(sturdyref.0, sturdyref.1.clone());
+            let mut restore_request = get_restorer().restore_request();
+            restore_request.get().init_value().set_as(sturdyref.1.as_slice())?;
+            let cap: listener::Client = tokio::task::block_in_place(move ||tokio::runtime::Handle::current().block_on(restore_request.send().promise))?.get()?.get_cap()?.get_as_capability()?;
+            sc.listeners.insert(sturdyref.0, cap);
+        }
+        let cap: scheduler::Client = crate::scheduler::SCHEDULER_SET.with_borrow_mut(|set| set.new_client(Rc::new(tokio::sync::Mutex::new(sc))));
+        return Ok(cap.into_client_hook());
+    }
+}
+
 impl saveable::Server for SchedulerImpl {
     fn save(&mut self, _: keystone::sturdyref_capnp::saveable::SaveParams, mut result: keystone::sturdyref_capnp::saveable::SaveResults) -> Promise<(), Error> {
         let mut scheduled_vec = Vec::new();
@@ -521,7 +511,7 @@ impl saveable::Server for SchedulerImpl {
             sturdyrefs_vec.push((id.clone(), signed.clone()));
         }
         
-        let sturdyref = crate::sturdyref::Saved::Scheduler(scheduled_vec, sturdyrefs_vec);
+        let sturdyref = Box::new(SavedScheduler{scheduled_vec: scheduled_vec, listener_sturdyref_vec: sturdyrefs_vec}) as Box<dyn crate::sturdyref::Restore>;
         let Ok(signed_row) = crate::sturdyref::save_sturdyref(sturdyref) else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to save sturdyref")});
         };
@@ -531,7 +521,7 @@ impl saveable::Server for SchedulerImpl {
         Promise::ok(())
     }
 }
-
+//Probably needed to aquire underlying object for polling after restoring
 thread_local! (
     pub static SCHEDULER_SET: RefCell<CapabilityServerSet<Rc<tokio::sync::Mutex<SchedulerImpl>>, scheduler::Client>> = RefCell::new(CapabilityServerSet::new());
 );
@@ -620,7 +610,7 @@ impl cancelable::Server for CancelableImpl {
         return Promise::from_future(async move  {
             let mut guard = this.lock().await;
             let Some(key) = guard.keys.remove(&id) else {
-                return Err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Task no longer running")});
+                return Err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Already canceled or expired")});
             };
             guard.queue.remove(&key);
             drop(guard);
@@ -704,3 +694,17 @@ async fn poll_scheduler(poll_rc: &mut Rc<tokio::sync::Mutex<SchedulerImpl>>) {
         }
         drop(guard);
 }
+/*
+*thinking*
+impl listener_test::Server for Arc<Mutex<ListenerTestImpl>> {
+
+}
+fn test() -> eyre::Result<()> {
+    let test = Arc::new(Mutex::new(ListenerTestImpl{test: Vec::new()}));
+    let to_move = test.clone();
+    std::thread::spawn(move ||{
+        let client: listener_test::Client = capnp_rpc::new_client(to_move);
+        client.do_stuff_request();
+    });  
+    todo!()
+}*/

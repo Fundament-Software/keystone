@@ -51,6 +51,7 @@ filepath = "0.1.2"
 chrono-tz = "0.8.4"
 futures-core = "0.3.30"
 tokio-stream = "0.1.14"
+typetag = "0.2.15"
 
 [dev-dependencies]
 predicates = "2.1"

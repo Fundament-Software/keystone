@@ -12,7 +12,7 @@ use filepath::FilePath;
 use capnp::IntoResult;
 
 thread_local! (
-    pub static DIR_SET: RefCell<CapabilityServerSet<DirImpl, dir::Client>> = RefCell::new(CapabilityServerSet::new());
+    static DIR_SET: RefCell<CapabilityServerSet<DirImpl, dir::Client>> = RefCell::new(CapabilityServerSet::new());
     static INSTANT_SET: RefCell<CapabilityServerSet<InstantImpl, instant::Client>> = RefCell::new(CapabilityServerSet::new());
 );
 
@@ -229,6 +229,7 @@ impl ambient_authority::Server for AmbientAuthorityImpl {
 pub struct DirImpl {
     pub dir: Dir
 }
+
 #[derive(Serialize, Deserialize)]
 struct SavedDir {
     path: PathBuf
@@ -1156,7 +1157,7 @@ pub mod tests {
 
         return Ok(())
     }
-
+    
     #[test]
     fn test_home_dir() -> eyre::Result<()> {
         let ambient_authority: ambient_authority::Client = capnp_rpc::new_client(AmbientAuthorityImpl{});
@@ -1432,28 +1433,6 @@ pub mod tests {
         let out = res.get()?.get_result()?;
         for c in out {
             print!("{}", *c as char)
-        }
-        return Ok(())
-    }
-
-    #[test]
-    fn cap_std_test_open_read() -> eyre::Result<()> {
-        
-        use std::io::{BufWriter, Write};
-        use super::FileImpl;
-
-        let mut path = std::env::temp_dir();
-        path.push("capnp_test.txt");
-        let _f = std::fs::File::create(path)?;
-        let mut writer = BufWriter::new(_f);
-        writer.write_all(b"Just a test file ")?;
-        writer.flush()?;
-
-        let mut path = std::env::temp_dir();
-        let dir = cap_std::fs::Dir::open_ambient_dir(path, cap_std::ambient_authority()).unwrap();
-        let out = dir.read("capnp_test.txt")?;
-        for c in out {
-            print!("{}", c as char)
         }
         return Ok(())
     }

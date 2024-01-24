@@ -251,9 +251,8 @@ impl crate::sturdyref_capnp::saveable::Server for DirImpl {
         let Ok(path) = cloned.into_std_file().path() else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to get path")});
         };
-        //let sturdyref = crate::sturdyref::Saved::Dir(path);
-        let sturdyref = Box::new(SavedDir{path: path}) as Box<dyn crate::sturdyref::Restore>;
-        let Ok(signed_row) = crate::sturdyref::save_sturdyref(sturdyref) else {
+        let sturdyref = &SavedDir{path: path} as &dyn crate::sturdyref::Restore;
+        let Ok(signed_row) = sturdyref.save() else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to save sturdyref")});
         };
         let Ok(()) = result.get().init_value().set_as(signed_row.as_slice()) else {

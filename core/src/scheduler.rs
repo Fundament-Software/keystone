@@ -221,8 +221,8 @@ impl crate::sturdyref::Restore for SavedListenerTestAsListener {
 }
 impl saveable::Server for ListenerTestImpl {
     fn save(&mut self, _: keystone::sturdyref_capnp::saveable::SaveParams, mut result: keystone::sturdyref_capnp::saveable::SaveResults) -> Promise<(), Error> {
-        let sturdyref = Box::new(SavedListenerTest{test_vec: self.test.clone()}) as Box<dyn crate::sturdyref::Restore>;
-        let Ok(signed_row) = crate::sturdyref::save_sturdyref(sturdyref) else {
+        let sturdyref = &SavedListenerTest{test_vec: self.test.clone()} as &dyn crate::sturdyref::Restore;
+        let Ok(signed_row) = sturdyref.save() else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to save sturdyref")});
         };
         let Ok(()) = result.get().init_value().set_as(signed_row.as_slice()) else {
@@ -344,7 +344,7 @@ impl <T : capnp::capability::FromClientHook + Clone, P : Clone, V>saveable::Serv
 }*/
 pub trait Listener {
     fn send_requests(&mut self, id: u8);
-    fn get_restorable(&mut self) -> eyre::Result<Box<dyn Restore>>;
+    fn get_underlying_restorable(&mut self) -> eyre::Result<Box<dyn Restore>>;
 }
 
 #[derive(Serialize, Deserialize)]
@@ -373,7 +373,7 @@ impl Listener for listener_test::Client {
             }
         }
     }
-    fn get_restorable(&mut self) -> eyre::Result<Box<dyn Restore>> {
+    fn get_underlying_restorable(&mut self) -> eyre::Result<Box<dyn Restore>> {
         let result = tokio::task::block_in_place(move ||tokio::runtime::Handle::current().block_on(self.clone().cast_to::<saveable::Client>().save_request().send().promise))?;
         let underlying_sturdyref = result.get()?.get_value().get_as::<&[u8]>()?;
         let restorable_listener = Box::new(SavedListenerTestAsListener{underlying_sturdyref: underlying_sturdyref.to_vec()}) as Box<dyn Restore>;
@@ -382,10 +382,10 @@ impl Listener for listener_test::Client {
 }
 impl crate::sturdyref_capnp::saveable::Server for Box<dyn Listener> {
     fn save(&mut self, _: crate::sturdyref_capnp::saveable::SaveParams, mut result: crate::sturdyref_capnp::saveable::SaveResults) -> Promise<(), Error> {
-        let Ok(restorable) = self.get_restorable() else {
+        let Ok(restorable) = self.get_underlying_restorable() else {
             todo!()
         };
-        let Ok(signed_row) = crate::sturdyref::save_sturdyref(restorable) else {
+        let Ok(signed_row) = restorable.save() else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to save underlying sturdyref")});
         };
         let Ok(()) = result.get().init_value().set_as(signed_row.as_slice()) else {
@@ -511,8 +511,8 @@ impl saveable::Server for SchedulerImpl {
             sturdyrefs_vec.push((id.clone(), signed.clone()));
         }
         
-        let sturdyref = Box::new(SavedScheduler{scheduled_vec: scheduled_vec, listener_sturdyref_vec: sturdyrefs_vec}) as Box<dyn crate::sturdyref::Restore>;
-        let Ok(signed_row) = crate::sturdyref::save_sturdyref(sturdyref) else {
+        let sturdyref = &SavedScheduler{scheduled_vec: scheduled_vec, listener_sturdyref_vec: sturdyrefs_vec} as &dyn crate::sturdyref::Restore;
+        let Ok(signed_row) = sturdyref.save() else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to save sturdyref")});
         };
         let Ok(()) = result.get().init_value().set_as(signed_row.as_slice()) else {
@@ -621,7 +621,7 @@ impl cancelable::Server for CancelableImpl {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn scheduler2_test() -> eyre::Result<()> {
+async fn scheduler_test() -> eyre::Result<()> {
     let scheduler_rc = Rc::new(tokio::sync::Mutex::new(SchedulerImpl{scheduled: HashMap::new(), queue: DelayQueue::new(), keys: HashMap::new(), next_id: 1, listeners: HashMap::new(), sturdyrefs: HashMap::new()}));
     let scheduler: scheduler::Client = capnp_rpc::new_client(scheduler_rc.clone());
     let listener_test: listener_test::Client = capnp_rpc::new_client(ListenerTestImpl{test: Vec::new()});

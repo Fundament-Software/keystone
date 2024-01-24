@@ -94,13 +94,15 @@ pub trait Restore {
     fn restore(&mut self) -> eyre::Result<Box<dyn ClientHook>>;
 }
 
-pub fn save_sturdyref(sturdyref: Box<dyn Restore>) -> eyre::Result<Vec<u8>> {
-    //TODO make more generic/save to database
-    let key = NEXT_ROW.get();
-    NEXT_ROW.replace(key + 1);
-    let serialized = serde_json::to_string(&sturdyref)?;
-    STURDYREFS.with_borrow_mut(|map| map.insert(key, serialized));
-    return Ok(sign(key));
+impl dyn Restore {
+    pub fn save(&self) -> eyre::Result<Vec<u8>> {
+        //TODO make more generic/save to database
+        let key = NEXT_ROW.get();
+        NEXT_ROW.replace(key + 1);
+        let serialized = serde_json::to_string(self)?;
+        STURDYREFS.with_borrow_mut(|map| map.insert(key, serialized));
+        return Ok(sign(key));
+    }
 }
 
 #[test]

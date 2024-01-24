@@ -254,6 +254,9 @@ impl crate::sturdyref_capnp::saveable::Server for DirImpl {
         let sturdyref = &SavedDir{path: path} as &dyn crate::sturdyref::Restore;
         let Ok(signed_row) = sturdyref.save() else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to save sturdyref")});
+        };*/
+        let Ok(signed_row) = sturdyref.save() else {
+            todo!()
         };
         let Ok(()) = result.get().init_value().set_as(signed_row.as_slice()) else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Type incompatible with capnproto")});

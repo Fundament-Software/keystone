@@ -80,7 +80,12 @@ fn verify(signed: &[u8]) -> Result<u8, SignatureError> {
 }
 
 fn get_sturdyref(key: &u8) -> eyre::Result<Box<dyn Restore>> {
-    return Ok(serde_json::from_str(STURDYREFS.with_borrow_mut(|map| map.remove(key)).ok_or_else(|| eyre::eyre!("Failed to find corresponding sturdyref"))?.as_str())?);
+    return Ok(serde_json::from_str(STURDYREFS.with_borrow_mut(|map| {
+        let Some(string) = map.get(key) else {
+            return Err(eyre::eyre!("Failed to find corresponding sturdyref"));
+        };
+        return Ok(string.clone());
+    })?.as_str())?);
 }
 
 fn delete_sturdyref(key: &u8) -> Option<()> {

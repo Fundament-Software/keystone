@@ -232,13 +232,15 @@ pub struct DirImpl {
 
 #[derive(Serialize, Deserialize)]
 struct SavedDir {
-    path: PathBuf
+    path: PathBuf,
+    readonly: bool
 }
 #[typetag::serde]
 impl crate::sturdyref::Restore for SavedDir {
     fn restore(&mut self) -> eyre::Result<Box<dyn ClientHook>> {
         //TODO may be messing up permissions
         let dir = cap_std::fs::Dir::open_ambient_dir(self.path.clone(), cap_std::ambient_authority())?;
+        dir.dir_metadata()?.permissions().set_readonly(self.readonly);
         let cap: dir::Client = DIR_SET.with_borrow_mut(|set| set.new_client(DirImpl{dir: dir}));
         return Ok(cap.into_client_hook());
     }
@@ -251,7 +253,10 @@ impl crate::sturdyref_capnp::saveable::Server for DirImpl {
         let Ok(path) = cloned.into_std_file().path() else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to get path")});
         };
-        let sturdyref = &SavedDir{path: path} as &dyn crate::sturdyref::Restore;
+        let Ok(metadata) = self.dir.dir_metadata() else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to get dir metadata")});
+        };
+        let sturdyref = &SavedDir{path: path, readonly: metadata.permissions().readonly()} as &dyn crate::sturdyref::Restore;
         let Ok(signed_row) = sturdyref.save() else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to save sturdyref")});
         };

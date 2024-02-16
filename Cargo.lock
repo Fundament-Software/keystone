@@ -356,13 +356,16 @@ dependencies = [
 
 [[package]]
 name = "capnp"
-version = "0.18.0-alpha"
-source = "git+https://github.com/Fundament-Software/capnproto-rust#017e6f2542c790703cb5236c4c4448ffe9bf2104"
+version = "0.18.0"
+source = "git+https://github.com/Fundament-Software/capnproto-rust#972f5025a5416267dbc0e5487528ec2cb0d03357"
+dependencies = [
+ "embedded-io",
+]
 
 [[package]]
 name = "capnp-futures"
-version = "0.18.0-alpha"
-source = "git+https://github.com/Fundament-Software/capnproto-rust#017e6f2542c790703cb5236c4c4448ffe9bf2104"
+version = "0.18.0"
+source = "git+https://github.com/Fundament-Software/capnproto-rust#972f5025a5416267dbc0e5487528ec2cb0d03357"
 dependencies = [
  "capnp",
  "futures",
@@ -370,8 +373,8 @@ dependencies = [
 
 [[package]]
 name = "capnp-import"
-version = "0.2.0"
-source = "git+https://github.com/Fundament-Software/capnproto-rust#017e6f2542c790703cb5236c4c4448ffe9bf2104"
+version = "0.18.0"
+source = "git+https://github.com/Fundament-Software/capnproto-rust#972f5025a5416267dbc0e5487528ec2cb0d03357"
 dependencies = [
  "anyhow",
  "capnp",
@@ -392,11 +395,12 @@ dependencies = [
 
 [[package]]
 name = "capnp-macros"
-version = "0.1.0"
-source = "git+https://github.com/Fundament-Software/capnproto-rust#017e6f2542c790703cb5236c4c4448ffe9bf2104"
+version = "0.18.0"
+source = "git+https://github.com/Fundament-Software/capnproto-rust#972f5025a5416267dbc0e5487528ec2cb0d03357"
 dependencies = [
  "capnp",
  "capnp-rpc",
+ "convert_case",
  "proc-macro2 1.0.63",
  "quote 1.0.29",
  "syn 2.0.22",
@@ -404,8 +408,8 @@ dependencies = [
 
 [[package]]
 name = "capnp-rpc"
-version = "0.18.0-alpha"
-source = "git+https://github.com/Fundament-Software/capnproto-rust#017e6f2542c790703cb5236c4c4448ffe9bf2104"
+version = "0.18.0"
+source = "git+https://github.com/Fundament-Software/capnproto-rust#972f5025a5416267dbc0e5487528ec2cb0d03357"
 dependencies = [
  "capnp",
  "capnp-futures",
@@ -414,8 +418,8 @@ dependencies = [
 
 [[package]]
 name = "capnpc"
-version = "0.18.0-alpha"
-source = "git+https://github.com/Fundament-Software/capnproto-rust#017e6f2542c790703cb5236c4c4448ffe9bf2104"
+version = "0.18.0"
+source = "git+https://github.com/Fundament-Software/capnproto-rust#972f5025a5416267dbc0e5487528ec2cb0d03357"
 dependencies = [
  "capnp",
 ]
@@ -688,6 +692,12 @@ name = "either"
 version = "1.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7fcaabb2fef8c910e7f4c7ce9f67a1283a1715879a7c230ca9d6d1ae31f16d91"
+
+[[package]]
+name = "embedded-io"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "658bbadc628dc286b9ae02f0cb0f5411c056eb7487b72f0083203f115de94060"
 
 [[package]]
 name = "encoding_rs"

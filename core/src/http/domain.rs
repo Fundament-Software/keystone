@@ -40,8 +40,8 @@ impl Domain::Server for DomainImpl {
             ));
         }
         let original_domain_name = self.domain_name.clone();
-        let name = pry!(pry!(params.get()).get_name());
-        let new_domain_name = name.to_string() + "." + original_domain_name.as_str();
+        let name = pry!(pry!(pry!(params.get()).get_name()).to_string());
+        let new_domain_name = name + "." + original_domain_name.as_str();
         let domain_impl = DomainImpl::new(new_domain_name, self.https_client.clone());
         if let Err(e) = domain_impl {
             return Promise::err(e);
@@ -56,11 +56,17 @@ impl Domain::Server for DomainImpl {
         params: Domain::PathParams,
         mut results: Domain::PathResults,
     ) -> Promise<(), capnp::Error> {
-        let path_list: Vec<String> = pry!(pry!(params.get()).get_values())
+        let path_list: Vec<String> = pry!(pry!(pry!(params.get()).get_values())
             .iter()
-            .filter(|i| i.is_ok()) // TODO Not sure what the errors would be, we should probably report them instead of skipping
-            .map(|i| i.unwrap().to_string())
-            .collect();
+            //.filter(|i| i.is_ok()) // TODO Not sure what the errors would be, we should probably report them instead of skipping
+            //TODO I think this does what it's supposed to but someone should take a look(Relies on result implementing from iterator and pry returning if an error comes up)
+            .map(|i| {
+                let Ok(result) = i?.to_string() else {
+                    return Err(capnp::Error{kind: capnp::ErrorKind::Failed, extra: String::from("Values contains invalid utf-8")})
+                };
+                return Ok(result);
+            })
+            .collect());
         let path_impl = PathImpl::new(
             self.domain_name.as_str(),
             path_list,

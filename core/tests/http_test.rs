@@ -9,7 +9,7 @@ async fn basic_test() -> eyre::Result<()> {
     // Requesting domain
     let mut request = client.domain_request();
     {
-        request.get().set_name("httpbin.org");
+        request.get().set_name("httpbin.org".into());
     }
     let domain_client = request.send().promise.await?.get()?.get_result()?;
 
@@ -17,7 +17,7 @@ async fn basic_test() -> eyre::Result<()> {
     let mut request = domain_client.path_request();
     {
         let mut values_builder = request.get().init_values(1);
-        values_builder.reborrow().set(0, "get");
+        values_builder.reborrow().set(0, "get".into());
     }
     let path_client = request.send().promise.await?.get()?.get_result()?;
 
@@ -25,10 +25,10 @@ async fn basic_test() -> eyre::Result<()> {
     let mut request = path_client.query_request();
     {
         let mut values_builder = request.get().init_values(2);
-        values_builder.reborrow().get(0).set_key("key1");
-        values_builder.reborrow().get(0).set_value("val1");
-        values_builder.reborrow().get(1).set_key("key2");
-        values_builder.reborrow().get(1).set_value("val2");
+        values_builder.reborrow().get(0).set_key("key1".into());
+        values_builder.reborrow().get(0).set_value("val1".into());
+        values_builder.reborrow().get(1).set_key("key2".into());
+        values_builder.reborrow().get(1).set_value("val2".into());
     }
     let path_client = request.send().promise.await?.get()?.get_result()?;
 
@@ -39,7 +39,7 @@ async fn basic_test() -> eyre::Result<()> {
     let response = response.get()?.get_result()?;
 
     // Validating results - httpbin returns json as its body
-    let body = response.get_body()?;
+    let body = response.get_body()?.to_str()?;
     let body_json: serde_json::Value = serde_json::from_str(body)?;
     assert_eq!(
         body_json["args"],
@@ -76,18 +76,18 @@ async fn domains() -> eyre::Result<()> {
     // Requesting domain
     let mut request = client.domain_request();
     {
-        request.get().set_name("org");
+        request.get().set_name("org".into());
     }
     let domain_client = request.send().promise.await?.get()?.get_result()?;
 
     let mut request = domain_client.subdomain_request();
-    request.get().set_name("httpbin");
+    request.get().set_name("httpbin".into());
     let subdomain_client = request.send().promise.await?.get()?.get_result()?;
 
     let mut request = subdomain_client.path_request();
     {
         let mut values_builder = request.get().init_values(1);
-        values_builder.reborrow().set(0, "get");
+        values_builder.reborrow().set(0, "get".into());
     }
     let path_client = request.send().promise.await?.get()?.get_result()?;
 
@@ -97,7 +97,7 @@ async fn domains() -> eyre::Result<()> {
     let response = request.send().promise.await?; // We'd get "temporary value dropped while borrowed" if we didn't split it
     let response = response.get()?.get_result()?;
 
-    let body = response.get_body()?;
+    let body = response.get_body()?.to_str()?;
     let body_json: serde_json::Value = serde_json::from_str(body)?;
     assert_eq!(body_json["headers"]["Host"], "httpbin.org");
     assert_eq!(body_json["url"], "https://httpbin.org/get");
@@ -116,19 +116,19 @@ async fn subdomains() -> eyre::Result<()> {
     // Requesting domain
     let mut request = client.domain_request();
     {
-        request.get().set_name("httpbin.org");
+        request.get().set_name("httpbin.org".into());
     }
     let domain_client = request.send().promise.await?.get()?.get_result()?;
 
     // Can specify domains and subdomains in different calls
     let mut request = domain_client.subdomain_request();
-    request.get().set_name("www");
+    request.get().set_name("www".into());
     let subdomain_client = request.send().promise.await?.get()?.get_result()?;
 
     let mut request = subdomain_client.path_request();
     {
         let mut values_builder = request.get().init_values(1);
-        values_builder.reborrow().set(0, "get");
+        values_builder.reborrow().set(0, "get".into());
     }
     let path_client = request.send().promise.await?.get()?.get_result()?;
 
@@ -137,7 +137,7 @@ async fn subdomains() -> eyre::Result<()> {
     let response = request.send().promise.await?; // We'd get "temporary value dropped while borrowed" if we didn't split it
     let response = response.get()?.get_result()?;
 
-    let body = response.get_body()?;
+    let body = response.get_body()?.to_str()?;
     let body_json: serde_json::Value = serde_json::from_str(body)?;
     assert_eq!(body_json["headers"]["Host"], "www.httpbin.org");
     assert_eq!(body_json["url"], "https://www.httpbin.org/get");
@@ -156,7 +156,7 @@ async fn finalize_domains() -> eyre::Result<(), capnp::Error> {
     // Requesting domain
     let mut request = client.domain_request();
     {
-        request.get().set_name("httpbin.org");
+        request.get().set_name("httpbin.org".into());
     }
     let domain_client = request.send().promise.await?.get()?.get_result()?;
 
@@ -165,7 +165,7 @@ async fn finalize_domains() -> eyre::Result<(), capnp::Error> {
 
     let mut request = finalized_client.subdomain_request();
     {
-        request.get().set_name("www");
+        request.get().set_name("www".into());
     }
     let err = request.send().promise.await;
     assert!(err.is_err());
@@ -180,14 +180,14 @@ async fn finalize_paths() -> eyre::Result<(), capnp::Error> {
     // Requesting domain
     let mut request = client.domain_request();
     {
-        request.get().set_name("httpbin.org");
+        request.get().set_name("httpbin.org".into());
     }
     let domain_client = request.send().promise.await?.get()?.get_result()?;
 
     let mut request = domain_client.path_request();
     {
         let mut values_builder = request.get().init_values(1);
-        values_builder.reborrow().set(0, "get");
+        values_builder.reborrow().set(0, "get".into());
     }
     let path_client = request.send().promise.await?.get()?.get_result()?;
 
@@ -197,8 +197,8 @@ async fn finalize_paths() -> eyre::Result<(), capnp::Error> {
     let mut request = finalized_client.path_request();
     {
         let mut text_list = request.get().init_values(2);
-        text_list.set(0, "foo");
-        text_list.set(1, "bar");
+        text_list.set(0, "foo".into());
+        text_list.set(1, "bar".into());
     }
     let err = request.send().promise.await;
     assert!(err.is_err());
@@ -214,7 +214,7 @@ async fn finalize_query() -> eyre::Result<(), capnp::Error> {
     // Requesting domain
     let mut request = client.domain_request();
     {
-        request.get().set_name("httpbin.org");
+        request.get().set_name("httpbin.org".into());
     }
     let domain_client = request.send().promise.await?.get()?.get_result()?;
 
@@ -222,7 +222,7 @@ async fn finalize_query() -> eyre::Result<(), capnp::Error> {
     let mut request = domain_client.path_request();
     {
         let mut values_builder = request.get().init_values(1);
-        values_builder.reborrow().set(0, "get");
+        values_builder.reborrow().set(0, "get".into());
     }
     let path_client = request.send().promise.await?.get()?.get_result()?;
 
@@ -230,8 +230,8 @@ async fn finalize_query() -> eyre::Result<(), capnp::Error> {
     let mut request = path_client.query_request();
     {
         let mut values_builder = request.get().init_values(2);
-        values_builder.reborrow().get(0).set_key("key1");
-        values_builder.reborrow().get(0).set_value("val1");
+        values_builder.reborrow().get(0).set_key("key1".into());
+        values_builder.reborrow().get(0).set_value("val1".into());
     }
     let path_client = request.send().promise.await?.get()?.get_result()?;
     let request = path_client.finalize_query_request();
@@ -241,8 +241,8 @@ async fn finalize_query() -> eyre::Result<(), capnp::Error> {
     let mut request = finalized_client.query_request();
     {
         let mut values_builder = request.get().init_values(2);
-        values_builder.reborrow().get(0).set_key("key2");
-        values_builder.reborrow().get(0).set_value("val2");
+        values_builder.reborrow().get(0).set_key("key2".into());
+        values_builder.reborrow().get(0).set_value("val2".into());
     }
 
     let err = request.send().promise.await;
@@ -259,7 +259,7 @@ async fn allowlist_test() -> eyre::Result<(), capnp::Error> {
     // Requesting domain
     let mut request = client.domain_request();
     {
-        request.get().set_name("httpbin.org");
+        request.get().set_name("httpbin.org".into());
     }
     let domain_client = request.send().promise.await?.get()?.get_result()?;
 
@@ -267,7 +267,7 @@ async fn allowlist_test() -> eyre::Result<(), capnp::Error> {
     let mut request = domain_client.path_request();
     {
         let mut values_builder = request.get().init_values(1);
-        values_builder.reborrow().set(0, "get");
+        values_builder.reborrow().set(0, "get".into());
     }
     let path_client = request.send().promise.await?.get()?.get_result()?;
 
@@ -323,7 +323,7 @@ async fn parent_directory_path() -> eyre::Result<()> {
     // Requesting domain
     let mut request = client.domain_request();
     {
-        request.get().set_name("httpbin.org");
+        request.get().set_name("httpbin.org".into());
     }
     let domain_client = request.send().promise.await?.get()?.get_result()?;
 
@@ -331,7 +331,7 @@ async fn parent_directory_path() -> eyre::Result<()> {
     let mut request = domain_client.path_request();
     {
         let mut values_builder = request.get().init_values(1);
-        values_builder.reborrow().set(0, "");
+        values_builder.reborrow().set(0, "".into());
     }
     let root_path_client = request.send().promise.await?.get()?.get_result()?;
     let request = root_path_client.get_request();
@@ -343,13 +343,13 @@ async fn parent_directory_path() -> eyre::Result<()> {
     let mut request = domain_client.path_request();
     {
         let mut values_builder = request.get().init_values(1);
-        values_builder.reborrow().set(0, "get");
+        values_builder.reborrow().set(0, "get".into());
     }
     let path_client = request.send().promise.await?.get()?.get_result()?;
     let mut request = path_client.path_request();
     {
         let mut values_builder = request.get().init_values(1);
-        values_builder.reborrow().set(0, "..");
+        values_builder.reborrow().set(0, "..".into());
     }
     let path_client = request.send().promise.await?.get()?.get_result()?;
     let request = path_client.get_request();
@@ -370,7 +370,7 @@ async fn root_directory_path() -> eyre::Result<()> {
     // Requesting domain
     let mut request = client.domain_request();
     {
-        request.get().set_name("httpbin.org");
+        request.get().set_name("httpbin.org".into());
     }
     let domain_client = request.send().promise.await?.get()?.get_result()?;
 
@@ -378,7 +378,7 @@ async fn root_directory_path() -> eyre::Result<()> {
     let mut request = domain_client.path_request();
     {
         let mut values_builder = request.get().init_values(1);
-        values_builder.reborrow().set(0, "");
+        values_builder.reborrow().set(0, "".into());
     }
     let root_path_client = request.send().promise.await?.get()?.get_result()?;
     let request = root_path_client.get_request();
@@ -390,13 +390,13 @@ async fn root_directory_path() -> eyre::Result<()> {
     let mut request = domain_client.path_request();
     {
         let mut values_builder = request.get().init_values(1);
-        values_builder.reborrow().set(0, "get");
+        values_builder.reborrow().set(0, "get".into());
     }
     let path_client = request.send().promise.await?.get()?.get_result()?;
     let mut request = path_client.path_request();
     {
         let mut values_builder = request.get().init_values(1);
-        values_builder.reborrow().set(0, "/");
+        values_builder.reborrow().set(0, "/".into());
     }
     let path_client = request.send().promise.await?.get()?.get_result()?;
     let request = path_client.get_request();
@@ -417,7 +417,7 @@ async fn escapes_path() -> eyre::Result<()> {
     // Requesting domain
     let mut request = client.domain_request();
     {
-        request.get().set_name("httpbin.org");
+        request.get().set_name("httpbin.org".into());
     }
     let domain_client = request.send().promise.await?.get()?.get_result()?;
 
@@ -425,7 +425,7 @@ async fn escapes_path() -> eyre::Result<()> {
     let mut request = domain_client.path_request();
     {
         let mut values_builder = request.get().init_values(1);
-        values_builder.reborrow().set(0, "");
+        values_builder.reborrow().set(0, "".into());
     }
     let root_path_client = request.send().promise.await?.get()?.get_result()?;
     let request = root_path_client.get_request();
@@ -437,7 +437,7 @@ async fn escapes_path() -> eyre::Result<()> {
     let mut request = domain_client.path_request();
     {
         let mut values_builder = request.get().init_values(1);
-        values_builder.reborrow().set(0, "get");
+        values_builder.reborrow().set(0, "get".into());
     }
     let path_client = request.send().promise.await?.get()?.get_result()?;
 
@@ -445,7 +445,7 @@ async fn escapes_path() -> eyre::Result<()> {
     let mut request = path_client.path_request();
     {
         let mut values_builder = request.get().init_values(1);
-        values_builder.reborrow().set(0, "%2E%2E");
+        values_builder.reborrow().set(0, "%2E%2E".into());
     }
     let other_client = request.send().promise.await?.get()?.get_result()?;
     let request = other_client.get_request();
@@ -460,7 +460,7 @@ async fn escapes_path() -> eyre::Result<()> {
     let mut request = path_client.path_request();
     {
         let mut values_builder = request.get().init_values(1);
-        values_builder.reborrow().set(0, "%2F");
+        values_builder.reborrow().set(0, "%2F".into());
     }
     let other_client = request.send().promise.await?.get()?.get_result()?;
     let request = other_client.get_request();
@@ -481,7 +481,7 @@ async fn protocol_relative_url_path() -> eyre::Result<()> {
     // Requesting domain
     let mut request = client.domain_request();
     {
-        request.get().set_name("httpbin.org");
+        request.get().set_name("httpbin.org".into());
     }
     let domain_client = request.send().promise.await?.get()?.get_result()?;
 
@@ -489,7 +489,7 @@ async fn protocol_relative_url_path() -> eyre::Result<()> {
     let mut request = domain_client.path_request();
     {
         let mut values_builder = request.get().init_values(1);
-        values_builder.reborrow().set(0, "get");
+        values_builder.reborrow().set(0, "get".into());
     }
     let path_client = request.send().promise.await?.get()?.get_result()?;
 
@@ -497,7 +497,7 @@ async fn protocol_relative_url_path() -> eyre::Result<()> {
     let mut request = path_client.path_request();
     {
         let mut values_builder = request.get().init_values(1);
-        values_builder.reborrow().set(0, "/httpbin.org/post");
+        values_builder.reborrow().set(0, "/httpbin.org/post".into());
     }
     let path_client = request.send().promise.await?.get()?.get_result()?;
 

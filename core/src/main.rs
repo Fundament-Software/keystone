@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 mod byte_stream;
 mod cap_std_capnproto;
+mod sturdyref;
 mod couchdb;
 mod database;
 mod node;

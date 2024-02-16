@@ -8,6 +8,7 @@ use capnp_rpc::{pry, CapabilityServerSet};
 use capnp_macros::capnp_let;
 use tokio::io::{AsyncRead, AsyncReadExt};
 use crate::{cap_std_capnp::{ambient_authority, dir, dir_entry, duration, file, FileType, instant, metadata, monotonic_clock, open_options, permissions, project_dirs, read_dir, system_clock, system_time, temp_dir, temp_file, user_dirs}, spawn::unix_process::UnixProcessServiceSpawnImpl, byte_stream::ByteStreamImpl};
+use filepath::FilePath;
 use capnp::IntoResult;
 
 thread_local! (
@@ -229,6 +230,42 @@ pub struct DirImpl {
     pub dir: Dir
 }
 
+#[derive(Serialize, Deserialize)]
+struct SavedDir {
+    path: PathBuf,
+    readonly: bool
+}
+#[typetag::serde]
+impl crate::sturdyref::Restore for SavedDir {
+    fn restore(&mut self) -> eyre::Result<Box<dyn ClientHook>> {
+        //TODO may be messing up permissions
+        let dir = cap_std::fs::Dir::open_ambient_dir(self.path.clone(), cap_std::ambient_authority())?;
+        dir.dir_metadata()?.permissions().set_readonly(self.readonly);
+        let cap: dir::Client = DIR_SET.with_borrow_mut(|set| set.new_client(DirImpl{dir: dir}));
+        return Ok(cap.into_client_hook());
+    }
+}
+impl crate::sturdyref_capnp::saveable::Server for DirImpl {
+    fn save(&mut self, _: crate::sturdyref_capnp::saveable::SaveParams, mut result: crate::sturdyref_capnp::saveable::SaveResults) -> Promise<(), Error> {
+        let Ok(cloned) = self.dir.try_clone() else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to clone underlying dir")});
+        };
+        let Ok(path) = cloned.into_std_file().path() else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to get path")});
+        };
+        let Ok(metadata) = self.dir.dir_metadata() else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to get dir metadata")});
+        };
+        let sturdyref = &SavedDir{path: path, readonly: metadata.permissions().readonly()} as &dyn crate::sturdyref::Restore;
+        let Ok(signed_row) = sturdyref.save() else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to save sturdyref")});
+        };
+        let Ok(()) = result.get().init_value().set_as(signed_row.as_slice()) else {
+            return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Type incompatible with capnproto")});
+        };
+        Promise::ok(())
+    }
+}
 impl dir::Server for DirImpl { 
     fn open(&mut self, params: dir::OpenParams, mut result: dir::OpenResults) -> Promise<(), Error> {
         let path_reader = pry!(params.get());

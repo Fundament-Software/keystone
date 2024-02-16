@@ -12,7 +12,8 @@ interface File {
   open @6 () -> (stream :Stream);
 }
 
-interface Dir {
+using Saveable = import "sturdyref.capnp".Saveable;
+interface Dir extends(Saveable) {
   open @0 (path :Text) -> (file :File);
   openWith @1 (path :Text, openOptions :OpenOptions) -> (file :File);
   createDir @2 (path :Text) -> ();

@@ -123,7 +123,7 @@ pub mod unix_process {
                     Ok(exitstatus) => {
                         let exitcode = exitstatus.code().unwrap_or(i32::MIN);
                         process_error_builder.set_error_code(exitcode.into());
-                        process_error_builder.set_error_message("");
+                        process_error_builder.set_error_message("".into());
 
                         Ok(())
                     },
@@ -177,14 +177,18 @@ pub mod unix_process {
         fn spawn(&mut self, params: SpawnParams, mut results: SpawnResults) -> Promise<(), capnp::Error> {
             let params_reader = pry!(params.get());
             
-            let program = pry!(params_reader.get_program());
+            let program = pry!(pry!(params_reader.get_program()).to_str());
             
             let args = pry!(params_reader.get_args());
             let stdout: ByteStreamClient = pry!(args.get_stdout());
             let stderr: ByteStreamClient = pry!(args.get_stderr());
             let argv: capnp::text_list::Reader = pry!(args.get_argv());
+            let argv_iter = argv.into_iter().map(|item| match item {
+                Ok(i) => Ok(i.to_str().map_err(|_| capnp::Error::failed("Invalid utf-8 in argv".to_string()))?), 
+                Err(e) => Err(e)
+            });
 
-            match UnixProcessImpl::spawn_process(program, argv.into_iter(), stdout, stderr) {
+            match UnixProcessImpl::spawn_process(program, argv_iter, stdout, stderr) {
                 Err(e) => Promise::err(capnp::Error::failed(e.to_string())),
                 Ok(process_impl) => {
                     let server_pointer = Rc::new(RefCell::new(process_impl));
@@ -209,7 +213,7 @@ pub mod unix_process {
             
             let mut params_builder = spawn_request.get();
 
-            params_builder.set_program(program)?;
+            params_builder.set_program(program.into())?;
 
             let mut args_builder = params_builder.init_args();
             args_builder.set_stdout(stdout_stream);
@@ -218,7 +222,7 @@ pub mod unix_process {
             {
                 let mut argv_builder = args_builder.init_argv(argv.len().try_into()?);
                 for (idx, &x) in argv.iter().enumerate() {
-                    argv_builder.reborrow().set(idx.try_into()?, x);
+                    argv_builder.reborrow().set(idx.try_into()?, x.into());
                 }
             }
 

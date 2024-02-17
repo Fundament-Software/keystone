@@ -23,7 +23,7 @@ impl Https::Server for HttpsImpl {
         params: Https::DomainParams,
         mut results: Https::DomainResults,
     ) -> Promise<(), capnp::Error> {
-        let domain_name = pry!(pry!(params.get()).get_name());
+        let domain_name = pry!(pry!(pry!(params.get()).get_name()).to_str());
         let domain_impl = DomainImpl::new(domain_name, self.https_client.clone());
         if let Err(e) = domain_impl {
             return Promise::err(e);

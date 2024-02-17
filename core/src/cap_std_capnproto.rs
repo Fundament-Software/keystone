@@ -20,7 +20,7 @@ pub struct AmbientAuthorityImpl;
 impl ambient_authority::Server for AmbientAuthorityImpl {
     fn file_open_ambient(&mut self, params: ambient_authority::FileOpenAmbientParams, mut result: ambient_authority::FileOpenAmbientResults) -> Promise<(), Error> {
         let params_reader = pry!(params.get());
-        let path = pry!(params_reader.get_path());
+        let path = pry!(pry!(params_reader.get_path()).to_str());
         let ambient_authority = cap_std::ambient_authority();
         let Ok(_file) = File::open_ambient(path, ambient_authority) else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to open file using ambient authority")});
@@ -30,7 +30,7 @@ impl ambient_authority::Server for AmbientAuthorityImpl {
     }
     fn file_create_ambient(&mut self, params: ambient_authority::FileCreateAmbientParams, mut result: ambient_authority::FileCreateAmbientResults) -> Promise<(), Error> {
         let params_reader = pry!(params.get());
-        let path = pry!(params_reader.get_path());
+        let path = pry!(pry!(params_reader.get_path()).to_str());
         let ambient_authority = cap_std::ambient_authority();
         let Ok(_file) = File::create_ambient(path, ambient_authority) else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to create file using ambient authority")});
@@ -42,7 +42,7 @@ impl ambient_authority::Server for AmbientAuthorityImpl {
         let params_reader = pry!(params.get());
         capnp_let!({open_options : {read, write, append, truncate, create, create_new}} = params_reader);
         let mut options = OpenOptions::new();
-        let path = pry!(params_reader.get_path());
+        let path = pry!(pry!(params_reader.get_path()).to_str());
         options.read(read).write(write).append(append).truncate(truncate).create(create).create_new(create_new);
         let ambient_authority = cap_std::ambient_authority();
         let Ok(_file) = File::open_ambient_with(path, &options, ambient_authority) else {
@@ -53,7 +53,7 @@ impl ambient_authority::Server for AmbientAuthorityImpl {
     }
     fn dir_open_ambient(&mut self, params: ambient_authority::DirOpenAmbientParams, mut result: ambient_authority::DirOpenAmbientResults) -> Promise<(), Error> {
         let params_reader = pry!(params.get());
-        let path = pry!(params_reader.get_path());
+        let path = pry!(pry!(params_reader.get_path()).to_str());
         let ambient_authority = cap_std::ambient_authority();
         let Ok(_dir) = Dir::open_ambient_dir(path, ambient_authority) else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to open dir using ambient authority")});
@@ -77,7 +77,7 @@ impl ambient_authority::Server for AmbientAuthorityImpl {
     }
     fn dir_create_ambient_all(&mut self, params: ambient_authority::DirCreateAmbientAllParams, mut result: ambient_authority::DirCreateAmbientAllResults) -> Promise<(), Error> {
         let params_reader = pry!(params.get());
-        let path = pry!(params_reader.get_path());
+        let path = pry!(pry!(params_reader.get_path()).to_str());
         let ambient_authority = cap_std::ambient_authority();
         let Ok(()) = Dir::create_ambient_dir_all(path, ambient_authority) else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to recursively create all dirs using ambient authority")});
@@ -98,7 +98,7 @@ impl ambient_authority::Server for AmbientAuthorityImpl {
         let params_reader = pry!(params.get());
         capnp_let!({qualifier, organization, application} = params_reader);
         let ambient_authority = cap_std::ambient_authority();
-        let Some(_project_dirs) = ProjectDirs::from(qualifier, organization, application, ambient_authority) else {
+        let Some(_project_dirs) = ProjectDirs::from(pry!(qualifier.to_str()), pry!(organization.to_str()), pry!(application.to_str()), ambient_authority) else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("No valid $HOME directory")});
         };
         result.get().set_project_dirs(capnp_rpc::new_client(ProjectDirsImpl{project_dirs: _project_dirs}));
@@ -232,7 +232,7 @@ pub struct DirImpl {
 impl dir::Server for DirImpl { 
     fn open(&mut self, params: dir::OpenParams, mut result: dir::OpenResults) -> Promise<(), Error> {
         let path_reader = pry!(params.get());
-        let path = pry!(path_reader.get_path());
+        let path = pry!(pry!(path_reader.get_path()).to_str());
         let Ok(_file) = self.dir.open(path) else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to open file")});
         };
@@ -243,7 +243,7 @@ impl dir::Server for DirImpl {
         let params_reader = pry!(params.get());
         capnp_let!({open_options : {read, write, append, truncate, create, create_new}} = params_reader);
         let mut options = OpenOptions::new();
-        let path = pry!(params_reader.get_path());
+        let path = pry!(pry!(params_reader.get_path()).to_str());
         options.read(read).write(write).append(append).truncate(truncate).create(create).create_new(create_new);
         let Ok(_file) = self.dir.open_with(path, &options) else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to open file for reading(With custom options)")});
@@ -253,7 +253,7 @@ impl dir::Server for DirImpl {
     }
     fn create_dir(&mut self, params: dir::CreateDirParams, _: dir::CreateDirResults) -> Promise<(), Error> {
         let path_reader = pry!(params.get());
-        let path = pry!(path_reader.get_path());
+        let path = pry!(pry!(path_reader.get_path()).to_str());
         let Ok(_dir) = self.dir.create_dir(path) else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to create dir")});
         };
@@ -261,7 +261,7 @@ impl dir::Server for DirImpl {
     }
     fn create_dir_all(&mut self, params: dir::CreateDirAllParams, _: dir::CreateDirAllResults) -> Promise<(), Error> {
         let path_reader = pry!(params.get());
-        let path = pry!(path_reader.get_path());
+        let path = pry!(pry!(path_reader.get_path()).to_str());
         let Ok(_dir) = self.dir.create_dir_all(path) else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to create dir(all)")});
         };
@@ -269,7 +269,7 @@ impl dir::Server for DirImpl {
     }
     fn create(&mut self, params: dir::CreateParams, mut result: dir::CreateResults) -> Promise<(), Error> {
         let path_reader = pry!(params.get());
-        let path = pry!(path_reader.get_path());
+        let path = pry!(pry!(path_reader.get_path()).to_str());
         let Ok(_file) = self.dir.create(path) else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to open a file in write only mode")});
         };
@@ -278,20 +278,20 @@ impl dir::Server for DirImpl {
     }
     fn canonicalize(&mut self, params: dir::CanonicalizeParams, mut result: dir::CanonicalizeResults) -> Promise<(), Error> {
         let path_reader = pry!(params.get());
-        let path = pry!(path_reader.get_path());
+        let path = pry!(pry!(path_reader.get_path()).to_str());
         let Ok(_pathBuf) = self.dir.canonicalize(path) else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to canonicalize path")});
         };
         let Some(_str) = _pathBuf.to_str() else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Path contains non utf-8 characters")});
         };
-        result.get().set_path_buf(_str);
+        result.get().set_path_buf(_str.into());
         Promise::ok(())
     }
     fn copy(&mut self, params: dir::CopyParams, mut result: dir::CopyResults) -> Promise<(), Error> {
         let params_reader = pry!(params.get());
-        let from = pry!(params_reader.get_path_from()) ;
-        let to = pry!(params_reader.get_path_to());
+        let from = pry!(pry!(params_reader.get_path_from()).to_str());
+        let to = pry!(pry!(params_reader.get_path_to()).to_str());
         let dir_to_cap = pry!(params_reader.get_dir_to());
         let Some(dir_impl) = DIR_SET.with_borrow(|set| set.get_local_server_of_resolved(&dir_to_cap)) else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Dir not from the same machine")});
@@ -305,8 +305,8 @@ impl dir::Server for DirImpl {
     }
     fn hard_link(&mut self, params: dir::HardLinkParams, _: dir::HardLinkResults) -> Promise<(), Error> {
         let params_reader = pry!(params.get());
-        let src = pry!(params_reader.get_src_path());
-        let dst = pry!(params_reader.get_dst_path());
+        let src = pry!(pry!(params_reader.get_src_path()).to_str());
+        let dst = pry!(pry!(params_reader.get_dst_path()).to_str());
         let dst_dir_cap = pry!(params_reader.get_dst_dir());
         let Some(dir_impl) = DIR_SET.with_borrow(|set| set.get_local_server_of_resolved(&dst_dir_cap)) else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Dir not from the same machine")});
@@ -319,7 +319,7 @@ impl dir::Server for DirImpl {
     }
     fn metadata(&mut self, params: dir::MetadataParams, mut result: dir::MetadataResults) -> Promise<(), Error> {
         let params_reader = pry!(params.get());
-        let path = pry!(params_reader.get_path());
+        let path = pry!(pry!(params_reader.get_path()).to_str());
         let Ok(_metadata) = self.dir.metadata(path) else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to get file metadata")});
         };
@@ -342,7 +342,7 @@ impl dir::Server for DirImpl {
     }
     fn read_dir(&mut self, params: dir::ReadDirParams, mut result: dir::ReadDirResults) -> Promise<(), Error> {
         let params_reader = pry!(params.get());
-        let path = pry!(params_reader.get_path());
+        let path = pry!(pry!(params_reader.get_path()).to_str());
         let Ok(mut _iter) = self.dir.read_dir(path) else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to read dir")});
         };
@@ -351,7 +351,7 @@ impl dir::Server for DirImpl {
     }
     fn read(&mut self, params: dir::ReadParams, mut result: dir::ReadResults) -> Promise<(), Error> {
         let params_reader = pry!(params.get());
-        let path = pry!(params_reader.get_path());
+        let path = pry!(pry!(params_reader.get_path()).to_str());
         let Ok(vec) = self.dir.read(path) else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to read file")});
         };
@@ -360,28 +360,28 @@ impl dir::Server for DirImpl {
     }
     fn read_link(&mut self, params: dir::ReadLinkParams, mut result: dir::ReadLinkResults) -> Promise<(), Error> {
         let params_reader = pry!(params.get());
-        let path = pry!(params_reader.get_path());
+        let path = pry!(pry!(params_reader.get_path()).to_str());
         let Ok(_pathbuf) = self.dir.read_link(path) else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to read link")});
         };
         let Some(_str) = _pathbuf.to_str() else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to read link")});
         };
-        result.get().set_result(_str);
+        result.get().set_result(_str.into());
         Promise::ok(())
     }
     fn read_to_string(&mut self, params: dir::ReadToStringParams, mut result: dir::ReadToStringResults) -> Promise<(), Error> {
         let params_reader = pry!(params.get());
-        let path = pry!(params_reader.get_path());
+        let path = pry!(pry!(params_reader.get_path()).to_str());
         let Ok(string) = self.dir.read_to_string(path) else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to read file to string")});
         };
-        result.get().set_result(string.as_str());
+        result.get().set_result(string.as_str().into());
         Promise::ok(())
     }
     fn remove_dir(&mut self, params: dir::RemoveDirParams, _: dir::RemoveDirResults) -> Promise<(), Error> {
         let params_reader = pry!(params.get());
-        let path = pry!(params_reader.get_path());
+        let path = pry!(pry!(params_reader.get_path()).to_str());
         let Ok(()) = self.dir.remove_dir(path) else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to remove dir")});
         };
@@ -389,7 +389,7 @@ impl dir::Server for DirImpl {
     }
     fn remove_dir_all(&mut self, params: dir::RemoveDirAllParams, _: dir::RemoveDirAllResults) -> Promise<(), Error> {
         let params_reader = pry!(params.get());
-        let path = pry!(params_reader.get_path());
+        let path = pry!(pry!(params_reader.get_path()).to_str());
         let Ok(()) = self.dir.remove_dir_all(path) else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to remove dir(all)")});
         };
@@ -417,7 +417,7 @@ impl dir::Server for DirImpl {
     }
     fn remove_file(&mut self, params: dir::RemoveFileParams, _: dir::RemoveFileResults) -> Promise<(), Error> {
         let params_reader = pry!(params.get());
-        let path = pry!(params_reader.get_path());
+        let path = pry!(pry!(params_reader.get_path()).to_str());
         let Ok(()) = self.dir.remove_file(path) else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to remove file")});
         };
@@ -425,8 +425,8 @@ impl dir::Server for DirImpl {
     }
     fn rename(&mut self, params: dir::RenameParams, _: dir::RenameResults) -> Promise<(), Error> {
         let params_reader = pry!(params.get());
-        let from = pry!(params_reader.get_from());
-        let to = pry!(params_reader.get_to());
+        let from = pry!(pry!(params_reader.get_from()).to_str());
+        let to = pry!(pry!(params_reader.get_to()).to_str());
         let this = &self.dir;
         let Ok(()) = self.dir.rename(from, this, to) else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to rename file")});
@@ -435,7 +435,7 @@ impl dir::Server for DirImpl {
     }
     fn set_readonly(&mut self, params: dir::SetReadonlyParams, _: dir::SetReadonlyResults) -> Promise<(), Error> {
         let params_reader = pry!(params.get());
-        let path = pry!(params_reader.get_path());
+        let path = pry!(pry!(params_reader.get_path()).to_str());
         let readonly = params_reader.get_readonly();
         //capnp_let!({path, readonly} = params_reader);
         let Ok(_meta) = self.dir.metadata(path) else {
@@ -450,7 +450,7 @@ impl dir::Server for DirImpl {
     }
     fn symlink_metadata(&mut self, params: dir::SymlinkMetadataParams, mut result: dir::SymlinkMetadataResults) -> Promise<(), Error> {
         let params_reader = pry!(params.get());
-        let path = pry!(params_reader.get_path());
+        let path = pry!(pry!(params_reader.get_path()).to_str());
         let Ok(_metadata) = self.dir.symlink_metadata(path) else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to get symlink metadata")});
         };
@@ -459,7 +459,7 @@ impl dir::Server for DirImpl {
     }
     fn write(&mut self, params: dir::WriteParams, _: dir::WriteResults) -> Promise<(), Error> {
         let params_reader = pry!(params.get());
-        let path = pry!(params_reader.get_path());
+        let path = pry!(pry!(params_reader.get_path()).to_str());
         let contents = pry!(params_reader.get_contents());
         let Ok(()) = self.dir.write(path, contents) else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to write to file")});
@@ -468,8 +468,8 @@ impl dir::Server for DirImpl {
     }
     fn symlink(&mut self, params: dir::SymlinkParams, _: dir::SymlinkResults) -> Promise<(), Error> {
         let params_reader = pry!(params.get());
-        let original = pry!(params_reader.get_original());
-        let link = pry!(params_reader.get_link());
+        let original = pry!(pry!(params_reader.get_original()).to_str());
+        let link = pry!(pry!(params_reader.get_link()).to_str());
         #[cfg(target_os = "windows")]
         let Ok(()) = self.dir.symlink_dir(original, link) else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to create symlink")});
@@ -482,14 +482,14 @@ impl dir::Server for DirImpl {
     }
     fn exists(&mut self, params: dir::ExistsParams, mut result: dir::ExistsResults) -> Promise<(), Error> {
         let params_reader = pry!(params.get());
-        let path = pry!(params_reader.get_path());
+        let path = pry!(pry!(params_reader.get_path()).to_str());
         let _result = self.dir.exists(path);
         result.get().set_result(_result);
         Promise::ok(())
     }
     fn try_exists(&mut self, params: dir::TryExistsParams, mut result: dir::TryExistsResults) -> Promise<(), Error> {
         let params_reader = pry!(params.get());
-        let path = pry!(params_reader.get_path());
+        let path = pry!(pry!(params_reader.get_path()).to_str());
         let Ok(_result) = self.dir.try_exists(path) else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to check if entity exists")});
         };
@@ -498,14 +498,14 @@ impl dir::Server for DirImpl {
     }
     fn is_file(&mut self, params: dir::IsFileParams, mut result: dir::IsFileResults) -> Promise<(), Error> {
         let params_reader = pry!(params.get());
-        let path = pry!(params_reader.get_path());
+        let path = pry!(pry!(params_reader.get_path()).to_str());
         let _result = self.dir.is_file(path);
         result.get().set_result(_result);
         Promise::ok(())
     }
     fn is_dir(&mut self, params: dir::IsDirParams, mut result: dir::IsDirResults) -> Promise<(), Error> {
         let params_reader = pry!(params.get());
-        let path = pry!(params_reader.get_path());
+        let path = pry!(pry!(params_reader.get_path()).to_str());
         let _result = self.dir.is_dir(path);
         result.get().set_result(_result);
         Promise::ok(())
@@ -624,7 +624,7 @@ impl dir_entry::Server for DirEntryImpl {
         let Some(_name) = _name.to_str() else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("File name not valid utf-8")});
         };
-        result.get().set_result(_name);
+        result.get().set_result(_name.into());
         Promise::ok(())
     }
 }
@@ -821,7 +821,7 @@ impl temp_file::Server for TempFileImpl<'_> {
     }
     fn replace(&mut self, params: temp_file::ReplaceParams, _: temp_file::ReplaceResults) -> Promise<(), Error> {
         let params_reader = pry!(params.get());
-        let dest = pry!(params_reader.get_dest());
+        let dest = pry!(pry!(params_reader.get_dest()).to_str());
         let Some(temp_file) = self.temp_file.take() else {
             return Promise::err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Temp file already removed")});
         };
@@ -1076,17 +1076,17 @@ pub mod tests {
         
         let mut open_ambient_request = ambient_authority.dir_open_ambient_request();
         let mut path = std::env::temp_dir();
-        open_ambient_request.get().set_path(path.to_str().unwrap());
+        open_ambient_request.get().set_path(path.to_str().unwrap().into());
         let dir = futures::executor::block_on(open_ambient_request.send().promise)?.get()?.get_result()?;
 
         let mut create_dir_all_request = dir.create_dir_all_request();
-        create_dir_all_request.get().set_path("test_dir/testing_recursively_creating_dirs");
+        create_dir_all_request.get().set_path("test_dir/testing_recursively_creating_dirs".into());
         futures::executor::block_on(create_dir_all_request.send().promise)?;
 
         let mut canonicalize_request = dir.canonicalize_request();
-        canonicalize_request.get().set_path("test_dir/testing_recursively_creating_dirs");
+        canonicalize_request.get().set_path("test_dir/testing_recursively_creating_dirs".into());
         let result = futures::executor::block_on(canonicalize_request.send().promise)?;
-        let p = result.get()?.get_path_buf()?;
+        let p = result.get()?.get_path_buf()?.to_str()?;
         println!("path = {p}");
         return Ok(())
     }
@@ -1098,11 +1098,11 @@ pub mod tests {
 
         let mut open_ambient_request = ambient_authority.dir_open_ambient_request();
         let mut path = std::env::temp_dir();
-        open_ambient_request.get().set_path(path.to_str().unwrap());
+        open_ambient_request.get().set_path(path.to_str().unwrap().into());
         let dir = futures::executor::block_on(open_ambient_request.send().promise)?.get()?.get_result()?;
 
         let mut create_request = dir.create_request();
-        create_request.get().set_path("capnp_test.txt");
+        create_request.get().set_path("capnp_test.txt".into());
         let file = futures::executor::block_on(create_request.send().promise)?.get()?.get_file()?;
 
         let mut open_bytestream_request = file.open_request();
@@ -1113,7 +1113,7 @@ pub mod tests {
         let _res = futures::executor::block_on(write_request.send().promise)?;
 
         let mut file_metadata_request = dir.metadata_request();
-        file_metadata_request.get().set_path("capnp_test.txt");
+        file_metadata_request.get().set_path("capnp_test.txt".into());
         let metadata = futures::executor::block_on(file_metadata_request.send().promise)?.get()?.get_metadata()?;
         println!("File metadata:");
         test_metadata(metadata)?;
@@ -1178,9 +1178,9 @@ pub mod tests {
 
         let mut project_dirs_from_request = ambient_authority.project_dirs_from_request();
         let mut project_dirs_builder = project_dirs_from_request.get();
-        project_dirs_builder.set_qualifier("");
-        project_dirs_builder.set_organization("Fundament software");
-        project_dirs_builder.set_application("Keystone");
+        project_dirs_builder.set_qualifier("".into());
+        project_dirs_builder.set_organization("Fundament software".into());
+        project_dirs_builder.set_application("Keystone".into());
         let project_dirs = futures::executor::block_on(project_dirs_from_request.send().promise)?.get()?.get_project_dirs()?;
         
         let cache_dir_request = project_dirs.cache_dir_request();
@@ -1256,7 +1256,7 @@ pub mod tests {
         let mut open_ambient_request = ambient_authority.dir_open_ambient_request();
         let mut path = std::env::temp_dir();
         path.push("capnp_test_dir");
-        open_ambient_request.get().set_path(path.to_str().unwrap());
+        open_ambient_request.get().set_path(path.to_str().unwrap().into());
         let dir = futures::executor::block_on(open_ambient_request.send().promise)?.get()?.get_result()?;
 
         let entries_request = dir.entries_request();
@@ -1302,7 +1302,7 @@ pub mod tests {
         println!("File type = {:?}", file_type);
 
         let result = futures::executor::block_on(entry.file_name_request().send().promise)?;
-        let name = result.get()?.get_result()?;
+        let name = result.get()?.get_result()?.to_str()?;
         println!("File/dir name: {name}");
         return Ok(())
     }
@@ -1392,11 +1392,11 @@ pub mod tests {
         
         let mut open_ambient_request = ambient_authority.dir_open_ambient_request();
         let mut path = std::env::temp_dir();
-        open_ambient_request.get().set_path(path.to_str().unwrap());
+        open_ambient_request.get().set_path(path.to_str().unwrap().into());
         let dir = futures::executor::block_on(open_ambient_request.send().promise)?.get()?.get_result()?;
 
         let mut read_request = dir.read_request();
-        read_request.get().set_path("capnp_test.txt");
+        read_request.get().set_path("capnp_test.txt".into());
         let res = futures::executor::block_on(read_request.send().promise)?;
         let out = res.get()?.get_result()?;
         for c in out {

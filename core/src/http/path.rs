@@ -128,10 +128,10 @@ async fn http_request_promise(
         .init_headers(len_response_headers);
     for (i, (key, value)) in header_iter {
         let mut pair = results_headers.reborrow().get(i as u32);
-        pair.set_key(key.as_str());
+        pair.set_key(key.as_str().into());
         pair.set_value(value.to_str().map_err(|_| {
             capnp::Error::failed("Response Header contains invalid character".to_string())
-        })?);
+        })?.into());
     }
     let body_bytes = hyper::body::to_bytes(response.into_body())
         .await
@@ -139,7 +139,7 @@ async fn http_request_promise(
     let body = String::from_utf8(body_bytes.to_vec()).map_err(|_| {
         capnp::Error::failed("Couldn't convert response body to utf8 String".to_string())
     })?;
-    results_builder.reborrow().set_body(body.as_str());
+    results_builder.reborrow().set_body(body.as_str().into());
     Ok(())
 }
 
@@ -157,9 +157,9 @@ impl Path::Server for PathImpl {
         let values = pry!(pry!(params.get()).get_values());
         let mut return_path = self.clone();
         for value in values.iter() {
-            let k = pry!(value.get_key());
-            let v = pry!(value.get_value());
-            return_path.query.push((k.to_string(), v.to_string()));
+            let k = pry!(pry!(value.get_key()).to_string());
+            let v = pry!(pry!(value.get_value()).to_string());
+            return_path.query.push((k, v));
         }
         let client = capnp_rpc::new_client(return_path);
         results.get().set_result(client);
@@ -179,8 +179,8 @@ impl Path::Server for PathImpl {
         let values = pry!(pry!(params.get()).get_values());
         let mut return_path = self.clone();
         for value in values.iter() {
-            let v = pry!(value);
-            return_path.path_list.push(v.to_string());
+            let v = pry!(pry!(value).to_string());
+            return_path.path_list.push(v);
         }
         let client = capnp_rpc::new_client(return_path);
         results.get().set_result(client);
@@ -220,8 +220,8 @@ impl Path::Server for PathImpl {
         params: Path::PostParams,
         mut results: Path::PostResults,
     ) -> Promise<(), capnp::Error> {
-        let body = pry!(pry!(params.get()).get_body());
-        let future = self.http_request(HttpVerb::Post, Some(body.to_string()));
+        let body = pry!(pry!(pry!(params.get()).get_body()).to_string());
+        let future = self.http_request(HttpVerb::Post, Some(body));
         match future {
             Ok(f) => Promise::<_, capnp::Error>::from_future(async move {
                 http_request_promise(results.get().init_result(), f).await
@@ -235,8 +235,8 @@ impl Path::Server for PathImpl {
         params: Path::PutParams,
         mut results: Path::PutResults,
     ) -> Promise<(), capnp::Error> {
-        let body = pry!(pry!(params.get()).get_body());
-        let future = self.http_request(HttpVerb::Put, Some(body.to_string()));
+        let body = pry!(pry!(pry!(params.get()).get_body()).to_string());
+        let future = self.http_request(HttpVerb::Put, Some(body));
         match future {
             Ok(f) => Promise::<_, capnp::Error>::from_future(async move {
                 http_request_promise(results.get().init_result(), f).await
@@ -250,8 +250,8 @@ impl Path::Server for PathImpl {
         params: Path::DeleteParams,
         mut results: Path::DeleteResults,
     ) -> Promise<(), capnp::Error> {
-        let body = pry!(pry!(params.get()).get_body());
-        let future = self.http_request(HttpVerb::Delete, Some(body.to_string()));
+        let body = pry!(pry!(pry!(params.get()).get_body()).to_string());
+        let future = self.http_request(HttpVerb::Delete, Some(body));
         match future {
             Ok(f) => Promise::<_, capnp::Error>::from_future(async move {
                 http_request_promise(results.get().init_result(), f).await
@@ -279,8 +279,8 @@ impl Path::Server for PathImpl {
         params: Path::PatchParams,
         mut results: Path::PatchResults,
     ) -> Promise<(), capnp::Error> {
-        let body = pry!(pry!(params.get()).get_body());
-        let future = self.http_request(HttpVerb::Patch, Some(body.to_string()));
+        let body = pry!(pry!(pry!(params.get()).get_body()).to_string());
+        let future = self.http_request(HttpVerb::Patch, Some(body));
         match future {
             Ok(f) => Promise::<_, capnp::Error>::from_future(async move {
                 http_request_promise(results.get().init_result(), f).await
@@ -346,7 +346,7 @@ impl Path::Server for PathImpl {
         let headers = pry!(pry!(params.get()).get_headers());
         let mut return_path = self.clone();
         for header in headers.iter() {
-            let key = pry!(header.get_key());
+            let key = pry!(pry!(header.get_key()).to_string());
             let key = hyper::header::HeaderName::try_from(key);
             if key.is_err() {
                 return Promise::err(capnp::Error::failed(
@@ -354,7 +354,7 @@ impl Path::Server for PathImpl {
                 ));
             }
             let key = key.unwrap();
-            let value = pry!(header.get_value());
+            let value = pry!(pry!(header.get_value()).to_string());
             let value = hyper::http::HeaderValue::try_from(value);
             if value.is_err() {
                 return Promise::err(capnp::Error::failed(
@@ -396,7 +396,7 @@ mod tests {
         let mut request = path_client.path_request();
         {
             let mut path_params = request.get().init_values(1); //one element
-            path_params.set(0, "get");
+            path_params.set(0, "get".into());
         }
         path_client = request.send().promise.await?.get()?.get_result()?;
 
@@ -404,7 +404,7 @@ mod tests {
         let result = request.send().promise.await?;
         let result = result.get()?.get_result()?;
 
-        let body = result.get_body()?;
+        let body = result.get_body()?.to_str()?;
 
         let body_json: serde_json::Value = serde_json::from_str(body).unwrap();
         assert_eq!(body_json["headers"]["Host"], "httpbin.org");
@@ -467,24 +467,24 @@ mod tests {
         let mut request = path_client.query_request();
         {
             let mut query_params = request.get().init_values(3);
-            query_params.reborrow().get(0).set_key("key1");
-            query_params.reborrow().get(0).set_value("value1");
-            query_params.reborrow().get(1).set_key("key2");
-            query_params.reborrow().get(1).set_value("value2");
-            query_params.reborrow().get(2).set_key("key3");
-            query_params.reborrow().get(2).set_value("value3");
+            query_params.reborrow().get(0).set_key("key1".into());
+            query_params.reborrow().get(0).set_value("value1".into());
+            query_params.reborrow().get(1).set_key("key2".into());
+            query_params.reborrow().get(1).set_value("value2".into());
+            query_params.reborrow().get(2).set_key("key3".into());
+            query_params.reborrow().get(2).set_value("value3".into());
         }
         path_client = request.send().promise.await?.get()?.get_result()?;
         let mut request = path_client.post_request();
         {
             request
                 .get()
-                .set_body("Here's something I post. It should be returned to me");
+                .set_body("Here's something I post. It should be returned to me".into());
         }
         let result = request.send().promise.await?;
         let result = result.get()?.get_result()?;
 
-        let body = result.get_body()?;
+        let body = result.get_body()?.to_str()?;
         let body_json: serde_json::Value = serde_json::from_str(body).unwrap();
         assert_eq!(
             body_json["args"],
@@ -527,10 +527,10 @@ mod tests {
         let mut request = path_client.headers_request();
         {
             let mut headers = request.get().init_headers(2);
-            headers.reborrow().get(0).set_key("Header1");
-            headers.reborrow().get(0).set_value("Value1");
-            headers.reborrow().get(1).set_key("Header2");
-            headers.reborrow().get(1).set_value("Value2");
+            headers.reborrow().get(0).set_key("Header1".into());
+            headers.reborrow().get(0).set_value("Value1".into());
+            headers.reborrow().get(1).set_key("Header2".into());
+            headers.reborrow().get(1).set_value("Value2".into());
         }
         path_client = request.send().promise.await?.get()?.get_result()?;
 
@@ -542,8 +542,8 @@ mod tests {
         let mut request = path_client.headers_request();
         {
             let mut headers = request.get().init_headers(1);
-            headers.reborrow().get(0).set_key("IllegalHeader");
-            headers.reborrow().get(0).set_value("IllegalValue");
+            headers.reborrow().get(0).set_key("IllegalHeader".into());
+            headers.reborrow().get(0).set_value("IllegalValue".into());
         }
         assert!(request.send().promise.await.is_err());
 
@@ -551,7 +551,7 @@ mod tests {
         let result = request.send().promise.await?;
         let result = result.get()?.get_result()?;
 
-        let body = result.get_body()?;
+        let body = result.get_body()?.to_str()?;
 
         let body_json: serde_json::Value = serde_json::from_str(body).unwrap();
         assert_eq!(body_json["headers"]["Header1"], "Value1");

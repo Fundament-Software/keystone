@@ -13,6 +13,11 @@
       url = "github:rustsec/advisory-db";
       flake = false;
     };
+
+    capnproto-fs = {
+      url = "github:Fundament-Software/capnproto?ref=v2";
+      flake = false;
+    };
   };
 
   outputs = inputs@{ self, flake-utils, nixpkgs, rust-overlay, nixpkgs-21, crane
@@ -23,38 +28,44 @@
         pkgs = import nixpkgs { inherit system overlays; };
 
         rust-custom-toolchain = (pkgs.rust-bin.stable.latest.default.override {
-              extensions = [
-                "rust-src"
-                "rustfmt"
-                "llvm-tools-preview"
-                "rust-analyzer-preview"
-              ];
+          extensions = [
+            "rust-src"
+            "rustfmt"
+            "llvm-tools-preview"
+            "rust-analyzer-preview"
+          ];
+        });
+
+        capnproto = (pkgs.clangStdenv.mkDerivation {
+          pname = "capnproto";
+          version = "v2";
+          src = inputs.capnproto-fs;
+          nativeBuildInputs = [ pkgs.cmake ];
+          propagatedBuildInputs = [ pkgs.openssl pkgs.zlib ];
         });
 
       in rec {
-        devShell = pkgs.mkShell {
-          buildInputs = with pkgs; [
-            openssl
-            pkg-config
-          ];
+        devShells.default =
+          (pkgs.mkShell.override { stdenv = pkgs.llvmPackages.stdenv; }) {
+            buildInputs = with pkgs; [ openssl pkg-config ];
 
-          nativeBuildInputs = with pkgs; [
-            # get current rust toolchain defaults (this includes clippy and rustfmt)
-            rust-custom-toolchain
+            nativeBuildInputs = with pkgs; [
+              # get current rust toolchain defaults (this includes clippy and rustfmt)
+              rust-custom-toolchain
 
-            cargo-edit
+              cargo-edit
 
-            capnproto
+              capnproto
 
-            cmake
-          ];
+              cmake
+            ];
 
-          # fetch with cli instead of native
-          CARGO_NET_GIT_FETCH_WITH_CLI = "true";
-          RUST_BACKTRACE = 1;
-        };
+            # fetch with cli instead of native
+            CARGO_NET_GIT_FETCH_WITH_CLI = "true";
+            RUST_BACKTRACE = 1;
+          };
 
-        default = {};
+        default = { };
 
         checks = let
           craneLib =

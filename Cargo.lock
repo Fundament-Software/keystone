@@ -348,7 +348,7 @@ dependencies = [
 [[package]]
 name = "capnp"
 version = "0.18.0"
-source = "git+https://github.com/Fundament-Software/capnproto-rust#31b24358ec50ebef9f7eac217d2c24043d90cb37"
+source = "git+https://github.com/Fundament-Software/capstone-rs#ec9540c3a12b6a4466968c1b960aefc7d6fab85c"
 dependencies = [
  "embedded-io",
  "smallvec",
@@ -357,7 +357,7 @@ dependencies = [
 [[package]]
 name = "capnp-futures"
 version = "0.18.0"
-source = "git+https://github.com/Fundament-Software/capnproto-rust#31b24358ec50ebef9f7eac217d2c24043d90cb37"
+source = "git+https://github.com/Fundament-Software/capstone-rs#ec9540c3a12b6a4466968c1b960aefc7d6fab85c"
 dependencies = [
  "capnp",
  "futures",
@@ -366,7 +366,7 @@ dependencies = [
 [[package]]
 name = "capnp-import"
 version = "0.18.0"
-source = "git+https://github.com/Fundament-Software/capnproto-rust#31b24358ec50ebef9f7eac217d2c24043d90cb37"
+source = "git+https://github.com/Fundament-Software/capstone-rs#ec9540c3a12b6a4466968c1b960aefc7d6fab85c"
 dependencies = [
  "anyhow",
  "capnp",
@@ -388,7 +388,7 @@ dependencies = [
 [[package]]
 name = "capnp-macros"
 version = "0.18.0"
-source = "git+https://github.com/Fundament-Software/capnproto-rust#31b24358ec50ebef9f7eac217d2c24043d90cb37"
+source = "git+https://github.com/Fundament-Software/capstone-rs#ec9540c3a12b6a4466968c1b960aefc7d6fab85c"
 dependencies = [
  "capnp",
  "capnp-rpc",
@@ -401,17 +401,18 @@ dependencies = [
 [[package]]
 name = "capnp-rpc"
 version = "0.18.0"
-source = "git+https://github.com/Fundament-Software/capnproto-rust#31b24358ec50ebef9f7eac217d2c24043d90cb37"
+source = "git+https://github.com/Fundament-Software/capstone-rs#ec9540c3a12b6a4466968c1b960aefc7d6fab85c"
 dependencies = [
  "capnp",
  "capnp-futures",
  "futures",
+ "tokio",
 ]
 
 [[package]]
 name = "capnpc"
 version = "0.18.0"
-source = "git+https://github.com/Fundament-Software/capnproto-rust#31b24358ec50ebef9f7eac217d2c24043d90cb37"
+source = "git+https://github.com/Fundament-Software/capstone-rs#ec9540c3a12b6a4466968c1b960aefc7d6fab85c"
 dependencies = [
  "capnp",
 ]

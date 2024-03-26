@@ -1,6 +1,7 @@
 use super::database;
 use async_trait::async_trait;
 use atomic_counter::{AtomicCounter, RelaxedCounter};
+use capnp_macros::capnproto_rpc;
 use capnp_rpc::pry;
 use couch_rs::document::TypedCouchDocument;
 use couch_rs::types::document::DocumentId;
@@ -30,16 +31,12 @@ impl CouchDB {
         })
     }
 }
-
+#[capnproto_rpc(crate::database_capnp::connection)]
 impl crate::database_capnp::connection::Server for CouchDB {
     fn create_database(
         &mut self,
-        params: crate::database_capnp::connection::CreateDatabaseParams,
-        results: crate::database_capnp::connection::CreateDatabaseResults,
-    ) -> capnp::capability::Promise<(), capnp::Error> {
-        let args = pry!(params.get());
-        let name = args.get_name().unwrap();
-
+        name: capnp::text::Reader
+    ) {
         /*Promise::from_future(
             async move {
                 let db = match self.client.make_db(name).await {
@@ -51,29 +48,25 @@ impl crate::database_capnp::connection::Server for CouchDB {
             }
             .map_err(|e: Box<dyn std::error::Error>| Error::failed(format!("{:?}", e))),
         )*/
-        capnp::capability::Promise::err(capnp::Error::unimplemented(
+        Ok(async {Err(capnp::Error::unimplemented(
             "method connection::Server::create_database not implemented".to_string(),
-        ))
+        ))})
     }
 
     fn get_database(
         &mut self,
-        _: crate::database_capnp::connection::GetDatabaseParams,
-        _: crate::database_capnp::connection::GetDatabaseResults,
-    ) -> capnp::capability::Promise<(), capnp::Error> {
-        capnp::capability::Promise::err(capnp::Error::unimplemented(
+    ) {
+        Ok(async {Err(capnp::Error::unimplemented(
             "method connection::Server::get_database not implemented".to_string(),
-        ))
+        ))})
     }
 
     fn destroy_database(
         &mut self,
-        _: crate::database_capnp::connection::DestroyDatabaseParams,
-        _: crate::database_capnp::connection::DestroyDatabaseResults,
-    ) -> capnp::capability::Promise<(), capnp::Error> {
-        capnp::capability::Promise::err(capnp::Error::unimplemented(
+    ) {
+        Ok(async {Err(capnp::Error::unimplemented(
             "method connection::Server::destroy_database not implemented".to_string(),
-        ))
+        ))})
     }
 }
 

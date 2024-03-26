@@ -3,12 +3,13 @@ use capnp::{
     capability::{Promise, Response},
     ErrorKind,
 };
+use capnp_macros::capnproto_rpc;
 use capnp_rpc::pry;
 use tokio::io::{AsyncRead, AsyncReadExt};
 
-use crate::byte_stream_capnp::byte_stream::{
+use crate::byte_stream_capnp::{self, byte_stream::{
     Client, EndParams, EndResults, Server, WriteParams, WriteResults,
-};
+}};
 use crate::stream_capnp::stream_result;
 
 /// Server implementation of a ByteStream capability.
@@ -37,42 +38,37 @@ where
     }
 }
 
+#[capnproto_rpc(byte_stream_capnp::byte_stream)]
 impl<C> Server for ByteStreamImpl<C>
 where
     C: FnMut(&[u8]) -> Promise<(), capnp::Error>,
 {
     fn write(
         &mut self,
-        params: WriteParams,
-        mut _results: WriteResults,
-    ) -> Promise<(), capnp::Error> {
+        bytes: &[u8]
+    ) {
         if self.closed {
-            return Promise::err(capnp::Error {
+            return Err(capnp::Error {
                 kind: ErrorKind::Failed,
                 extra: String::from("Write called on byte stream after closed."),
             });
         }
 
-        let byte_reader = pry!(params.get());
-        let bytes = pry!(byte_reader.get_bytes());
-
-        (self.consumer)(bytes)
+        Ok((self.consumer)(bytes))
     }
 
-    fn end(&mut self, _: EndParams, _: EndResults) -> Promise<(), capnp::Error> {
+    fn end(&mut self) {
         self.closed = true;
-        Promise::ok(())
+        capnp::ok()
     }
 
     fn get_substream(
-        &mut self,
-        _: crate::byte_stream_capnp::byte_stream::GetSubstreamParams,
-        _: crate::byte_stream_capnp::byte_stream::GetSubstreamResults,
-    ) -> capnp::capability::Promise<(), capnp::Error> {
-        Promise::err(capnp::Error {
+        &mut self
+    ) {
+        Ok(async{Err(capnp::Error {
             kind: ErrorKind::Unimplemented,
             extra: String::from("Not implemented"),
-        })
+        })})
     }
 }
 

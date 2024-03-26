@@ -1,5 +1,6 @@
 use super::Path;
 use capnp::capability::Promise;
+use capnp_macros::capnproto_rpc;
 use capnp_rpc::pry;
 use hyper::{
     client::{HttpConnector, ResponseFuture},
@@ -129,9 +130,14 @@ async fn http_request_promise(
     for (i, (key, value)) in header_iter {
         let mut pair = results_headers.reborrow().get(i as u32);
         pair.set_key(key.as_str().into());
-        pair.set_value(value.to_str().map_err(|_| {
-            capnp::Error::failed("Response Header contains invalid character".to_string())
-        })?.into());
+        pair.set_value(
+            value
+                .to_str()
+                .map_err(|_| {
+                    capnp::Error::failed("Response Header contains invalid character".to_string())
+                })?
+                .into(),
+        );
     }
     let body_bytes = hyper::body::to_bytes(response.into_body())
         .await
@@ -142,186 +148,103 @@ async fn http_request_promise(
     results_builder.reborrow().set_body(body.as_str().into());
     Ok(())
 }
-
+#[capnproto_rpc(Path)]
 impl Path::Server for PathImpl {
-    fn query(
-        &mut self,
-        params: Path::QueryParams,
-        mut results: Path::QueryResults,
-    ) -> Promise<(), capnp::Error> {
+    fn query(&mut self, values: Reader) {
         if !self.query_modifiable {
-            return Promise::err(capnp::Error::failed(
+            return Err(capnp::Error::failed(
                 "Can't add to query, because it was finalized".to_string(),
             ));
         }
-        let values = pry!(pry!(params.get()).get_values());
         let mut return_path = self.clone();
         for value in values.iter() {
-            let k = pry!(pry!(value.get_key()).to_string());
-            let v = pry!(pry!(value.get_value()).to_string());
+            let k = value.get_key()?.to_string()?;
+            let v = value.get_value()?.to_string()?;
             return_path.query.push((k, v));
         }
         let client = capnp_rpc::new_client(return_path);
         results.get().set_result(client);
-        Promise::ok(())
+        capnp::ok()
     }
 
-    fn path(
-        &mut self,
-        params: Path::PathParams,
-        mut results: Path::PathResults,
-    ) -> Promise<(), capnp::Error> {
+    fn path(&mut self, values: Reader) {
         if !self.path_modifiable {
-            return Promise::err(capnp::Error::failed(
+            return Err(capnp::Error::failed(
                 "Can't add to path, because it was finalized".to_string(),
             ));
         }
-        let values = pry!(pry!(params.get()).get_values());
         let mut return_path = self.clone();
         for value in values.iter() {
-            let v = pry!(pry!(value).to_string());
+            let v = value?.to_string()?;
             return_path.path_list.push(v);
         }
         let client = capnp_rpc::new_client(return_path);
         results.get().set_result(client);
-        Promise::ok(())
+        capnp::ok()
     }
     // START OF IMPLEMENTATIONS THAT RETURN HTTP RESULT
-    fn get(
-        &mut self,
-        _: Path::GetParams,
-        mut results: Path::GetResults,
-    ) -> Promise<(), capnp::Error> {
-        let future = self.http_request(HttpVerb::Get, None);
-        match future {
-            Ok(f) => Promise::<_, capnp::Error>::from_future(async move {
-                http_request_promise(results.get().init_result(), f).await
-            }),
-            Err(e) => Promise::err(e),
-        }
+    fn get(&mut self) {
+        let future = self.http_request(HttpVerb::Get, None)?;
+        Ok(async move { http_request_promise(results.get().init_result(), future).await })
     }
 
-    fn head(
-        &mut self,
-        _: Path::HeadParams,
-        mut results: Path::HeadResults,
-    ) -> Promise<(), capnp::Error> {
-        let future = self.http_request(HttpVerb::Head, None);
-        match future {
-            Ok(f) => Promise::<_, capnp::Error>::from_future(async move {
-                http_request_promise(results.get().init_result(), f).await
-            }),
-            Err(e) => Promise::err(e),
-        }
+    fn head(&mut self) {
+        let future = self.http_request(HttpVerb::Head, None)?;
+        Ok(async move { http_request_promise(results.get().init_result(), future).await })
     }
 
-    fn post(
-        &mut self,
-        params: Path::PostParams,
-        mut results: Path::PostResults,
-    ) -> Promise<(), capnp::Error> {
-        let body = pry!(pry!(pry!(params.get()).get_body()).to_string());
-        let future = self.http_request(HttpVerb::Post, Some(body));
-        match future {
-            Ok(f) => Promise::<_, capnp::Error>::from_future(async move {
-                http_request_promise(results.get().init_result(), f).await
-            }),
-            Err(e) => Promise::err(e),
-        }
+    fn post(&mut self, body: Reader) {
+        let body = body.to_string()?;
+        let future = self.http_request(HttpVerb::Post, Some(body))?;
+
+        Ok(async move { http_request_promise(results.get().init_result(), future).await })
     }
 
-    fn put(
-        &mut self,
-        params: Path::PutParams,
-        mut results: Path::PutResults,
-    ) -> Promise<(), capnp::Error> {
-        let body = pry!(pry!(pry!(params.get()).get_body()).to_string());
-        let future = self.http_request(HttpVerb::Put, Some(body));
-        match future {
-            Ok(f) => Promise::<_, capnp::Error>::from_future(async move {
-                http_request_promise(results.get().init_result(), f).await
-            }),
-            Err(e) => Promise::err(e),
-        }
+    fn put(&mut self, body: Reader) {
+        let body = body.to_string()?;
+        let future = self.http_request(HttpVerb::Put, Some(body))?;
+
+        Ok(async move { http_request_promise(results.get().init_result(), future).await })
     }
 
-    fn delete(
-        &mut self,
-        params: Path::DeleteParams,
-        mut results: Path::DeleteResults,
-    ) -> Promise<(), capnp::Error> {
-        let body = pry!(pry!(pry!(params.get()).get_body()).to_string());
-        let future = self.http_request(HttpVerb::Delete, Some(body));
-        match future {
-            Ok(f) => Promise::<_, capnp::Error>::from_future(async move {
-                http_request_promise(results.get().init_result(), f).await
-            }),
-            Err(e) => Promise::err(e),
-        }
+    fn delete(&mut self, body: Reader) {
+        let body = body.to_string()?;
+        let future = self.http_request(HttpVerb::Delete, Some(body))?;
+
+        Ok(async move { http_request_promise(results.get().init_result(), future).await })
     }
 
-    fn options(
-        &mut self,
-        _: Path::OptionsParams,
-        mut results: Path::OptionsResults,
-    ) -> Promise<(), capnp::Error> {
-        let future = self.http_request(HttpVerb::Options, None);
-        match future {
-            Ok(f) => Promise::<_, capnp::Error>::from_future(async move {
-                http_request_promise(results.get().init_result(), f).await
-            }),
-            Err(e) => Promise::err(e),
-        }
+    fn options(&mut self) {
+        let future = self.http_request(HttpVerb::Options, None)?;
+        Ok(async move { http_request_promise(results.get().init_result(), future).await })
     }
 
-    fn patch(
-        &mut self,
-        params: Path::PatchParams,
-        mut results: Path::PatchResults,
-    ) -> Promise<(), capnp::Error> {
-        let body = pry!(pry!(pry!(params.get()).get_body()).to_string());
-        let future = self.http_request(HttpVerb::Patch, Some(body));
-        match future {
-            Ok(f) => Promise::<_, capnp::Error>::from_future(async move {
-                http_request_promise(results.get().init_result(), f).await
-            }),
-            Err(e) => Promise::err(e),
-        }
+    fn patch(&mut self, body: Reader) {
+        let body = body.to_string()?;
+        let future = self.http_request(HttpVerb::Patch, Some(body))?;
+        Ok(async move { http_request_promise(results.get().init_result(), future).await })
     }
     // END OF IMPLEMENTATIONS THAT RETURN HTTP RESULT
-    fn finalize_query(
-        &mut self,
-        _: Path::FinalizeQueryParams,
-        mut results: Path::FinalizeQueryResults,
-    ) -> Promise<(), capnp::Error> {
+    fn finalize_query(&mut self) {
         let mut return_path = self.clone();
         return_path.query_modifiable = false;
         let client = capnp_rpc::new_client(return_path);
         results.get().set_result(client);
-        Promise::ok(())
+        capnp::ok()
     }
 
-    fn finalize_path(
-        &mut self,
-        _: Path::FinalizePathParams,
-        mut results: Path::FinalizePathResults,
-    ) -> Promise<(), capnp::Error> {
+    fn finalize_path(&mut self) {
         let mut return_path = self.clone();
         return_path.path_modifiable = false;
         let client = capnp_rpc::new_client(return_path);
         results.get().set_result(client);
-        Promise::ok(())
+        capnp::ok()
     }
 
-    fn whitelist_verbs(
-        &mut self,
-        params: Path::WhitelistVerbsParams,
-        mut results: Path::WhitelistVerbsResults,
-    ) -> Promise<(), capnp::Error> {
-        let verbs = pry!(pry!(params.get()).get_verbs());
+    fn whitelist_verbs(&mut self, verbs: Reader) {
         let mut verbs_vec = vec![];
         for verb in verbs.iter() {
-            let v = pry!(verb);
+            let v = verb?;
             verbs_vec.push(v);
         }
         let mut return_path = self.clone();
@@ -330,34 +253,29 @@ impl Path::Server for PathImpl {
             .retain(|&x| verbs_vec.contains(&x));
         let client = capnp_rpc::new_client(return_path);
         results.get().set_result(client);
-        Promise::ok(())
+        capnp::ok()
     }
 
-    fn headers(
-        &mut self,
-        params: Path::HeadersParams,
-        mut results: Path::HeadersResults,
-    ) -> Promise<(), capnp::Error> {
+    fn headers(&mut self, headers: Reader) {
         if !self.headers_modifiable {
-            return Promise::err(capnp::Error::failed(
+            return Err(capnp::Error::failed(
                 "Can't add headers, because they were finalized".to_string(),
             ));
         }
-        let headers = pry!(pry!(params.get()).get_headers());
         let mut return_path = self.clone();
         for header in headers.iter() {
-            let key = pry!(pry!(header.get_key()).to_string());
+            let key = header.get_key()?.to_string()?;
             let key = hyper::header::HeaderName::try_from(key);
             if key.is_err() {
-                return Promise::err(capnp::Error::failed(
+                return Err(capnp::Error::failed(
                     "Can't add header, key is invalid".to_string(),
                 ));
             }
             let key = key.unwrap();
-            let value = pry!(pry!(header.get_value()).to_string());
+            let value = header.get_value()?.to_string()?;
             let value = hyper::http::HeaderValue::try_from(value);
             if value.is_err() {
-                return Promise::err(capnp::Error::failed(
+                return Err(capnp::Error::failed(
                     "Can't add header, value is invalid".to_string(),
                 ));
             }
@@ -366,19 +284,15 @@ impl Path::Server for PathImpl {
         }
         let client = capnp_rpc::new_client(return_path);
         results.get().set_result(client);
-        Promise::ok(())
+        capnp::ok()
     }
 
-    fn finalize_headers(
-        &mut self,
-        _: Path::FinalizeHeadersParams,
-        mut results: Path::FinalizeHeadersResults,
-    ) -> Promise<(), capnp::Error> {
+    fn finalize_headers(&mut self) {
         let mut return_path = self.clone();
         return_path.headers_modifiable = false;
         let client = capnp_rpc::new_client(return_path);
         results.get().set_result(client);
-        Promise::ok(())
+        capnp::ok()
     }
 }
 

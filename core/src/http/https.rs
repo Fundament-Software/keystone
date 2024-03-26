@@ -1,6 +1,7 @@
 use super::domain::DomainImpl;
 use super::{Domain, Https};
 use capnp::capability::Promise;
+use capnp_macros::capnproto_rpc;
 use capnp_rpc::pry;
 use hyper::client::HttpConnector;
 use hyper_tls::HttpsConnector;
@@ -16,20 +17,12 @@ impl HttpsImpl {
         HttpsImpl { https_client }
     }
 }
-
+#[capnproto_rpc(Https)]
 impl Https::Server for HttpsImpl {
-    fn domain(
-        &mut self,
-        params: Https::DomainParams,
-        mut results: Https::DomainResults,
-    ) -> Promise<(), capnp::Error> {
-        let domain_name = pry!(pry!(pry!(params.get()).get_name()).to_str());
-        let domain_impl = DomainImpl::new(domain_name, self.https_client.clone());
-        if let Err(e) = domain_impl {
-            return Promise::err(e);
-        }
-        let domain: Domain::Client = capnp_rpc::new_client(domain_impl.unwrap());
+    fn domain(&mut self, name: capnp::text::Reader) {
+        let domain_impl = DomainImpl::new(name.to_str()?, self.https_client.clone())?;
+        let domain: Domain::Client = capnp_rpc::new_client(domain_impl);
         results.get().set_result(domain);
-        Promise::ok(())
+        capnp::ok()
     }
 }

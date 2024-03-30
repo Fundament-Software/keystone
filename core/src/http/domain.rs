@@ -37,7 +37,6 @@ impl Domain::Server for DomainImpl {
             ));
         }
         let original_domain_name = self.domain_name.clone();
-        //let name = pry!(pry!(pry!(params.get()).get_name()).to_string());
         let new_domain_name = name.to_string()? + "." + original_domain_name.as_str();
         let domain_impl = DomainImpl::new(new_domain_name, self.https_client.clone())?;
         let domain: Domain::Client = capnp_rpc::new_client(domain_impl);

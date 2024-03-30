@@ -1,6 +1,7 @@
 use super::path::PathImpl;
 use super::{Domain, Path};
 use capnp::capability::Promise;
+use capnp_macros::capnproto_rpc;
 use capnp_rpc::pry;
 use hyper::client::HttpConnector;
 use hyper::http::uri::Authority;
@@ -27,68 +28,40 @@ impl DomainImpl {
         })
     }
 }
-
+#[capnproto_rpc(Domain)]
 impl Domain::Server for DomainImpl {
-    fn subdomain(
-        &mut self,
-        params: Domain::SubdomainParams,
-        mut results: Domain::SubdomainResults,
-    ) -> Promise<(), capnp::Error> {
+    fn subdomain(&mut self, name: capnp::text::Reader) {
         if !self.modifiable {
-            return Promise::err(capnp::Error::failed(
+            return Err(capnp::Error::failed(
                 "Can't add subdomain, because domain was finalized".to_string(),
             ));
         }
         let original_domain_name = self.domain_name.clone();
-        let name = pry!(pry!(pry!(params.get()).get_name()).to_string());
-        let new_domain_name = name + "." + original_domain_name.as_str();
-        let domain_impl = DomainImpl::new(new_domain_name, self.https_client.clone());
-        if let Err(e) = domain_impl {
-            return Promise::err(e);
-        }
-        let domain: Domain::Client = capnp_rpc::new_client(domain_impl.unwrap());
+        let new_domain_name = name.to_string()? + "." + original_domain_name.as_str();
+        let domain_impl = DomainImpl::new(new_domain_name, self.https_client.clone())?;
+        let domain: Domain::Client = capnp_rpc::new_client(domain_impl);
         results.get().set_result(domain);
-        Promise::ok(())
+        capnp::ok()
     }
 
-    fn path(
-        &mut self,
-        params: Domain::PathParams,
-        mut results: Domain::PathResults,
-    ) -> Promise<(), capnp::Error> {
-        let path_list: Vec<String> = pry!(pry!(pry!(params.get()).get_values())
-            .iter()
-            //.filter(|i| i.is_ok()) // TODO Not sure what the errors would be, we should probably report them instead of skipping
-            //TODO I think this does what it's supposed to but someone should take a look(Relies on result implementing from iterator and pry returning if an error comes up)
-            .map(|i| {
-                let Ok(result) = i?.to_string() else {
-                    return Err(capnp::Error{kind: capnp::ErrorKind::Failed, extra: String::from("Values contains invalid utf-8")})
-                };
-                return Ok(result);
-            })
-            .collect());
+    fn path(&mut self, values: capnp::text_list::Reader) {
+        let path_list: Result<Vec<String>, capnp::Error> =
+            values.iter().map(|i| Ok(i?.to_string()?)).collect();
         let path_impl = PathImpl::new(
             self.domain_name.as_str(),
-            path_list,
+            path_list?,
             self.https_client.clone(),
-        );
-        if let Err(e) = path_impl {
-            return Promise::err(e);
-        }
-        let path: Path::Client = capnp_rpc::new_client(path_impl.unwrap());
+        )?;
+        let path: Path::Client = capnp_rpc::new_client(path_impl);
         results.get().set_result(path);
-        Promise::ok(())
+        capnp::ok()
     }
 
-    fn finalize_domain(
-        &mut self,
-        _: Domain::FinalizeDomainParams,
-        mut results: Domain::FinalizeDomainResults,
-    ) -> Promise<(), capnp::Error> {
+    fn finalize_domain(&mut self) {
         let mut return_domain = self.clone();
         return_domain.modifiable = false;
         let client = capnp_rpc::new_client(return_domain);
         results.get().set_result(client);
-        Promise::ok(())
+        capnp::ok()
     }
 }

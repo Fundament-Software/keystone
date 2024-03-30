@@ -4,6 +4,7 @@ pub mod unix_process {
     use std::process::Stdio;
     use std::rc::Rc;
     use std::result::Result;
+    use std::future::Future;
     use capnp::capability::Promise;
     use capnp_rpc::pry;
     use tokio::io::{AsyncRead, AsyncWriteExt};
@@ -113,9 +114,9 @@ pub mod unix_process {
     impl process::Server<UnixProcessApi, UnixProcessError> for Rc<RefCell<UnixProcessImpl>> {
         /// In this implementation of `spawn`, the functions returns the exit code of the child
         /// process.
-        fn geterror(&mut self, _: GetErrorParams, mut results: GetErrorResults) -> Promise<(), capnp::Error> { 
+        fn geterror<'b>(&mut self, _: GetErrorParams, mut results: GetErrorResults) -> Result<impl Future<Output = Result<(), capnp::Error>> + 'b, capnp::Error> { 
             let this = self.clone();
-            Promise::from_future(async move {
+            Ok(async move {
                 let results_builder = results.get();
                 let mut process_error_builder = results_builder.init_result();
 
@@ -132,9 +133,9 @@ pub mod unix_process {
             })
         }
 
-        fn kill(&mut self, _: KillParams, _: KillResults) ->  Promise<(), capnp::Error> {
+        fn kill<'b>(&mut self, _: KillParams, _: KillResults) -> Result<impl Future<Output = Result<(), capnp::Error>> + 'b, capnp::Error> {
             let this = self.clone();
-            Promise::from_future(async move {
+            Ok(async move {
                 match this.borrow_mut().child.kill().await {
                     Ok(_) => Ok(()),
                     Err(e) => Err(capnp::Error::failed(e.to_string())),
@@ -142,7 +143,7 @@ pub mod unix_process {
             })
         }
 
-        fn getapi(&mut self, _: GetApiParams, mut results: GetApiResults) ->  Promise<(), capnp::Error> {
+        fn getapi<'b>(&mut self, _: GetApiParams, mut results: GetApiResults) -> Result<impl Future<Output = Result<(), capnp::Error>> + 'b, capnp::Error> {
             let this = self.clone();
             let mut api_builder = results.get().init_api();
 
@@ -164,7 +165,7 @@ pub mod unix_process {
             let stdin_stream_client: ByteStreamClient = capnp_rpc::new_client(stdin_stream_server);
             api_builder.set_stdin(stdin_stream_client);
 
-            Promise::ok(())
+            capnp::ok()
         }
     }
 
@@ -174,27 +175,27 @@ pub mod unix_process {
     type SpawnResults = service_spawn::SpawnResults<capnp::text::Owned, UnixProcessArgs, UnixProcessApi, UnixProcessError>;
 
     impl service_spawn::Server<capnp::text::Owned, UnixProcessArgs, UnixProcessApi, UnixProcessError> for UnixProcessServiceSpawnImpl {
-        fn spawn(&mut self, params: SpawnParams, mut results: SpawnResults) -> Promise<(), capnp::Error> {
-            let params_reader = pry!(params.get());
+        fn spawn<'b>(&mut self, params: SpawnParams, mut results: SpawnResults) -> Result<impl Future<Output = Result<(), capnp::Error>> + 'b, capnp::Error> {
+            let params_reader = params.get()?;
             
-            let program = pry!(pry!(params_reader.get_program()).to_str());
+            let program = params_reader.get_program()?.to_str()?;
             
-            let args = pry!(params_reader.get_args());
-            let stdout: ByteStreamClient = pry!(args.get_stdout());
-            let stderr: ByteStreamClient = pry!(args.get_stderr());
-            let argv: capnp::text_list::Reader = pry!(args.get_argv());
+            let args = params_reader.get_args()?;
+            let stdout: ByteStreamClient = args.get_stdout()?;
+            let stderr: ByteStreamClient = args.get_stderr()?;
+            let argv: capnp::text_list::Reader = args.get_argv()?;
             let argv_iter = argv.into_iter().map(|item| match item {
                 Ok(i) => Ok(i.to_str().map_err(|_| capnp::Error::failed("Invalid utf-8 in argv".to_string()))?), 
                 Err(e) => Err(e)
             });
 
             match UnixProcessImpl::spawn_process(program, argv_iter, stdout, stderr) {
-                Err(e) => Promise::err(capnp::Error::failed(e.to_string())),
+                Err(e) => Err(capnp::Error::failed(e.to_string())),
                 Ok(process_impl) => {
                     let server_pointer = Rc::new(RefCell::new(process_impl));
                     let process_client: UnixProcessClient = capnp_rpc::new_client(server_pointer);
                     results.get().set_result(process_client);
-                    Promise::ok(())
+                    capnp::ok()
                 }
             }
         }

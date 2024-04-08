@@ -14,8 +14,8 @@
       flake = false;
     };
 
-    capnproto-fs = {
-      url = "github:Fundament-Software/capnproto?ref=v2";
+    capstone = {
+      url = "github:Fundament-Software/capstone?ref=v2";
       flake = false;
     };
   };
@@ -39,7 +39,7 @@
         capnproto = (pkgs.clangStdenv.mkDerivation {
           pname = "capnproto";
           version = "v2";
-          src = inputs.capnproto-fs;
+          src = inputs.capstone;
           nativeBuildInputs = [ pkgs.cmake ];
           propagatedBuildInputs = [ pkgs.openssl pkgs.zlib ];
         });

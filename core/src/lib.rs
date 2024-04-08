@@ -1,7 +1,5 @@
 #![allow(dead_code)]
-mod couchdb;
-mod database;
+mod config;
 pub mod http;
-mod node;
 
 capnp_import::capnp_import!("schema/**/*.capnp");

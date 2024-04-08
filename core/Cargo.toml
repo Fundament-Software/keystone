@@ -1,48 +1,57 @@
 [package]
 name = "keystone"
-version = "0.1.0"
-edition = "2021"
-rust-version = "1.60"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
 authors = ["Erik McClure <erikm@fundament.software>"]
 description = """
 Core framework for managing internal company infrastructure using couchdb and capability based security.
 """
-homepage = "https://github.com/Fundament-Software/keystone"
-repository = "https://github.com/Fundament-Software/keystone/tree/master/core"
-readme = "README.md"
-keywords = ["backend", "infrastructure", "management", "enterprise", "distributed"]
-license = "Apache-2.0"
+homepage.workspace = true
+repository = "https://github.com/Fundament-Software/keystone/tree/main/core"
+readme.workspace = true
+keywords = [
+  "backend",
+  "infrastructure",
+  "management",
+  "enterprise",
+  "distributed",
+]
+license.workspace = true
 
 [lib]
-doctest = false 
+doctest = false
 
 [dependencies]
-async-trait = "0.1.57"
 atomic-counter = "1.0"
 bytes = "1.4.0"
-cap-std = "2.0.0"
+cap-std.workspace = true
 cap-tempfile = "2.0.0"
 cap-directories = "2.0.0"
-capstone = { git = "https://github.com/Fundament-Software/capstone-rs" }
-capstone-futures = { git = "https://github.com/Fundament-Software/capstone-rs" }
-capstone-import = { git = "https://github.com/Fundament-Software/capstone-rs" }
-capstone-rpc = { git = "https://github.com/Fundament-Software/capstone-rs" }
-capstone-macros = { git = "https://github.com/Fundament-Software/capstone-rs" }
+caplog = { git = "https://github.com/Fundament-Software/caplog" }
+capstone.workspace = true
+capstone-futures.workspace = true
+capstone-import.workspace = true
+capstone-rpc.workspace = true
+capstone-macros.workspace = true
 chrono = "0.4"
-color-eyre = "0.6"
-couch_rs = "0.9"
+color-eyre.workspace = true
 dlopen = "0.1.8"
-eyre = "0.6"
+eyre.workspace = true
 futures = "0.3"
 hyper = { version = "0.14", features = ["full"] }
 hyper-tls = "0.5"
 log = { version = "0.4", features = ["kv_unstable"] }
-pretty_env_logger = "0.4.0"
-serde = "1.0"
+serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-tokio = { version = "1.18", features = ["full"] }
+tokio.workspace = true
 tokio-util = "0.7"
 url = "2.3.1"
+clap = { version = "4.5.4", features = ["derive"] }
+tracing-subscriber.workspace = true
+tracing.workspace = true
+time = "0.3.34"
+toml = "0.8.12"
 
 [dev-dependencies]
 predicates = "2.1"

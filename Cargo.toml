@@ -1,6 +1,27 @@
 [workspace]
-members = [
-  "core",
-  "modules/test",
-]
-default-members = [ "core" ]
+resolver = "2"
+members = ["core", "modules/sqlite-ks", "modules/test"]
+default-members = ["core"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75.0"
+license = "Apache-2.0"
+homepage = "https://github.com/Fundament-Software/keystone"
+repository = "https://github.com/Fundament-Software/keystone/"
+documentation = "https://docs.rs/keystone/"
+readme = "README.md"
+
+[workspace.dependencies]
+cap-std = "2.0.0"
+color-eyre = "0.6"
+eyre = "0.6"
+tracing-subscriber = { version = "0.3.18", features = ["time"] }
+tracing = "0.1.40"
+tokio = { version = "1.18", features = ["full"] }
+capstone = { git = "https://github.com/Fundament-Software/capstone-rs" }
+capstone-futures = { git = "https://github.com/Fundament-Software/capstone-rs" }
+capstone-import = { git = "https://github.com/Fundament-Software/capstone-rs" }
+capstone-rpc = { git = "https://github.com/Fundament-Software/capstone-rs" }
+capstone-macros = { git = "https://github.com/Fundament-Software/capstone-rs" }

@@ -4,12 +4,12 @@ use capnp::{
     ErrorKind,
 };
 use capnp_macros::capnproto_rpc;
-use capnp_rpc::pry;
 use tokio::io::{AsyncRead, AsyncReadExt};
 
-use crate::byte_stream_capnp::{self, byte_stream::{
-    Client, EndParams, EndResults, Server, WriteParams, WriteResults,
-}};
+use crate::byte_stream_capnp::{
+    self,
+    byte_stream::{Client, Server},
+};
 use crate::stream_capnp::stream_result;
 
 /// Server implementation of a ByteStream capability.
@@ -43,10 +43,7 @@ impl<C> Server for ByteStreamImpl<C>
 where
     C: FnMut(&[u8]) -> Promise<(), capnp::Error>,
 {
-    fn write(
-        &mut self,
-        bytes: &[u8]
-    ) {
+    fn write(&mut self, bytes: &[u8]) {
         if self.closed {
             return Err(capnp::Error {
                 kind: ErrorKind::Failed,
@@ -62,13 +59,13 @@ where
         capnp::ok()
     }
 
-    fn get_substream(
-        &mut self
-    ) {
-        Ok(async{Err(capnp::Error {
-            kind: ErrorKind::Unimplemented,
-            extra: String::from("Not implemented"),
-        })})
+    fn get_substream(&mut self) {
+        Ok(async {
+            Err(capnp::Error {
+                kind: ErrorKind::Unimplemented,
+                extra: String::from("Not implemented"),
+            })
+        })
     }
 }
 

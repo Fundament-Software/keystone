@@ -1,44 +1,49 @@
-pub mod unix_process {
+pub mod posix_process {
+    use crate::byte_stream::ByteStreamImpl;
+    use crate::byte_stream_capnp::{
+        byte_stream::Client as ByteStreamClient, byte_stream::Owned as ByteStream,
+    };
+    use crate::posix_spawn_capnp::{
+        posix_args::Owned as PosixArgs, posix_error::Owned as PosixError,
+    };
+    use crate::spawn_capnp::program::{SpawnParams, SpawnResults};
+    use crate::spawn_capnp::{process, program};
+    use capnp::capability::Promise;
     use std::cell::RefCell;
     use std::convert::TryInto;
+    use std::future::Future;
+    use std::path::{Path, PathBuf};
     use std::process::Stdio;
     use std::rc::Rc;
     use std::result::Result;
-    use std::future::Future;
-    use capnp::capability::Promise;
-    use capnp_rpc::pry;
+    use std::str::FromStr;
     use tokio::io::{AsyncRead, AsyncWriteExt};
     use tokio::process::Child;
     use tokio::process::ChildStdin;
-    use tokio::task::{JoinHandle, spawn_local};
-    use tokio_util::sync::CancellationToken;
-    use crate::byte_stream::ByteStreamImpl;
-    use crate::spawn_capnp::process;
-    use crate::spawn_capnp::{service_spawn, service_spawn::Client};
-    use crate::unix_process_capnp::{
-        unix_process_api::Owned as UnixProcessApi,
-        unix_process_args::Owned as UnixProcessArgs,
-        unix_process_error::Owned as UnixProcessError,
-    };
-    use crate::byte_stream_capnp::byte_stream::Client as ByteStreamClient;
     use tokio::process::Command;
+    use tokio::task::{spawn_local, JoinHandle};
+    use tokio_util::sync::CancellationToken;
 
-    pub struct UnixProcessImpl {
+    type PosixProgramClient = program::Client<PosixArgs, ByteStream, PosixError>;
+
+    pub struct PosixProcessImpl {
         pub cancellation_token: CancellationToken,
         stdin: Option<ChildStdin>,
         stdout_task: JoinHandle<eyre::Result<Option<usize>>>,
         stderr_task: JoinHandle<eyre::Result<Option<usize>>>,
-        child: Child
+        child: Child,
     }
 
-    /// Helper function for UnixProcessImpl::spawn_process.
+    /// Helper function for PosixProcessImpl::spawn_process.
     /// Creates a task on the localset that reads the `AsyncRead` (usually a
     /// ChildStdout/ChildStderr) and copies to the ByteStreamClient.
     ///
     /// **Warning**: This function uses [spawn_local] and must be called in a LocalSet context.
-    fn spawn_iostream_task(iostream: Option<impl AsyncRead + Unpin + 'static>, // In this case, 'static means an owned type. Also required for spawn_local
-                           bytestream: ByteStreamClient,
-                           cancellation_token: CancellationToken) -> JoinHandle<eyre::Result<Option<usize>>> {
+    fn spawn_iostream_task(
+        iostream: Option<impl AsyncRead + Unpin + 'static>, // In this case, 'static means an owned type. Also required for spawn_local
+        bytestream: ByteStreamClient,
+        cancellation_token: CancellationToken,
+    ) -> JoinHandle<eyre::Result<Option<usize>>> {
         spawn_local(async move {
             if let Some(mut stream) = iostream {
                 tokio::select! {
@@ -51,33 +56,38 @@ pub mod unix_process {
         })
     }
 
-    impl UnixProcessImpl {
-        fn new(cancellation_token: CancellationToken,
-               stdin: Option<ChildStdin>,
-               stdout_task: JoinHandle<eyre::Result<Option<usize>>>,
-               stderr_task: JoinHandle<eyre::Result<Option<usize>>>,
-               child: Child) -> Self {
+    impl PosixProcessImpl {
+        fn new(
+            cancellation_token: CancellationToken,
+            stdin: Option<ChildStdin>,
+            stdout_task: JoinHandle<eyre::Result<Option<usize>>>,
+            stderr_task: JoinHandle<eyre::Result<Option<usize>>>,
+            child: Child,
+        ) -> Self {
             Self {
                 cancellation_token,
                 stdin,
                 stdout_task,
                 stderr_task,
-                child
+                child,
             }
         }
 
-        /// Creates a new instance of `UnixProcessImpl` by spawning a child process.
+        /// Creates a new instance of `PosixProcessImpl` by spawning a child process.
         ///
         /// **Warning**: This function uses [spawn_local] and must be called in a LocalSet context.
-        fn spawn_process<'i, I>(program: &str,
-                                args_iter: I,
-                                stdout_stream: ByteStreamClient,
-                                stderr_stream: ByteStreamClient)
-        -> eyre::Result<UnixProcessImpl>
+        fn spawn_process<'i, I>(
+            program: &str,
+            args_iter: I,
+            stdout_stream: ByteStreamClient,
+            stderr_stream: ByteStreamClient,
+        ) -> eyre::Result<PosixProcessImpl>
         where
-            I: IntoIterator<Item = Result<&'i str, capnp::Error>>
+            I: IntoIterator<Item = Result<&'i str, capnp::Error>>,
         {
-            let args: Vec<&'i str> = args_iter.into_iter().collect::<Result<Vec<&'i str>, capnp::Error>>()?;
+            let args: Vec<&'i str> = args_iter
+                .into_iter()
+                .collect::<Result<Vec<&'i str>, capnp::Error>>()?;
 
             // Create the child process
             let mut child = Command::new(program)
@@ -92,29 +102,47 @@ pub mod unix_process {
 
             // Create a cancellation token to allow us to kill ("cancel") the process.
             let cancellation_token = CancellationToken::new();
-           
-            // Create the tasks to read stdout and stderr to the byte stream
-            let stdout_task = spawn_iostream_task(child.stdout.take(), stdout_stream, cancellation_token.child_token());
-            let stderr_task = spawn_iostream_task(child.stderr.take(), stderr_stream, cancellation_token.child_token());
 
-            eyre::Result::Ok(Self::new(cancellation_token, stdin, stdout_task, stderr_task, child))
+            // Create the tasks to read stdout and stderr to the byte stream
+            let stdout_task = spawn_iostream_task(
+                child.stdout.take(),
+                stdout_stream,
+                cancellation_token.child_token(),
+            );
+            let stderr_task = spawn_iostream_task(
+                child.stderr.take(),
+                stderr_stream,
+                cancellation_token.child_token(),
+            );
+
+            eyre::Result::Ok(Self::new(
+                cancellation_token,
+                stdin,
+                stdout_task,
+                stderr_task,
+                child,
+            ))
         }
     }
 
-    type GetApiParams = process::GetapiParams<UnixProcessApi, UnixProcessError>;
-    type GetApiResults = process::GetapiResults<UnixProcessApi, UnixProcessError>;
-    type GetErrorParams = process::GeterrorParams<UnixProcessApi, UnixProcessError>;
-    type GetErrorResults = process::GeterrorResults<UnixProcessApi, UnixProcessError>;
-    type KillParams = process::KillParams<UnixProcessApi, UnixProcessError>;
-    type KillResults = process::KillResults<UnixProcessApi, UnixProcessError>;
-    type UnixProcessClient = process::Client<UnixProcessApi, UnixProcessError>;
-    
-    // You might ask why this trait is implementated for an `Rc` + `RefCell` of `UnixProcessImpl`
+    type GetApiParams = process::GetApiParams<ByteStream, PosixError>;
+    type GetApiResults = process::GetApiResults<ByteStream, PosixError>;
+    type GetErrorParams = process::GetErrorParams<ByteStream, PosixError>;
+    type GetErrorResults = process::GetErrorResults<ByteStream, PosixError>;
+    type KillParams = process::KillParams<ByteStream, PosixError>;
+    type KillResults = process::KillResults<ByteStream, PosixError>;
+    type PosixProcessClient = process::Client<ByteStream, PosixError>;
+
+    // You might ask why this trait is implementated for an `Rc` + `RefCell` of `PosixProcessImpl`
     // Well thats a very good question
-    impl process::Server<UnixProcessApi, UnixProcessError> for Rc<RefCell<UnixProcessImpl>> {
+    impl process::Server<ByteStream, PosixError> for Rc<RefCell<PosixProcessImpl>> {
         /// In this implementation of `spawn`, the functions returns the exit code of the child
         /// process.
-        fn geterror<'b>(&mut self, _: GetErrorParams, mut results: GetErrorResults) -> Result<impl Future<Output = Result<(), capnp::Error>> + 'b, capnp::Error> { 
+        fn get_error<'b>(
+            &mut self,
+            _: GetErrorParams,
+            mut results: GetErrorResults,
+        ) -> Result<impl Future<Output = Result<(), capnp::Error>> + 'b, capnp::Error> {
             let this = self.clone();
             Ok(async move {
                 let results_builder = results.get();
@@ -127,13 +155,17 @@ pub mod unix_process {
                         process_error_builder.set_error_message("".into());
 
                         Ok(())
-                    },
-                    Err(e) => Err(capnp::Error::failed(e.to_string()))
+                    }
+                    Err(e) => Err(capnp::Error::failed(e.to_string())),
                 }
             })
         }
 
-        fn kill<'b>(&mut self, _: KillParams, _: KillResults) -> Result<impl Future<Output = Result<(), capnp::Error>> + 'b, capnp::Error> {
+        fn kill<'b>(
+            &mut self,
+            _: KillParams,
+            _: KillResults,
+        ) -> Result<impl Future<Output = Result<(), capnp::Error>> + 'b, capnp::Error> {
             let this = self.clone();
             Ok(async move {
                 match this.borrow_mut().child.kill().await {
@@ -143,9 +175,12 @@ pub mod unix_process {
             })
         }
 
-        fn getapi<'b>(&mut self, _: GetApiParams, mut results: GetApiResults) -> Result<impl Future<Output = Result<(), capnp::Error>> + 'b, capnp::Error> {
+        fn get_api<'b>(
+            &mut self,
+            _: GetApiParams,
+            mut results: GetApiResults,
+        ) -> Result<impl Future<Output = Result<(), capnp::Error>> + 'b, capnp::Error> {
             let this = self.clone();
-            let mut api_builder = results.get().init_api();
 
             let stdin_stream_server = ByteStreamImpl::new(move |bytes| {
                 let this_inner = this.clone();
@@ -154,7 +189,7 @@ pub mod unix_process {
                     if let Some(mut stdin) = this_inner.borrow_mut().stdin.take() {
                         match stdin.write_all(&owned_bytes).await {
                             Ok(_) => Ok(()),
-                            Err(e) => Err(capnp::Error::failed(e.to_string()))
+                            Err(e) => Err(capnp::Error::failed(e.to_string())),
                         }
                     } else {
                         Ok(())
@@ -162,38 +197,60 @@ pub mod unix_process {
                 })
             });
 
-            let stdin_stream_client: ByteStreamClient = capnp_rpc::new_client(stdin_stream_server);
-            api_builder.set_stdin(stdin_stream_client);
+            results
+                .get()
+                .set_api(capnp_rpc::new_client(stdin_stream_server))?;
 
             capnp::ok()
         }
     }
 
-    pub struct UnixProcessServiceSpawnImpl ();
+    pub struct PosixProgramImpl {
+        program: PathBuf,
+    }
 
-    type SpawnParams = service_spawn::SpawnParams<capnp::text::Owned, UnixProcessArgs, UnixProcessApi, UnixProcessError>;
-    type SpawnResults = service_spawn::SpawnResults<capnp::text::Owned, UnixProcessArgs, UnixProcessApi, UnixProcessError>;
+    impl PosixProgramImpl {
+        pub fn new(path: &str) -> Self {
+            Self {
+                program: PathBuf::from_str(path).unwrap(),
+            }
+        }
+    }
 
-    impl service_spawn::Server<capnp::text::Owned, UnixProcessArgs, UnixProcessApi, UnixProcessError> for UnixProcessServiceSpawnImpl {
-        fn spawn<'b>(&mut self, params: SpawnParams, mut results: SpawnResults) -> Result<impl Future<Output = Result<(), capnp::Error>> + 'b, capnp::Error> {
+    impl program::Server<PosixArgs, ByteStream, PosixError> for PosixProgramImpl {
+        fn spawn<'a, 'b>(
+            &'a mut self,
+            params: SpawnParams<PosixArgs, ByteStream, PosixError>,
+            mut results: SpawnResults<PosixArgs, ByteStream, PosixError>,
+        ) -> Result<
+            impl std::future::Future<Output = Result<(), ::capnp::Error>> + 'b,
+            ::capnp::Error,
+        > {
             let params_reader = params.get()?;
-            
-            let program = params_reader.get_program()?.to_str()?;
-            
+
             let args = params_reader.get_args()?;
             let stdout: ByteStreamClient = args.get_stdout()?;
             let stderr: ByteStreamClient = args.get_stderr()?;
-            let argv: capnp::text_list::Reader = args.get_argv()?;
+            let argv: capnp::text_list::Reader = args.get_args()?;
             let argv_iter = argv.into_iter().map(|item| match item {
-                Ok(i) => Ok(i.to_str().map_err(|_| capnp::Error::failed("Invalid utf-8 in argv".to_string()))?), 
-                Err(e) => Err(e)
+                Ok(i) => Ok(i
+                    .to_str()
+                    .map_err(|e| capnp::Error::failed(e.to_string()))?),
+                Err(e) => Err(e),
             });
 
-            match UnixProcessImpl::spawn_process(program, argv_iter, stdout, stderr) {
+            match PosixProcessImpl::spawn_process(
+                self.program.to_str().ok_or(capnp::Error::failed(
+                    "Invalid utf-8 in program path".to_string(),
+                ))?,
+                argv_iter,
+                stdout,
+                stderr,
+            ) {
                 Err(e) => Err(capnp::Error::failed(e.to_string())),
                 Ok(process_impl) => {
                     let server_pointer = Rc::new(RefCell::new(process_impl));
-                    let process_client: UnixProcessClient = capnp_rpc::new_client(server_pointer);
+                    let process_client: PosixProcessClient = capnp_rpc::new_client(server_pointer);
                     results.get().set_result(process_client);
                     capnp::ok()
                 }
@@ -201,95 +258,75 @@ pub mod unix_process {
         }
     }
 
-    pub type UnixProcessServiceSpawnClient = Client<capnp::text::Owned, UnixProcessArgs, UnixProcessApi, UnixProcessError>;
-    pub type SpawnRequest = capnp::capability::Request<
-        service_spawn::spawn_params::Owned<capnp::text::Owned, UnixProcessArgs, UnixProcessApi, UnixProcessError>,
-        service_spawn::spawn_results::Owned<capnp::text::Owned, UnixProcessArgs, UnixProcessApi, UnixProcessError>>;
-    
-    impl UnixProcessServiceSpawnClient {
-        /// Convenience function to create a new request to call `spawn_process` over RPC without
-        /// sending it.
-        pub fn build_spawn_request(&self, program: &str, argv: &[&str], stdout_stream: ByteStreamClient, stderr_stream: ByteStreamClient) -> eyre::Result<SpawnRequest> {
-            let mut spawn_request = self.spawn_request();
-            
-            let mut params_builder = spawn_request.get();
-
-            params_builder.set_program(program.into())?;
-
-            let mut args_builder = params_builder.init_args();
-            args_builder.set_stdout(stdout_stream);
-            args_builder.set_stderr(stderr_stream);
-
-            {
-                let mut argv_builder = args_builder.init_argv(argv.len().try_into()?);
-                for (idx, &x) in argv.iter().enumerate() {
-                    argv_builder.reborrow().set(idx.try_into()?, x.into());
-                }
-            }
-
-            Ok(spawn_request)
-        }
-
-        /// Convenience function to send a `spawn_process` call request over RPC.
-        pub async fn send_spawn_request(spawn_request: SpawnRequest) -> Result<UnixProcessClient, capnp::Error> {
-            let response = spawn_request.send().promise.await?;
-            response.get()?.get_result()
-        }
-
-        /// Convenience function that creates and sends a request to call `spawn_process` over RPC.
-        ///
-        /// Equivalent to the composition of [build_spawn_request] and [send_spawn_request].
-        pub async fn request_spawn_process(&self, 
-                                           program: &str,
-                                           argv: &[&str],
-                                           stdout_stream: ByteStreamClient,
-                                           stderr_stream: ByteStreamClient) -> eyre::Result<UnixProcessClient> {
-            Ok(UnixProcessServiceSpawnClient::send_spawn_request(self.build_spawn_request(program, argv, stdout_stream, stderr_stream)?).await?)
-        }
-    }
-
     #[cfg(test)]
     mod tests {
+        use std::str::FromStr;
+
+        use super::{PosixProgramClient, PosixProgramImpl};
+        use crate::byte_stream::ByteStreamImpl;
         use capnp::capability::Promise;
         use tokio::task;
-        use crate::byte_stream::ByteStreamImpl;
-        use super::{UnixProcessServiceSpawnImpl, UnixProcessServiceSpawnClient};
 
         #[tokio::test]
         async fn test_process_creation() {
-            let spawn_process_server = UnixProcessServiceSpawnImpl();
-            let spawn_process_client: UnixProcessServiceSpawnClient = capnp_rpc::new_client(spawn_process_server);
+            let spawn_process_server = PosixProgramImpl {
+                #[cfg(windows)]
+                program: std::path::PathBuf::from_str("cmd.exe").unwrap(),
+                #[cfg(not(windows))]
+                program: std::path::PathBuf::from_str("sh").unwrap(),
+            };
+            let spawn_process_client: PosixProgramClient =
+                capnp_rpc::new_client(spawn_process_server);
 
-            let e = task::LocalSet::new().run_until(async {
-                // Setting up stuff needed for RPC
-                let stdout_server = ByteStreamImpl::new(|bytes| {
-                    println!("remote stdout: {}", std::str::from_utf8(bytes).unwrap());
-                    Promise::ok(())
-                });
-                let stdout_client = capnp_rpc::new_client(stdout_server);
-                let stderr_server = ByteStreamImpl::new(|bytes| {
-                    println!("remote stderr: {}", std::str::from_utf8(bytes).unwrap());
-                    Promise::ok(())
-                });
-                let stderr_client = capnp_rpc::new_client(stderr_server);
+            let e = task::LocalSet::new()
+                .run_until(async {
+                    // Setting up stuff needed for RPC
+                    let stdout_server = ByteStreamImpl::new(|bytes| {
+                        println!("remote stdout: {}", std::str::from_utf8(bytes).unwrap());
+                        Promise::ok(())
+                    });
+                    let stdout_client: super::ByteStreamClient =
+                        capnp_rpc::new_client(stdout_server);
+                    let stderr_server = ByteStreamImpl::new(|bytes| {
+                        println!("remote stderr: {}", std::str::from_utf8(bytes).unwrap());
+                        Promise::ok(())
+                    });
+                    let stderr_client: super::ByteStreamClient =
+                        capnp_rpc::new_client(stderr_server);
 
-                let process_client = spawn_process_client.request_spawn_process(
-                    "sh",
-                    &["-c", r#"set; echo "Hello World!"; wait 10; exit 2"#],
-                    stdout_client,
-                    stderr_client).await?;
+                    let mut spawn_request = spawn_process_client.spawn_request();
+                    let params_builder = spawn_request.get();
+                    let mut args_builder = params_builder.init_args();
+                    args_builder.set_stdout(stdout_client);
+                    args_builder.set_stderr(stderr_client);
+                    let mut list_builder = args_builder.init_args(2);
 
-                let geterror_response = process_client.geterror_request().send().promise.await?;
-                let error_reader = geterror_response.get()?.get_result()?;
-                
-                let error_code = error_reader.get_error_code();
-                assert_eq!(error_code, 2);
+                    #[cfg(windows)]
+                    list_builder.set(0, "/C".into());
+                    #[cfg(not(windows))]
+                    list_builder.set(0, "-c".into());
 
-                let error_message = error_reader.get_error_message()?;
-                assert!(error_message.is_empty() == true);
+                    #[cfg(windows)]
+                    list_builder.set(1, r#"echo "Hello World!" & exit 2"#.into());
+                    #[cfg(not(windows))]
+                    list_builder.set(1, r#"echo "Hello World!"; exit 2"#.into());
 
-                Ok::<(), eyre::Error>(())
-            }).await;
+                    let response = spawn_request.send().promise.await?;
+                    let process_client = response.get()?.get_result()?;
+
+                    let geterror_response =
+                        process_client.get_error_request().send().promise.await?;
+                    let error_reader = geterror_response.get()?.get_result()?;
+
+                    let error_code = error_reader.get_error_code();
+                    assert_eq!(error_code, 2);
+
+                    let error_message = error_reader.get_error_message()?;
+                    assert!(error_message.is_empty() == true);
+
+                    Ok::<(), eyre::Error>(())
+                })
+                .await;
 
             e.unwrap();
         }

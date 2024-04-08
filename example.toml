@@ -1,0 +1,7 @@
+database = "test.sqlite"
+defaultLog = "debug"
+
+[[modules]]
+path = "/test/"
+transient = false
+config = { x = 1, y = 2 }

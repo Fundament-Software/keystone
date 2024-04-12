@@ -408,6 +408,7 @@ dependencies = [
 [[package]]
 name = "capstone"
 version = "0.18.0"
+source = "git+https://github.com/Fundament-Software/capstone-rs#94da018715c5b89f266a01de2ffab7a445d15d35"
 dependencies = [
  "embedded-io",
  "smallvec",
@@ -416,6 +417,7 @@ dependencies = [
 [[package]]
 name = "capstone-futures"
 version = "0.18.0"
+source = "git+https://github.com/Fundament-Software/capstone-rs#94da018715c5b89f266a01de2ffab7a445d15d35"
 dependencies = [
  "capstone",
  "futures",
@@ -424,6 +426,7 @@ dependencies = [
 [[package]]
 name = "capstone-gen"
 version = "0.18.0"
+source = "git+https://github.com/Fundament-Software/capstone-rs#94da018715c5b89f266a01de2ffab7a445d15d35"
 dependencies = [
  "capstone",
 ]
@@ -431,6 +434,7 @@ dependencies = [
 [[package]]
 name = "capstone-import"
 version = "0.18.0"
+source = "git+https://github.com/Fundament-Software/capstone-rs#94da018715c5b89f266a01de2ffab7a445d15d35"
 dependencies = [
  "anyhow",
  "capstone",
@@ -452,6 +456,7 @@ dependencies = [
 [[package]]
 name = "capstone-macros"
 version = "0.18.0"
+source = "git+https://github.com/Fundament-Software/capstone-rs#94da018715c5b89f266a01de2ffab7a445d15d35"
 dependencies = [
  "capstone",
  "capstone-rpc",
@@ -464,6 +469,7 @@ dependencies = [
 [[package]]
 name = "capstone-rpc"
 version = "0.18.0"
+source = "git+https://github.com/Fundament-Software/capstone-rs#94da018715c5b89f266a01de2ffab7a445d15d35"
 dependencies = [
  "capstone",
  "capstone-futures",

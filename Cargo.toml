@@ -33,10 +33,3 @@ capstone-futures = { git = "https://github.com/Fundament-Software/capstone-rs" }
 capstone-import = { git = "https://github.com/Fundament-Software/capstone-rs" }
 capstone-rpc = { git = "https://github.com/Fundament-Software/capstone-rs" }
 capstone-macros = { git = "https://github.com/Fundament-Software/capstone-rs" }
-
-[patch."https://github.com/Fundament-Software/capstone-rs"]
-capstone = { path = "../capstone-rs/capnp" }
-capstone-futures = { path = "../capstone-rs/capnp-futures" }
-capstone-import = { path = "../capstone-rs/capnp-import" }
-capstone-rpc = { path = "../capstone-rs/capnp-rpc" }
-capstone-macros = { path = "../capstone-rs/capnp-macros" }

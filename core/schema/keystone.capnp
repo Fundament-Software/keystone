@@ -38,6 +38,9 @@ struct KeystoneConfig {
   modules @2 :List(ModuleConfig);
   defaultLog @3 :LogLevel = warning;
   defaultCall @4 :CallLogLevel = nameOnly;
+  socketName @5 :Text; # This is optional, if empty, keystone will put a socket in /run for installed daemons, or the user's home folder for a local session.
+  password @6 :Text; # This is optional, an empty string correlates to no password.
+  keys @7 :List(Text); # also optional, but will warn if no password or key is used.
 }
 
 interface Keystone {

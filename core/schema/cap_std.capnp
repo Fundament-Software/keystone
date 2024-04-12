@@ -10,6 +10,7 @@ interface File {
   tryClone @4 () -> (cloned :File);
   setReadonly @5 (readonly :Bool) -> ();
   open @6 () -> (stream :Stream);
+  rawHandle @7 () -> (handle :UInt64);
 }
 
 interface Dir {

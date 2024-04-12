@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["core", "modules/sqlite-ks", "modules/test"]
+members = ["core", "modules/sqlite-ks", "modules/hello-world", "modules/test"]
 default-members = ["core"]
 
 [workspace.package]
@@ -19,9 +19,24 @@ color-eyre = "0.6"
 eyre = "0.6"
 tracing-subscriber = { version = "0.3.18", features = ["time"] }
 tracing = "0.1.40"
-tokio = { version = "1.18", features = ["full"] }
+futures = "0.3"
+tokio = { version = "1.18", features = [
+  "net",
+  "rt",
+  "macros",
+  "io-std",
+  "time",
+] }
+tokio-util = { version = "0.7.4", features = ["compat"] }
 capstone = { git = "https://github.com/Fundament-Software/capstone-rs" }
 capstone-futures = { git = "https://github.com/Fundament-Software/capstone-rs" }
 capstone-import = { git = "https://github.com/Fundament-Software/capstone-rs" }
 capstone-rpc = { git = "https://github.com/Fundament-Software/capstone-rs" }
 capstone-macros = { git = "https://github.com/Fundament-Software/capstone-rs" }
+
+[patch."https://github.com/Fundament-Software/capstone-rs"]
+capstone = { path = "../capstone-rs/capnp" }
+capstone-futures = { path = "../capstone-rs/capnp-futures" }
+capstone-import = { path = "../capstone-rs/capnp-import" }
+capstone-rpc = { path = "../capstone-rs/capnp-rpc" }
+capstone-macros = { path = "../capstone-rs/capnp-macros" }

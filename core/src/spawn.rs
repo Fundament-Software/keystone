@@ -1,3 +1,63 @@
+use std::ffi::OsStr;
+
+#[cfg(not(windows))]
+fn spawn_process_native<'i, I>(
+    source: &cap_std::fs::File,
+    args: I,
+) -> Result<tokio::process::Child, capnp::Error>
+where
+    I: IntoIterator<Item = Result<&'i str, capnp::Error>>,
+{
+    let fd = linux::write_trampoline()?;
+    skip_close_fd = fd.as_raw_fd();
+    Box::new(move || {
+        // not using nix crate here, as it would allocate args after fork, which will
+        // lead to crashes on systems where allocator is not
+        // fork+thread safe
+        unsafe { libc::fexecve(fd.as_raw_fd(), argv.as_ptr(), envp.as_ptr()) };
+        // if we're here then exec has failed
+        panic!("{}", std::io::Error::last_os_error());
+    })
+}
+
+#[cfg(windows)]
+fn spawn_process_native<'i, I>(
+    source: &cap_std::fs::File,
+    args: I,
+) -> Result<tokio::process::Child, capnp::Error>
+where
+    I: IntoIterator<Item = Result<&'i str, capnp::Error>>,
+{
+    use cap_std::io_lifetimes::raw::AsRawFilelike;
+    use std::ffi::OsString;
+    use std::os::windows::ffi::OsStringExt;
+    use std::process::Stdio;
+    use std::str::FromStr;
+    use tokio::process::Command;
+    use windows_sys::Win32::Storage::FileSystem::GetFinalPathNameByHandleW;
+
+    let argv: Vec<OsString> = args
+        .into_iter()
+        .map(|x| x.map(|s| OsString::from_str(s).unwrap()))
+        .collect::<Result<Vec<OsString>, capnp::Error>>()?;
+
+    let program = unsafe {
+        let mut buf = [0_u16; 2048];
+        let num =
+            GetFinalPathNameByHandleW(source.as_raw_filelike() as isize, buf.as_mut_ptr(), 2048, 0);
+        OsString::from_wide(&buf[0..num as usize])
+    };
+
+    // Note: it is actually possible to call libc::wexecve on windows, but this is unreliable.
+    Command::new(program)
+        .args(argv)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .stdin(Stdio::piped())
+        .spawn()
+        .map_err(|e| capnp::Error::failed(e.to_string()))
+}
+
 pub mod posix_process {
     use crate::byte_stream::ByteStreamImpl;
     use crate::byte_stream_capnp::{
@@ -8,19 +68,16 @@ pub mod posix_process {
     };
     use crate::spawn_capnp::program::{SpawnParams, SpawnResults};
     use crate::spawn_capnp::{process, program};
+    use cap_std::fs::File;
+    use cap_std::io_lifetimes::raw::FromRawFilelike;
     use capnp::capability::Promise;
     use std::cell::RefCell;
-    use std::convert::TryInto;
     use std::future::Future;
-    use std::path::{Path, PathBuf};
-    use std::process::Stdio;
     use std::rc::Rc;
     use std::result::Result;
-    use std::str::FromStr;
     use tokio::io::{AsyncRead, AsyncWriteExt};
     use tokio::process::Child;
     use tokio::process::ChildStdin;
-    use tokio::process::Command;
     use tokio::task::{spawn_local, JoinHandle};
     use tokio_util::sync::CancellationToken;
 
@@ -77,7 +134,7 @@ pub mod posix_process {
         ///
         /// **Warning**: This function uses [spawn_local] and must be called in a LocalSet context.
         fn spawn_process<'i, I>(
-            program: &str,
+            program: &cap_std::fs::File,
             args_iter: I,
             stdout_stream: ByteStreamClient,
             stderr_stream: ByteStreamClient,
@@ -85,17 +142,8 @@ pub mod posix_process {
         where
             I: IntoIterator<Item = Result<&'i str, capnp::Error>>,
         {
-            let args: Vec<&'i str> = args_iter
-                .into_iter()
-                .collect::<Result<Vec<&'i str>, capnp::Error>>()?;
-
             // Create the child process
-            let mut child = Command::new(program)
-                .args(args)
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .stdin(Stdio::piped())
-                .spawn()?;
+            let mut child = super::spawn_process_native(program, args_iter)?;
 
             // Stealing stdin also prevents the `child.wait()` call from closing it.
             let stdin = child.stdin.take();
@@ -206,13 +254,15 @@ pub mod posix_process {
     }
 
     pub struct PosixProgramImpl {
-        program: PathBuf,
+        program: File,
     }
 
     impl PosixProgramImpl {
-        pub fn new(path: &str) -> Self {
-            Self {
-                program: PathBuf::from_str(path).unwrap(),
+        pub fn new(handle: u64) -> Self {
+            unsafe {
+                Self {
+                    program: File::from_raw_filelike(handle as *mut std::os::raw::c_void),
+                }
             }
         }
     }
@@ -239,14 +289,7 @@ pub mod posix_process {
                 Err(e) => Err(e),
             });
 
-            match PosixProcessImpl::spawn_process(
-                self.program.to_str().ok_or(capnp::Error::failed(
-                    "Invalid utf-8 in program path".to_string(),
-                ))?,
-                argv_iter,
-                stdout,
-                stderr,
-            ) {
+            match PosixProcessImpl::spawn_process(&self.program, argv_iter, stdout, stderr) {
                 Err(e) => Err(capnp::Error::failed(e.to_string())),
                 Ok(process_impl) => {
                     let server_pointer = Rc::new(RefCell::new(process_impl));
@@ -260,20 +303,26 @@ pub mod posix_process {
 
     #[cfg(test)]
     mod tests {
-        use std::str::FromStr;
-
         use super::{PosixProgramClient, PosixProgramImpl};
         use crate::byte_stream::ByteStreamImpl;
+        use cap_std::io_lifetimes::{FromFilelike, IntoFilelike};
         use capnp::capability::Promise;
+        use std::fs::File;
         use tokio::task;
 
         #[tokio::test]
         async fn test_process_creation() {
             let spawn_process_server = PosixProgramImpl {
                 #[cfg(windows)]
-                program: std::path::PathBuf::from_str("cmd.exe").unwrap(),
+                program: cap_std::fs::File::from_filelike(
+                    File::open("C:/Windows/System32/cmd.exe")
+                        .unwrap()
+                        .into_filelike(),
+                ),
                 #[cfg(not(windows))]
-                program: std::path::PathBuf::from_str("sh").unwrap(),
+                program: cap_std::fs::File::from_filelike(
+                    File::open("sh").unwrap().into_filelike(),
+                ),
             };
             let spawn_process_client: PosixProgramClient =
                 capnp_rpc::new_client(spawn_process_server);

@@ -4,6 +4,8 @@ use capnp::{
     ErrorKind,
 };
 use capnp_macros::capnproto_rpc;
+use futures::AsyncWrite;
+use futures::FutureExt;
 use tokio::io::{AsyncRead, AsyncReadExt};
 
 use crate::byte_stream_capnp::{
@@ -22,8 +24,7 @@ use crate::stream_capnp::stream_result;
 /// rpc `write` calls and return a promise which resolves when the system is ready to process
 /// more bytes.
 pub struct ByteStreamImpl<C> {
-    consumer: C,
-    closed: bool,
+    consumer: Option<C>,
 }
 
 impl<C> ByteStreamImpl<C>
@@ -32,8 +33,7 @@ where
 {
     pub fn new(consumer: C) -> Self {
         Self {
-            consumer,
-            closed: false,
+            consumer: Some(consumer),
         }
     }
 }
@@ -44,18 +44,18 @@ where
     C: FnMut(&[u8]) -> Promise<(), capnp::Error>,
 {
     fn write(&mut self, bytes: &[u8]) {
-        if self.closed {
-            return Err(capnp::Error {
+        if let Some(f) = &mut self.consumer {
+            Ok((f)(bytes))
+        } else {
+            Err(capnp::Error {
                 kind: ErrorKind::Failed,
                 extra: String::from("Write called on byte stream after closed."),
-            });
+            })
         }
-
-        Ok((self.consumer)(bytes))
     }
 
     fn end(&mut self) {
-        self.closed = true;
+        self.consumer = None;
         capnp::ok()
     }
 
@@ -67,6 +67,12 @@ where
             })
         })
     }
+}
+
+enum PassThrough<'a> {
+    PendingRead(&'a [u8]),
+    PendingWrite(&'a [u8]),
+    Ready,
 }
 
 impl Client {
@@ -106,6 +112,42 @@ impl Client {
         }
 
         Ok(total_bytes)
+    }
+}
+
+impl AsyncWrite for Client {
+    fn poll_write(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &[u8],
+    ) -> std::task::Poll<Result<usize, std::io::Error>> {
+        let mut write_request = self.write_request();
+        write_request.get().set_bytes(buf);
+        match write_request.send().promise.poll_unpin(cx) {
+            std::task::Poll::Ready(Ok(_)) => std::task::Poll::Ready(Ok(buf.len())),
+            std::task::Poll::Ready(Err(e)) => std::task::Poll::Ready(Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                e.to_string(),
+            ))),
+            std::task::Poll::Pending => std::task::Poll::Pending,
+        }
+    }
+
+    fn poll_flush(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), std::io::Error>> {
+        std::task::Poll::Ready(Ok(()))
+    }
+
+    fn poll_close(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), std::io::Error>> {
+        match self.end_request().send().promise.poll_unpin(cx) {
+            std::task::Poll::Ready(_) => std::task::Poll::Ready(Ok(())),
+            std::task::Poll::Pending => std::task::Poll::Pending,
+        }
     }
 }
 

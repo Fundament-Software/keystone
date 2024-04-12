@@ -12,6 +12,7 @@ use crate::{
 use cap_directories::{self, ProjectDirs, UserDirs};
 use cap_std::{
     fs::{Dir, DirBuilder, DirEntry, File, Metadata, OpenOptions, Permissions, ReadDir},
+    io_lifetimes::raw::AsRawFilelike,
     time::{Duration, Instant, MonotonicClock, SystemClock, SystemTime},
 };
 use cap_tempfile::{TempDir, TempFile};
@@ -1043,6 +1044,10 @@ impl file::Server for FileImpl {
             Promise::ok(())
         });
         results.get().set_stream(capnp_rpc::new_client(_stream));
+        capnp::ok()
+    }
+    fn raw_handle(&mut self) {
+        results.get().set_handle(self.file.as_raw_filelike() as u64);
         capnp::ok()
     }
 }

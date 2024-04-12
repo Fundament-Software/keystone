@@ -3,6 +3,8 @@ mod byte_stream;
 mod cap_std_capnproto;
 mod config;
 mod database;
+mod keystone;
+mod posix_module;
 mod posix_spawn;
 mod spawn;
 
@@ -21,8 +23,21 @@ struct Cli {
     #[command(subcommand)]
     command: Commands,
 
+    /// Default log level to use
     #[arg(short = 'l')]
     log: Option<LogLevel>,
+
+    /// Auth password for running a command that connects to an existing keystone session.
+    #[arg(short = 'p')]
+    password: Option<String>,
+
+    /// SSH key for running a command that connects to an existing keystone session.
+    #[arg(short = 'k')]
+    key: Option<String>,
+
+    /// If connecting to an existing keystone session that is not using the default socket, name of the socket to use.
+    #[arg(short = 'n')]
+    name: Option<String>,
 }
 
 #[derive(ValueEnum, Copy, Clone, Debug, PartialEq, Eq)]
@@ -108,9 +123,18 @@ enum Commands {
         #[arg(short = 'f')]
         force: bool,
     },
-    /// Run a capnproto subcommand, like capnp id.
+    /// Run a CapnProto subcommand, like capnp id.
     #[command(arg_required_else_help = true)]
     Capnp(CapNPArgs),
+    /// Inspect or interact with any loaded keystone modules using their public CapnProto API
+    Module(ModuleCommandArgs),
+}
+
+/// Temporarily hold our module command
+#[derive(Args, Clone, Debug)]
+struct ModuleCommandArgs {
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    _args: Vec<String>,
 }
 
 #[derive(Debug, Args)]
@@ -147,6 +171,7 @@ async fn shutdown_signal() {
 async fn main() -> Result<()> {
     // Setup eyre
     color_eyre::install()?;
+
     let cli = Cli::parse();
 
     tracing_subscriber::fmt()
@@ -176,6 +201,10 @@ async fn main() -> Result<()> {
         Commands::Session { database, config } => {
             shutdown_signal().await;
             println!("Performing graceful shutdown...");
+        }
+        Commands::Module(ModuleCommandArgs { _args }) => {
+            //
+            println!("TODO!!!: {:?}", _args);
         }
         _ => todo!(),
     }

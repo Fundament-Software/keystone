@@ -16,20 +16,20 @@
         "type": "github"
       }
     },
-    "capnproto-fs": {
+    "capstone": {
       "flake": false,
       "locked": {
-        "lastModified": 1707465215,
-        "narHash": "sha256-PYDsB6YNnV3rb5jVutFbXXoaUyAWEtqKM0ixP8rkvao=",
+        "lastModified": 1711330334,
+        "narHash": "sha256-kCVVbAuC3njkgwJEbtJH5h+ipYyulJO/nlO5y1rtgz0=",
         "owner": "Fundament-Software",
-        "repo": "capnproto",
-        "rev": "b8607c4aa84c283a58e7b8d7c27ec8683bccf15e",
+        "repo": "capstone",
+        "rev": "07259d6ae78f70218fbbbd603e028f5f4350fa73",
         "type": "github"
       },
       "original": {
         "owner": "Fundament-Software",
         "ref": "v2",
-        "repo": "capnproto",
+        "repo": "capstone",
         "type": "github"
       }
     },
@@ -139,7 +139,7 @@
     "root": {
       "inputs": {
         "advisory-db": "advisory-db",
-        "capnproto-fs": "capnproto-fs",
+        "capstone": "capstone",
         "crane": "crane",
         "flake-utils": "flake-utils",
         "nixpkgs": "nixpkgs",

@@ -126,8 +126,8 @@ pub mod posix_module {
         ) -> Result<impl Future<Output = Result<(), ::capnp::Error>> + 'b, ::capnp::Error> {
             let mut request = self.posix_program.spawn_request();
             Ok(async move {
-                let args = request.get().init_args();
-                args.init_args(0);
+                let mut args = request.get().init_args();
+                args.reborrow().init_args(0);
 
                 // Here we create a bytestream implementation backed by a circular buffer. This is passed
                 // into the new process so it can write to it, and then our RPC system reads from it.
@@ -136,24 +136,29 @@ pub mod posix_module {
                     pending: AtomicUsize::default(),
                 })));
 
-                let stdout = ByteStreamImpl::new(move |bytes| {
-                    let owned_bytes = bytes.to_owned();
-                    let stdoutref = stdoutbuf.clone();
-                    Promise::from_future(async move {
-                        stdoutref.await;
-                        let mut r = stdoutref.0.borrow_mut();
-                        r.buf = owned_bytes;
-                        r.pending
-                            .store(owned_bytes.len(), std::sync::atomic::Ordering::Release);
-                        Ok(())
+                let stdout = {
+                    let stdoutbuf = stdoutbuf.clone();
+                    ByteStreamImpl::new(move |bytes| {
+                        let stdoutref = stdoutbuf.clone();
+                        let owned_bytes = bytes.to_owned();
+                        Promise::from_future(async move {
+                            stdoutref.clone().await;
+                            let binding = stdoutref.clone();
+                            let mut r = binding.0.borrow_mut();
+                            r.buf = owned_bytes;
+                            r.pending
+                                .store(r.buf.len(), std::sync::atomic::Ordering::Release);
+                            Ok(())
+                        })
                     })
-                });
+                };
 
                 args.set_stdout(capnp_rpc::new_client(stdout));
                 match request.send().promise.await {
                     Ok(h) => {
                         let process = h.get()?.get_result()?;
 
+                        let stdoutbuf = stdoutbuf.clone();
                         match process.get_api_request().send().promise.await {
                             Ok(s) => {
                                 let stdin = s.get()?.get_api()?;

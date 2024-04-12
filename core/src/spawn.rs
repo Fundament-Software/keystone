@@ -8,16 +8,17 @@ fn spawn_process_native<'i, I>(
 where
     I: IntoIterator<Item = Result<&'i str, capnp::Error>>,
 {
-    let fd = linux::write_trampoline()?;
-    skip_close_fd = fd.as_raw_fd();
-    Box::new(move || {
-        // not using nix crate here, as it would allocate args after fork, which will
-        // lead to crashes on systems where allocator is not
-        // fork+thread safe
-        unsafe { libc::fexecve(fd.as_raw_fd(), argv.as_ptr(), envp.as_ptr()) };
-        // if we're here then exec has failed
-        panic!("{}", std::io::Error::last_os_error());
-    })
+    todo!();
+    // let fd = linux::write_trampoline()?;
+    // skip_close_fd = fd.as_raw_fd();
+    // Box::new(move || {
+    //     // not using nix crate here, as it would allocate args after fork, which will
+    //     // lead to crashes on systems where allocator is not
+    //     // fork+thread safe
+    //     unsafe { libc::fexecve(fd.as_raw_fd(), argv.as_ptr(), envp.as_ptr()) };
+    //     // if we're here then exec has failed
+    //     panic!("{}", std::io::Error::last_os_error());
+    // })
 }
 
 #[cfg(windows)]
@@ -69,7 +70,7 @@ pub mod posix_process {
     use crate::spawn_capnp::program::{SpawnParams, SpawnResults};
     use crate::spawn_capnp::{process, program};
     use cap_std::fs::File;
-    use cap_std::io_lifetimes::raw::FromRawFilelike;
+    use cap_std::io_lifetimes::raw::{FromRawFilelike, RawFilelike};
     use capnp::capability::Promise;
     use std::cell::RefCell;
     use std::future::Future;
@@ -261,7 +262,7 @@ pub mod posix_process {
         pub fn new(handle: u64) -> Self {
             unsafe {
                 Self {
-                    program: File::from_raw_filelike(handle as *mut std::os::raw::c_void),
+                    program: File::from_raw_filelike(handle as RawFilelike),
                 }
             }
         }

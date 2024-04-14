@@ -10,6 +10,9 @@ mod spawn;
 
 capnp_import::capnp_import!("schema/**/*.capnp");
 
+#[cfg(test)]
+capnp_import::capnp_import!("../modules/hello-world/*.capnp");
+
 use crate::keystone_capnp::keystone_config;
 use capnp::{dynamic_value, introspect::Introspect};
 use clap::{Args, Parser, Subcommand, ValueEnum};

@@ -13,14 +13,18 @@ pub mod posix_module {
     use crate::module_capnp::module_error;
     use crate::posix_module_capnp::posix_module;
     use crate::posix_spawn_capnp::posix_args::Owned as PosixArgs;
+    use crate::posix_spawn_capnp::posix_error::Owned as PosixError;
     use crate::spawn_capnp::process;
     use crate::spawn_capnp::program;
     use crate::spawn_capnp::program::SpawnParams;
     use crate::spawn_capnp::program::SpawnResults;
     use capnp::any_pointer::Owned as any_pointer;
+    use capnp::capability::FromClientHook;
     use capnp::capability::Promise;
+    use capnp::private::capability::ClientHook;
     use capnp_macros::capnproto_rpc;
     use capnp_rpc::twoparty::VatNetwork;
+    use capnp_rpc::Disconnector;
     use capnp_rpc::{rpc_twoparty_capnp, twoparty, RpcSystem};
     use futures::AsyncRead;
     use std::cell::RefCell;
@@ -28,9 +32,27 @@ pub mod posix_module {
     use std::rc::Rc;
 
     pub struct PosixModuleProcessImpl {
-        posix_process: process::Client<ByteStream, any_pointer>,
+        posix_process: process::Client<ByteStream, PosixError>,
         //rpc_system: RpcSystem<rpc_twoparty_capnp::Side>,
-        rpc_system: tokio::task::JoinHandle<Result<(), capnp::Error>>,
+        handle: tokio::task::JoinHandle<Result<(), capnp::Error>>,
+        disconnector: Disconnector<rpc_twoparty_capnp::Side>,
+        bootstrap: Box<dyn ClientHook>,
+    }
+
+    struct ClientExtraction(Box<dyn ClientHook>);
+
+    impl FromClientHook for ClientExtraction {
+        fn new(hook: Box<dyn ClientHook>) -> Self {
+            Self(hook)
+        }
+
+        fn into_client_hook(self) -> Box<dyn ClientHook> {
+            self.0
+        }
+
+        fn as_client_hook(&self) -> &dyn ClientHook {
+            self.0.as_ref()
+        }
     }
 
     impl process::Server<any_pointer, module_error::Owned<any_pointer>>
@@ -59,12 +81,16 @@ pub mod posix_module {
             _: process::GetApiParams<any_pointer, module_error::Owned<any_pointer>>,
             mut results: process::GetApiResults<any_pointer, module_error::Owned<any_pointer>>,
         ) -> Result<impl Future<Output = Result<(), capnp::Error>> + 'b, capnp::Error> {
+            results
+                .get()
+                .init_api()
+                .set_as_capability(self.borrow_mut().bootstrap.clone());
             capnp::ok()
         }
     }
 
     pub struct PosixModuleProgramImpl {
-        posix_program: program::Client<PosixArgs, ByteStream, any_pointer>,
+        posix_program: program::Client<PosixArgs, ByteStream, PosixError>,
     }
 
     pub struct ByteStreamBuffer {
@@ -153,7 +179,30 @@ pub mod posix_module {
                     })
                 };
 
+                let stderrbuf = ByteStreamBufferRef(Rc::new(RefCell::new(ByteStreamBuffer {
+                    buf: Vec::new(),
+                    pending: AtomicUsize::default(),
+                })));
+
+                let stderr = {
+                    let stderrbuf = stderrbuf.clone();
+                    ByteStreamImpl::new(move |bytes| {
+                        let stderrref = stderrbuf.clone();
+                        let owned_bytes = bytes.to_owned();
+                        Promise::from_future(async move {
+                            stderrref.clone().await;
+                            let binding = stderrref.clone();
+                            let mut r = binding.0.borrow_mut();
+                            r.buf = owned_bytes;
+                            r.pending
+                                .store(r.buf.len(), std::sync::atomic::Ordering::Release);
+                            Ok(())
+                        })
+                    })
+                };
+
                 args.set_stdout(capnp_rpc::new_client(stdout));
+                args.set_stderr(capnp_rpc::new_client(stderr));
                 match request.send().promise.await {
                     Ok(h) => {
                         let process = h.get()?.get_result()?;
@@ -172,12 +221,20 @@ pub mod posix_module {
 
                                 let keystone_client: keystone::Client =
                                     capnp_rpc::new_client(KeystoneImpl {});
+                                let mut rpc_system = RpcSystem::new(
+                                    Box::new(network),
+                                    Some(keystone_client.clone().client),
+                                );
+
+                                let disconnector = rpc_system.get_disconnector();
+                                let bootstrap = rpc_system
+                                    .bootstrap::<ClientExtraction>(rpc_twoparty_capnp::Side::Client)
+                                    .into_client_hook();
                                 let module_process = PosixModuleProcessImpl {
                                     posix_process: process,
-                                    rpc_system: tokio::task::spawn_local(RpcSystem::new(
-                                        Box::new(network),
-                                        Some(keystone_client.clone().client),
-                                    )),
+                                    handle: tokio::task::spawn_local(rpc_system),
+                                    disconnector: disconnector,
+                                    bootstrap: bootstrap,
                                 };
 
                                 let module_process_client: process::Client<
@@ -211,6 +268,84 @@ pub mod posix_module {
             > = capnp_rpc::new_client(program);
             results.get().set_result(program_client);
             capnp::ok()
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::{PosixModuleImpl, PosixModuleProgramImpl};
+        use crate::byte_stream::ByteStreamImpl;
+        use crate::spawn::posix_process::PosixProgramImpl;
+        use cap_std::io_lifetimes::{FromFilelike, IntoFilelike};
+        use capnp::capability::Promise;
+        use std::fs::File;
+        use tokio::task;
+
+        #[tokio::test]
+        async fn test_process_creation() {
+            println!("{}", std::env::current_dir().unwrap().to_string_lossy());
+            #[cfg(windows)]
+            let spawn_process_server = PosixProgramImpl::new_std(
+                File::open("../target/debug/hello-world-module.exe").unwrap(),
+            );
+            #[cfg(not(windows))]
+            let spawn_process_server = PosixProgramImpl::new_std(
+                File::open("../target/debug/hello-world-module").unwrap(),
+            );
+
+            let spawn_process_client: crate::spawn::posix_process::PosixProgramClient =
+                capnp_rpc::new_client(spawn_process_server);
+
+            let wrapper_server = PosixModuleImpl {};
+            let wrapper_client: super::posix_module::Client = capnp_rpc::new_client(wrapper_server);
+
+            let mut wrap_request = wrapper_client.wrap_request();
+            wrap_request.get().set_prog(spawn_process_client);
+            let wrap_response = wrap_request.send().promise.await.unwrap();
+            let wrapped_client = wrap_response.get().unwrap().get_result().unwrap();
+
+            let e = task::LocalSet::new()
+                .run_until(async {
+                    let mut spawn_request = wrapped_client.spawn_request();
+                    // TODO: Pass in the hello_world structural config parameters
+
+                    let response = spawn_request.send().promise.await?;
+                    let process_client = response.get()?.get_result()?;
+
+                    let api_response = process_client.get_api_request().send().promise.await?;
+                    let hello_client: crate::hello_world_capnp::hello_world::Client =
+                        api_response.get()?.get_api()?.get_as_capability()?;
+
+                    let mut sayhello = hello_client.say_hello_request();
+                    sayhello.get().init_request().set_name("Keystone".into());
+                    let hello_response = sayhello.send().promise.await?;
+                    let msg = hello_response.get()?.get_reply()?.get_message()?;
+
+                    println!("Got reply! {}", msg.to_string()?);
+
+                    let geterror_response =
+                        process_client.get_error_request().send().promise.await?;
+                    let error_reader = geterror_response.get()?.get_result()?;
+
+                    let error_message = match error_reader.which()? {
+                        crate::module_capnp::module_error::Which::Backing(Ok(e)) => e
+                            .get_as::<crate::posix_spawn_capnp::posix_error::Reader<'_>>()?
+                            .get_error_message()?
+                            .to_str()?,
+
+                        crate::module_capnp::module_error::Which::ProtocolViolation(Ok(e)) => {
+                            e.to_str()?
+                        }
+
+                        _ => "Error getting error!!!",
+                    };
+                    assert!(error_message.is_empty() == true);
+
+                    Ok::<(), eyre::Error>(())
+                })
+                .await;
+
+            e.unwrap();
         }
     }
 }

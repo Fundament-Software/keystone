@@ -14,7 +14,6 @@ impl hello_world::Server for HelloWorldImpl {
         let message = format!("Hello, {name}!");
 
         results.get().init_reply().set_message(message[..].into());
-
         capnp::ok()
     }
 }

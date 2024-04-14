@@ -82,7 +82,7 @@ pub mod posix_process {
     use tokio::task::{spawn_local, JoinHandle};
     use tokio_util::sync::CancellationToken;
 
-    type PosixProgramClient = program::Client<PosixArgs, ByteStream, PosixError>;
+    pub type PosixProgramClient = program::Client<PosixArgs, ByteStream, PosixError>;
 
     pub struct PosixProcessImpl {
         pub cancellation_token: CancellationToken,
@@ -264,6 +264,11 @@ pub mod posix_process {
                 Self {
                     program: File::from_raw_filelike(handle as RawFilelike),
                 }
+            }
+        }
+        pub fn new_std(file: std::fs::File) -> Self {
+            Self {
+                program: cap_std::fs::File::from_std(file),
             }
         }
     }

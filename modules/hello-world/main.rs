@@ -1,4 +1,4 @@
-capnp_import::capnp_import!("hello_world.capnp");
+capnp_import::capnp_import!("hello_world.capnp", "../../core/schema/**/*.capnp");
 
 pub mod hello_world;
 use capnp_rpc::{rpc_twoparty_capnp, twoparty, RpcSystem};
@@ -23,12 +23,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let network = twoparty::VatNetwork::new(
                 reader,
                 writer,
-                rpc_twoparty_capnp::Side::Server,
+                rpc_twoparty_capnp::Side::Client,
                 Default::default(),
             );
-            let rpc_system =
+            let mut rpc_system =
                 RpcSystem::new(Box::new(network), Some(hello_world_client.clone().client));
 
+            let bootstrap: keystone_capnp::keystone::Client =
+                rpc_system.bootstrap(rpc_twoparty_capnp::Side::Server);
             tokio::task::spawn_local(rpc_system);
             tracing::info!("spawned rpc");
 

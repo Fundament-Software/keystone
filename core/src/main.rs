@@ -163,6 +163,7 @@ enum CapNPCommands {
 //    Ok(Response::new("Hello, World".into()))
 //}
 
+#[async_backtrace::framed]
 async fn shutdown_signal() {
     // Wait for the CTRL+C signal
     tokio::signal::ctrl_c()
@@ -170,6 +171,7 @@ async fn shutdown_signal() {
         .expect("failed to listen to shutdown signal");
 }
 
+#[async_backtrace::framed]
 #[tokio::main]
 async fn main() -> Result<()> {
     // Setup eyre

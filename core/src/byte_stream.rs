@@ -6,6 +6,10 @@ use capnp::{
 use capnp_macros::capnproto_rpc;
 use futures::AsyncWrite;
 use futures::FutureExt;
+use std::sync::atomic::AtomicUsize;
+use std::task::Poll;
+use std::task::Waker;
+use std::{cell::RefCell, rc::Rc};
 use tokio::io::{AsyncRead, AsyncReadExt};
 
 use crate::byte_stream_capnp::{
@@ -69,6 +73,120 @@ where
     }
 }
 
+struct ByteStreamBufferInternal {
+    buf: Vec<u8>,
+    write_waker: Option<Waker>,
+    read_waker: Option<Waker>,
+    pending: AtomicUsize,
+}
+
+#[derive(Clone)]
+pub struct ByteStreamBufferImpl {
+    internal: Rc<RefCell<ByteStreamBufferInternal>>,
+    closed: bool,
+}
+
+impl ByteStreamBufferImpl {
+    pub fn new() -> Self {
+        Self {
+            internal: Rc::new(RefCell::new(ByteStreamBufferInternal {
+                buf: Vec::new(),
+                write_waker: None,
+                read_waker: None,
+                pending: AtomicUsize::new(0),
+            })),
+            closed: false,
+        }
+    }
+}
+
+impl std::future::Future for ByteStreamBufferImpl {
+    type Output = ();
+
+    fn poll(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        if self
+            .internal
+            .borrow_mut()
+            .pending
+            .load(std::sync::atomic::Ordering::Relaxed)
+            == 0
+        {
+            Poll::Ready(())
+        } else {
+            self.internal.borrow_mut().write_waker = Some(cx.waker().clone());
+            Poll::Pending
+        }
+    }
+}
+
+#[capnproto_rpc(byte_stream_capnp::byte_stream)]
+impl Server for ByteStreamBufferImpl {
+    fn write(&mut self, bytes: &[u8]) {
+        if !self.closed {
+            let owned_bytes = bytes.to_owned();
+            let r = self.clone();
+            Ok(Promise::from_future(async move {
+                r.clone().await;
+                let mut this = r.internal.borrow_mut();
+                this.buf = owned_bytes;
+                this.pending
+                    .store(this.buf.len(), std::sync::atomic::Ordering::Release);
+                if let Some(w) = this.read_waker.take() {
+                    w.wake();
+                }
+                Ok(())
+            }))
+        } else {
+            Err(capnp::Error {
+                kind: ErrorKind::Failed,
+                extra: String::from("Write called on byte stream after closed."),
+            })
+        }
+    }
+
+    fn end(&mut self) {
+        self.closed = true;
+        capnp::ok()
+    }
+
+    fn get_substream(&mut self) {
+        Ok(async {
+            Err(capnp::Error {
+                kind: ErrorKind::Unimplemented,
+                extra: String::from("Not implemented"),
+            })
+        })
+    }
+}
+
+impl futures::AsyncRead for ByteStreamBufferImpl {
+    fn poll_read(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut [u8],
+    ) -> std::task::Poll<std::io::Result<usize>> {
+        let mut this = self.internal.borrow_mut();
+        let pending = this.pending.load(std::sync::atomic::Ordering::Acquire);
+        if pending > 0 {
+            let start = this.buf.len() - pending;
+            let len = std::cmp::min(pending, buf.len());
+            buf[0..len].copy_from_slice(&this.buf[start..(start + len)]);
+            this.pending
+                .fetch_sub(len, std::sync::atomic::Ordering::Release);
+            if let Some(w) = this.write_waker.take() {
+                w.wake()
+            }
+            std::task::Poll::Ready(Ok(len))
+        } else {
+            this.read_waker = Some(cx.waker().clone());
+            std::task::Poll::Pending
+        }
+    }
+}
+
 enum PassThrough<'a> {
     PendingRead(&'a [u8]),
     PendingWrite(&'a [u8]),
@@ -77,6 +195,7 @@ enum PassThrough<'a> {
 
 impl Client {
     /// Convenience function to make it easier to send bytes through the ByteStream
+    #[async_backtrace::framed]
     pub async fn write_bytes(
         &self,
         bytes: &[u8],
@@ -95,6 +214,7 @@ impl Client {
     /// stream.
     ///
     /// A copy buffer of 4 KB is created to take data from the reader to the byte stream.
+    #[async_backtrace::framed]
     pub async fn copy(&self, reader: &mut (impl AsyncRead + Unpin)) -> eyre::Result<usize> {
         let mut total_bytes = 0;
         let mut buffer = BytesMut::with_capacity(4096);

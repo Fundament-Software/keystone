@@ -6,6 +6,7 @@ pub mod posix_module {
     use std::sync::atomic::AtomicUsize;
     use std::sync::Arc;
 
+    use crate::byte_stream::ByteStreamBufferImpl;
     use crate::byte_stream::ByteStreamImpl;
     use crate::byte_stream_capnp::byte_stream::Owned as ByteStream;
     use crate::keystone::KeystoneImpl;
@@ -93,55 +94,6 @@ pub mod posix_module {
         posix_program: program::Client<PosixArgs, ByteStream, PosixError>,
     }
 
-    pub struct ByteStreamBuffer {
-        buf: Vec<u8>,
-        pending: AtomicUsize,
-    }
-
-    #[derive(Clone)]
-    pub struct ByteStreamBufferRef(Rc<RefCell<ByteStreamBuffer>>);
-
-    impl Future for ByteStreamBufferRef {
-        type Output = ();
-
-        fn poll(
-            self: std::pin::Pin<&mut Self>,
-            cx: &mut std::task::Context<'_>,
-        ) -> std::task::Poll<Self::Output> {
-            if self
-                .0
-                .borrow()
-                .pending
-                .load(std::sync::atomic::Ordering::Relaxed)
-                > 0
-            {
-                std::task::Poll::Pending
-            } else {
-                std::task::Poll::Ready(())
-            }
-        }
-    }
-
-    impl AsyncRead for ByteStreamBufferRef {
-        fn poll_read(
-            self: std::pin::Pin<&mut Self>,
-            cx: &mut std::task::Context<'_>,
-            buf: &mut [u8],
-        ) -> std::task::Poll<std::io::Result<usize>> {
-            let r = self.0.borrow();
-            let pending = r.pending.load(std::sync::atomic::Ordering::Acquire);
-            if pending > 0 {
-                let start = r.buf.len() - pending;
-                let len = std::cmp::min(pending, buf.len());
-                buf[0..len].copy_from_slice(&r.buf[start..(start + len)]);
-                r.pending
-                    .fetch_sub(len, std::sync::atomic::Ordering::Release);
-                std::task::Poll::Ready(Ok(len))
-            } else {
-                std::task::Poll::Pending
-            }
-        }
-    }
     impl program::Server<any_pointer, any_pointer, module_error::Owned<any_pointer>>
         for PosixModuleProgramImpl
     {
@@ -157,64 +109,22 @@ pub mod posix_module {
 
                 // Here we create a bytestream implementation backed by a circular buffer. This is passed
                 // into the new process so it can write to it, and then our RPC system reads from it.
-                let stdoutbuf = ByteStreamBufferRef(Rc::new(RefCell::new(ByteStreamBuffer {
-                    buf: Vec::new(),
-                    pending: AtomicUsize::default(),
-                })));
+                let stdout = ByteStreamBufferImpl::new();
+                let stderr = ByteStreamBufferImpl::new();
 
-                let stdout = {
-                    let stdoutbuf = stdoutbuf.clone();
-                    ByteStreamImpl::new(move |bytes| {
-                        let stdoutref = stdoutbuf.clone();
-                        let owned_bytes = bytes.to_owned();
-                        Promise::from_future(async move {
-                            stdoutref.clone().await;
-                            let binding = stdoutref.clone();
-                            let mut r = binding.0.borrow_mut();
-                            r.buf = owned_bytes;
-                            r.pending
-                                .store(r.buf.len(), std::sync::atomic::Ordering::Release);
-                            Ok(())
-                        })
-                    })
-                };
-
-                let stderrbuf = ByteStreamBufferRef(Rc::new(RefCell::new(ByteStreamBuffer {
-                    buf: Vec::new(),
-                    pending: AtomicUsize::default(),
-                })));
-
-                let stderr = {
-                    let stderrbuf = stderrbuf.clone();
-                    ByteStreamImpl::new(move |bytes| {
-                        let stderrref = stderrbuf.clone();
-                        let owned_bytes = bytes.to_owned();
-                        Promise::from_future(async move {
-                            stderrref.clone().await;
-                            let binding = stderrref.clone();
-                            let mut r = binding.0.borrow_mut();
-                            r.buf = owned_bytes;
-                            r.pending
-                                .store(r.buf.len(), std::sync::atomic::Ordering::Release);
-                            Ok(())
-                        })
-                    })
-                };
-
-                args.set_stdout(capnp_rpc::new_client(stdout));
-                args.set_stderr(capnp_rpc::new_client(stderr));
+                args.set_stdout(capnp_rpc::new_client(stdout.clone()));
+                args.set_stderr(capnp_rpc::new_client(stderr.clone()));
                 match request.send().promise.await {
                     Ok(h) => {
                         let process = h.get()?.get_result()?;
 
-                        let stdoutbuf = stdoutbuf.clone();
                         match process.get_api_request().send().promise.await {
                             Ok(s) => {
                                 let stdin = s.get()?.get_api()?;
 
                                 let network = VatNetwork::new(
-                                    stdoutbuf.clone(), // read from the output stream of the process
-                                    stdin,             // write into the input stream of the process
+                                    stdout.clone(), // read from the output stream of the process
+                                    stdin,          // write into the input stream of the process
                                     rpc_twoparty_capnp::Side::Server,
                                     Default::default(),
                                 );
@@ -230,6 +140,7 @@ pub mod posix_module {
                                 let bootstrap = rpc_system
                                     .bootstrap::<ClientExtraction>(rpc_twoparty_capnp::Side::Client)
                                     .into_client_hook();
+                                bootstrap.when_resolved().await?;
                                 let module_process = PosixModuleProcessImpl {
                                     posix_process: process,
                                     handle: tokio::task::spawn_local(rpc_system),
@@ -281,9 +192,11 @@ pub mod posix_module {
         use std::fs::File;
         use tokio::task;
 
+        #[async_backtrace::framed]
         #[tokio::test]
         async fn test_process_creation() {
-            println!("{}", std::env::current_dir().unwrap().to_string_lossy());
+            console_subscriber::init();
+
             #[cfg(windows)]
             let spawn_process_server = PosixProgramImpl::new_std(
                 File::open("../target/debug/hello-world-module.exe").unwrap(),
@@ -309,6 +222,9 @@ pub mod posix_module {
                     let mut spawn_request = wrapped_client.spawn_request();
                     // TODO: Pass in the hello_world structural config parameters
 
+                    async_backtrace::taskdump_tree(false);
+                    println!("STARTING");
+                    async_backtrace::taskdump_tree(false);
                     let response = spawn_request.send().promise.await?;
                     let process_client = response.get()?.get_result()?;
 

@@ -98,18 +98,14 @@ pub mod posix_process {
     ///
     /// **Warning**: This function uses [spawn_local] and must be called in a LocalSet context.
     fn spawn_iostream_task(
-        iostream: Option<impl AsyncRead + Unpin + 'static>, // In this case, 'static means an owned type. Also required for spawn_local
+        mut stream: impl AsyncRead + Unpin + 'static, // In this case, 'static means an owned type. Also required for spawn_local
         bytestream: ByteStreamClient,
         cancellation_token: CancellationToken,
     ) -> JoinHandle<eyre::Result<Option<usize>>> {
         spawn_local(async move {
-            if let Some(mut stream) = iostream {
-                tokio::select! {
-                    _ = cancellation_token.cancelled() => Ok(None),
-                    result = bytestream.copy(&mut stream) => result.map(Some)
-                }
-            } else {
-                Ok(None)
+            tokio::select! {
+                _ = cancellation_token.cancelled() => Ok(None),
+                result = bytestream.copy(&mut stream) => result.map(Some)
             }
         })
     }
@@ -152,14 +148,17 @@ pub mod posix_process {
             // Create a cancellation token to allow us to kill ("cancel") the process.
             let cancellation_token = CancellationToken::new();
 
+            let stdout = child.stdout.take();
             // Create the tasks to read stdout and stderr to the byte stream
             let stdout_task = spawn_iostream_task(
-                child.stdout.take(),
+                tokio::io::BufReader::new(stdout.unwrap()),
                 stdout_stream,
                 cancellation_token.child_token(),
             );
+            let stderr = child.stderr.take();
+
             let stderr_task = spawn_iostream_task(
-                child.stderr.take(),
+                tokio::io::BufReader::new(stderr.unwrap()),
                 stderr_stream,
                 cancellation_token.child_token(),
             );
@@ -313,10 +312,12 @@ pub mod posix_process {
         use crate::byte_stream::ByteStreamImpl;
         use cap_std::io_lifetimes::{FromFilelike, IntoFilelike};
         use capnp::capability::Promise;
+        use dlopen::symbor::RefMut;
         use std::fs::File;
         use tokio::task;
 
         #[tokio::test]
+        #[async_backtrace::framed]
         async fn test_process_creation() {
             let spawn_process_server = PosixProgramImpl {
                 #[cfg(windows)]
@@ -385,5 +386,89 @@ pub mod posix_process {
 
             e.unwrap();
         }
+
+        /*#[tokio::test]
+        async fn test_hello_world() {
+            console_subscriber::init();
+
+            #[cfg(windows)]
+            let spawn_process_server = PosixProgramImpl::new_std(
+                File::open("../target/debug/hello-world-module.exe").unwrap(),
+            );
+            #[cfg(not(windows))]
+            let spawn_process_server = PosixProgramImpl::new_std(
+                File::open("../target/debug/hello-world-module").unwrap(),
+            );
+
+            let spawn_process_client: PosixProgramClient =
+                capnp_rpc::new_client(spawn_process_server);
+
+            let e = task::LocalSet::new()
+                .run_until(async {
+                    // Setting up stuff needed for RPC
+                    let stdout_server = ByteStreamImpl::new(|bytes| {
+                        println!("remote stdout: {}", std::str::from_utf8(bytes).unwrap());
+                        Promise::ok(())
+                    });
+                    let stdout_client: super::ByteStreamClient =
+                        capnp_rpc::new_client(stdout_server);
+                    let stderr_server = ByteStreamImpl::new(|bytes| {
+                        println!("remote stderr: {}", std::str::from_utf8(bytes).unwrap());
+                        Promise::ok(())
+                    });
+                    let stderr_client: super::ByteStreamClient =
+                        capnp_rpc::new_client(stderr_server);
+
+                    let mut spawn_request = spawn_process_client.spawn_request();
+                    let params_builder = spawn_request.get();
+                    let mut args_builder = params_builder.init_args();
+                    args_builder.set_stdout(stdout_client);
+                    args_builder.set_stderr(stderr_client);
+
+                    let response = spawn_request.send().promise.await?;
+                    let process_client = response.get()?.get_result()?;
+
+                    let stdin_response = process_client.get_api_request().send().promise.await?;
+                    let stdin = stdin_response.get()?.get_api()?;
+
+                    let network = capnp_rpc::VatNetwork::new(
+                        stdoutbuf.clone(), // read from the output stream of the process
+                        stdin,             // write into the input stream of the process
+                        capnp_rpc::rpc_twoparty_capnp::Side::Server,
+                        Default::default(),
+                    );
+
+                    let keystone_client: keystone::Client = capnp_rpc::new_client(KeystoneImpl {});
+                    let mut rpc_system =
+                        RpcSystem::new(Box::new(network), Some(keystone_client.clone().client));
+
+                    let disconnector = rpc_system.get_disconnector();
+                    let bootstrap = rpc_system
+                        .bootstrap::<ClientExtraction>(rpc_twoparty_capnp::Side::Client)
+                        .into_client_hook();
+                    bootstrap.when_resolved().await?;
+                    let module_process = PosixModuleProcessImpl {
+                        posix_process: process,
+                        handle: tokio::task::spawn_local(rpc_system),
+                        disconnector: disconnector,
+                        bootstrap: bootstrap,
+                    };
+
+                    let geterror_response =
+                        process_client.get_error_request().send().promise.await?;
+                    let error_reader = geterror_response.get()?.get_result()?;
+
+                    let error_code = error_reader.get_error_code();
+                    assert_eq!(error_code, 2);
+
+                    let error_message = error_reader.get_error_message()?;
+                    assert!(error_message.is_empty() == true);
+
+                    Ok::<(), eyre::Error>(())
+                })
+                .await;
+
+            e.unwrap();
+        }*/
     }
 }

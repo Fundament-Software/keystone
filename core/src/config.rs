@@ -98,8 +98,7 @@ fn value_to_struct(v: &Table, mut builder: ::capnp::dynamic_struct::Builder) -> 
             if let schema_capnp::type_::Which::Struct(s) = x.get_type()?.which()? {
                 if s.get_type_id() == toml_capnp::value::Builder::TYPE_ID {
                     let dynamic: dynamic_struct::Builder = builder.init(field)?.downcast();
-                    // FIXME
-                    //toml_to_capnp(v, dynamic.downcast()?)?;
+                    toml_to_capnp(v, dynamic.downcast()?)?;
                     return Ok(());
                 }
             }

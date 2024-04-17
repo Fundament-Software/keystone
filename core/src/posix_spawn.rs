@@ -12,19 +12,18 @@ pub struct LocalNativeProgramImpl {}
 
 #[capnproto_rpc(local_native_program)]
 impl local_native_program::Server for LocalNativeProgramImpl {
-    fn file(&mut self, file: Client) {
-        Ok(async move {
-            match file.raw_handle_request().send().promise.await {
-                Ok(h) => {
-                    let handle = h.get().unwrap().get_handle();
-                    let program = PosixProgramImpl::new(handle);
+    #[async_backtrace::framed]
+    async fn file(&self, file: Client) {
+        match file.raw_handle_request().send().promise.await {
+            Ok(h) => {
+                let handle = h.get().unwrap().get_handle();
+                let program = PosixProgramImpl::new(handle);
 
-                    let program_client: PosixProcessClient = capnp_rpc::new_client(program);
-                    results.get().set_result(program_client);
-                    Ok(())
-                }
-                Err(e) => Err(capnp::Error::failed(e.to_string())),
+                let program_client: PosixProcessClient = capnp_rpc::new_client(program);
+                results.get().set_result(program_client);
+                Ok(())
             }
-        })
+            Err(e) => Err(capnp::Error::failed(e.to_string())),
+        }
     }
 }

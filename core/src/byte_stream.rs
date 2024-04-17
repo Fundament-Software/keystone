@@ -6,6 +6,7 @@ use capnp::{
 use capnp_macros::capnproto_rpc;
 use futures::AsyncWrite;
 use futures::FutureExt;
+use std::future::Future;
 use std::sync::atomic::AtomicUsize;
 use std::task::Poll;
 use std::task::Waker;
@@ -27,29 +28,37 @@ use crate::stream_capnp::stream_result;
 /// ByteStreamImpl is constructed with a Consumer `C` which will consume the bytes recieved by
 /// rpc `write` calls and return a promise which resolves when the system is ready to process
 /// more bytes.
-pub struct ByteStreamImpl<C> {
-    consumer: Option<C>,
+pub struct ByteStreamImpl<F, C>
+where
+    C: FnMut(&[u8]) -> F,
+    F: Future<Output = Result<(), capnp::Error>>,
+{
+    consumer: RefCell<Option<C>>,
 }
 
-impl<C> ByteStreamImpl<C>
+impl<F, C> ByteStreamImpl<F, C>
 where
-    C: FnMut(&[u8]) -> Promise<(), capnp::Error>,
+    C: FnMut(&[u8]) -> F,
+    F: Future<Output = Result<(), capnp::Error>>,
 {
     pub fn new(consumer: C) -> Self {
         Self {
-            consumer: Some(consumer),
+            consumer: RefCell::new(Some(consumer)),
         }
     }
 }
 
 #[capnproto_rpc(byte_stream_capnp::byte_stream)]
-impl<C> Server for ByteStreamImpl<C>
+impl<F, C> Server for ByteStreamImpl<F, C>
 where
-    C: FnMut(&[u8]) -> Promise<(), capnp::Error>,
+    C: FnMut(&[u8]) -> F,
+    F: Future<Output = Result<(), capnp::Error>>,
 {
-    fn write(&mut self, bytes: &[u8]) {
-        if let Some(f) = &mut self.consumer {
-            Ok((f)(bytes))
+    #[async_backtrace::framed]
+    async fn write(&self, bytes: &[u8]) {
+        if let Some(f) = &mut *self.consumer.borrow_mut() {
+            println!("inside ByteStreamImpl write");
+            f(bytes).await
         } else {
             Err(capnp::Error {
                 kind: ErrorKind::Failed,
@@ -58,17 +67,17 @@ where
         }
     }
 
-    fn end(&mut self) {
-        self.consumer = None;
-        capnp::ok()
+    #[async_backtrace::framed]
+    async fn end(&self) {
+        *self.consumer.borrow_mut() = None;
+        Ok(())
     }
 
-    fn get_substream(&mut self) {
-        Ok(async {
-            Err(capnp::Error {
-                kind: ErrorKind::Unimplemented,
-                extra: String::from("Not implemented"),
-            })
+    #[async_backtrace::framed]
+    async fn get_substream(&self) {
+        Err(capnp::Error {
+            kind: ErrorKind::Unimplemented,
+            extra: String::from("Not implemented"),
         })
     }
 }
@@ -78,25 +87,21 @@ struct ByteStreamBufferInternal {
     write_waker: Option<Waker>,
     read_waker: Option<Waker>,
     pending: AtomicUsize,
-}
-
-#[derive(Clone)]
-pub struct ByteStreamBufferImpl {
-    internal: Rc<RefCell<ByteStreamBufferInternal>>,
     closed: bool,
 }
 
+#[derive(Clone)]
+pub struct ByteStreamBufferImpl(Rc<RefCell<ByteStreamBufferInternal>>);
+
 impl ByteStreamBufferImpl {
     pub fn new() -> Self {
-        Self {
-            internal: Rc::new(RefCell::new(ByteStreamBufferInternal {
-                buf: Vec::new(),
-                write_waker: None,
-                read_waker: None,
-                pending: AtomicUsize::new(0),
-            })),
+        Self(Rc::new(RefCell::new(ByteStreamBufferInternal {
+            buf: Vec::new(),
+            write_waker: None,
+            read_waker: None,
+            pending: AtomicUsize::new(0),
             closed: false,
-        }
+        })))
     }
 }
 
@@ -107,16 +112,11 @@ impl std::future::Future for ByteStreamBufferImpl {
         self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Self::Output> {
-        if self
-            .internal
-            .borrow_mut()
-            .pending
-            .load(std::sync::atomic::Ordering::Relaxed)
-            == 0
-        {
+        let mut this = self.0.borrow_mut();
+        if this.pending.load(std::sync::atomic::Ordering::Relaxed) == 0 {
             Poll::Ready(())
         } else {
-            self.internal.borrow_mut().write_waker = Some(cx.waker().clone());
+            this.write_waker = Some(cx.waker().clone());
             Poll::Pending
         }
     }
@@ -124,21 +124,26 @@ impl std::future::Future for ByteStreamBufferImpl {
 
 #[capnproto_rpc(byte_stream_capnp::byte_stream)]
 impl Server for ByteStreamBufferImpl {
-    fn write(&mut self, bytes: &[u8]) {
-        if !self.closed {
+    #[async_backtrace::framed]
+    async fn write(&self, bytes: &[u8]) {
+        println!(
+            "inside ByteStreamBufferImpl write: {}",
+            async_backtrace::taskdump_tree(true)
+        );
+        let copy = self.clone();
+        let closed = self.0.borrow().closed;
+
+        if !closed {
             let owned_bytes = bytes.to_owned();
-            let r = self.clone();
-            Ok(Promise::from_future(async move {
-                r.clone().await;
-                let mut this = r.internal.borrow_mut();
-                this.buf = owned_bytes;
-                this.pending
-                    .store(this.buf.len(), std::sync::atomic::Ordering::Release);
-                if let Some(w) = this.read_waker.take() {
-                    w.wake();
-                }
-                Ok(())
-            }))
+            copy.await;
+            let mut this = self.0.borrow_mut();
+            this.buf = owned_bytes;
+            this.pending
+                .store(this.buf.len(), std::sync::atomic::Ordering::Release);
+            if let Some(w) = this.read_waker.take() {
+                w.wake();
+            }
+            Ok(())
         } else {
             Err(capnp::Error {
                 kind: ErrorKind::Failed,
@@ -147,17 +152,17 @@ impl Server for ByteStreamBufferImpl {
         }
     }
 
-    fn end(&mut self) {
-        self.closed = true;
-        capnp::ok()
+    #[async_backtrace::framed]
+    async fn end(&self) {
+        self.0.borrow_mut().closed = true;
+        Ok(())
     }
 
-    fn get_substream(&mut self) {
-        Ok(async {
-            Err(capnp::Error {
-                kind: ErrorKind::Unimplemented,
-                extra: String::from("Not implemented"),
-            })
+    #[async_backtrace::framed]
+    async fn get_substream(&self) {
+        Err(capnp::Error {
+            kind: ErrorKind::Unimplemented,
+            extra: String::from("Not implemented"),
         })
     }
 }
@@ -168,7 +173,7 @@ impl futures::AsyncRead for ByteStreamBufferImpl {
         cx: &mut std::task::Context<'_>,
         buf: &mut [u8],
     ) -> std::task::Poll<std::io::Result<usize>> {
-        let mut this = self.internal.borrow_mut();
+        let mut this = self.0.borrow_mut();
         let pending = this.pending.load(std::sync::atomic::Ordering::Acquire);
         if pending > 0 {
             let start = this.buf.len() - pending;
@@ -241,6 +246,7 @@ impl AsyncWrite for Client {
         cx: &mut std::task::Context<'_>,
         buf: &[u8],
     ) -> std::task::Poll<Result<usize, std::io::Error>> {
+        println!("inside CLIENT poll_write");
         let mut write_request = self.write_request();
         write_request.get().set_bytes(buf);
         match write_request.send().promise.poll_unpin(cx) {
@@ -257,6 +263,7 @@ impl AsyncWrite for Client {
         self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<(), std::io::Error>> {
+        println!("inside CLIENT poll_flush");
         std::task::Poll::Ready(Ok(()))
     }
 
@@ -264,6 +271,7 @@ impl AsyncWrite for Client {
         self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<(), std::io::Error>> {
+        println!("inside CLIENT poll_close");
         match self.end_request().send().promise.poll_unpin(cx) {
             std::task::Poll::Ready(_) => std::task::Poll::Ready(Ok(())),
             std::task::Poll::Pending => std::task::Poll::Pending,
@@ -275,7 +283,7 @@ impl AsyncWrite for Client {
 fn write_test() -> eyre::Result<()> {
     let server = ByteStreamImpl::new(|bytes| {
         assert_eq!(bytes, &[73, 22, 66, 91]);
-        Promise::ok(())
+        std::future::ready(Ok(()))
     });
 
     let client: crate::byte_stream_capnp::byte_stream::Client = capnp_rpc::new_client(server);

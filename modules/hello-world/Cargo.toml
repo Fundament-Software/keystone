@@ -26,3 +26,4 @@ tokio.workspace = true
 tokio-util.workspace = true
 tracing-subscriber.workspace = true
 tracing.workspace = true
+async-backtrace.workspace = true

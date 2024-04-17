@@ -63,7 +63,7 @@ pub mod hello_world {
   }
   #[allow(async_fn_in_trait)]
   pub trait Server<>   {
-    fn say_hello<'a, 'b>(&'a mut self, _: SayHelloParams<>, _: SayHelloResults<>) -> Result<impl std::future::Future<Output = Result<(), ::capnp::Error>> + 'b, ::capnp::Error> { Result::<std::future::Ready<Result<(), capnp::Error>>, capnp::Error>::Err(::capnp::Error::unimplemented("method hello_world::Server::say_hello not implemented".to_string())) }
+    async fn say_hello(&self, _: SayHelloParams<>, _: SayHelloResults<>) -> Result<(), ::capnp::Error> { Result::<(), capnp::Error>::Err(::capnp::Error::unimplemented("method hello_world::Server::say_hello not implemented".to_string())) }
   }
   pub struct ServerDispatch<_T,> {
     pub server: _T,
@@ -82,18 +82,18 @@ pub mod hello_world {
     fn deref_mut(&mut self) -> &mut _T { &mut self.server}
   }
   impl <_T: Server> ::capnp::capability::Server for ServerDispatch<_T> {
-    fn dispatch_call(&mut self, interface_id: u64, method_id: u16, params: ::capnp::capability::Params<::capnp::any_pointer::Owned>, results: ::capnp::capability::Results<::capnp::any_pointer::Owned>) -> Result<impl std::future::Future<Output = Result<(), ::capnp::Error>>, ::capnp::Error> {
+    async fn dispatch_call(&self, interface_id: u64, method_id: u16, params: ::capnp::capability::Params<::capnp::any_pointer::Owned>, results: ::capnp::capability::Results<::capnp::any_pointer::Owned>) -> Result<(), ::capnp::Error> {
       match interface_id {
-        _private::TYPE_ID => Ok(::capnp::capability::Either::A(Self::dispatch_call_internal(&mut self.server, method_id, params, results)?)),
-        _ =>  Ok(::capnp::capability::Either::B(async{Err(::capnp::Error::unimplemented("Method not implemented.".to_string()))})) 
+        _private::TYPE_ID => Self::dispatch_call_internal(&self.server, method_id, params, results).await,
+        _ =>  Err(::capnp::Error::unimplemented("Method not implemented.".to_string())) 
       }
     }
   }
   impl <_T :Server> ServerDispatch<_T> {
-    pub fn dispatch_call_internal<'a>(server: &'a mut _T, method_id: u16, params: ::capnp::capability::Params<::capnp::any_pointer::Owned>, results: ::capnp::capability::Results<::capnp::any_pointer::Owned>) -> Result<impl std::future::Future<Output = Result<(), ::capnp::Error>> + 'a, ::capnp::Error> {
+    pub async fn dispatch_call_internal(server: &_T, method_id: u16, params: ::capnp::capability::Params<::capnp::any_pointer::Owned>, results: ::capnp::capability::Results<::capnp::any_pointer::Owned>) -> Result<(), ::capnp::Error> {
         match method_id {
-          0 => Ok(::capnp::capability::Either::A(server.say_hello(::capnp::private::capability::internal_get_typed_params(params), ::capnp::private::capability::internal_get_typed_results(results))?)),
-          _ => Ok(::capnp::capability::Either::B(async{Err(::capnp::Error::unimplemented("Method not implemented.".to_string()))})) 
+          0 => server.say_hello(::capnp::private::capability::internal_get_typed_params(params), ::capnp::private::capability::internal_get_typed_results(results)).await,
+          _ => Err(::capnp::Error::unimplemented("Method not implemented.".to_string())) 
       }
     }
   }

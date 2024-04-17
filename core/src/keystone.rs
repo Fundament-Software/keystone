@@ -7,21 +7,19 @@ use crate::keystone_capnp::keystone::SetConfigResults;
 pub struct KeystoneImpl;
 
 impl keystone::Server for KeystoneImpl {
-    fn get_config<'a, 'b>(
-        &'a mut self,
+    async fn get_config(
+        &self,
         _: GetConfigParams,
         _: GetConfigResults,
-    ) -> Result<impl std::future::Future<Output = Result<(), ::capnp::Error>> + 'b, ::capnp::Error>
-    {
-        capnp::ok()
+    ) -> Result<(), ::capnp::Error> {
+        Ok(())
     }
 
-    fn set_config<'a, 'b>(
-        &'a mut self,
+    async fn set_config(
+        &self,
         _: SetConfigParams,
         _: SetConfigResults,
-    ) -> Result<impl std::future::Future<Output = Result<(), ::capnp::Error>> + 'b, ::capnp::Error>
-    {
-        capnp::ok()
+    ) -> Result<(), ::capnp::Error> {
+        Ok(())
     }
 }

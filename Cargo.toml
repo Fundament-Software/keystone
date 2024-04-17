@@ -29,6 +29,7 @@ tokio = { version = "1.18", features = [
   "tracing",
 ] }
 tokio-util = { version = "0.7.4", features = ["compat"] }
+async-backtrace = "0.2.7"
 capstone = { git = "https://github.com/Fundament-Software/capstone-rs" }
 capstone-futures = { git = "https://github.com/Fundament-Software/capstone-rs" }
 capstone-import = { git = "https://github.com/Fundament-Software/capstone-rs" }

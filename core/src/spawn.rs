@@ -1,7 +1,7 @@
 use std::ffi::OsStr;
 
 #[cfg(not(windows))]
-fn spawn_process_native<'i, I>(
+pub fn spawn_process_native<'i, I>(
     source: &cap_std::fs::File,
     args: I,
 ) -> Result<tokio::process::Child, capnp::Error>
@@ -22,7 +22,7 @@ where
 }
 
 #[cfg(windows)]
-fn spawn_process_native<'i, I>(
+pub fn spawn_process_native<'i, I>(
     source: &cap_std::fs::File,
     args: I,
 ) -> Result<tokio::process::Child, capnp::Error>
@@ -186,54 +186,49 @@ pub mod posix_process {
     impl process::Server<ByteStream, PosixError> for Rc<RefCell<PosixProcessImpl>> {
         /// In this implementation of `spawn`, the functions returns the exit code of the child
         /// process.
-        fn get_error<'b>(
-            &mut self,
+        #[async_backtrace::framed]
+        async fn get_error(
+            &self,
             _: GetErrorParams,
             mut results: GetErrorResults,
-        ) -> Result<impl Future<Output = Result<(), capnp::Error>> + 'b, capnp::Error> {
-            let this = self.clone();
-            Ok(async move {
-                let results_builder = results.get();
-                let mut process_error_builder = results_builder.init_result();
+        ) -> Result<(), capnp::Error> {
+            let results_builder = results.get();
+            let mut process_error_builder = results_builder.init_result();
 
-                match this.borrow_mut().child.wait().await {
-                    Ok(exitstatus) => {
-                        let exitcode = exitstatus.code().unwrap_or(i32::MIN);
-                        process_error_builder.set_error_code(exitcode.into());
-                        process_error_builder.set_error_message("".into());
+            match self.borrow_mut().child.wait().await {
+                Ok(exitstatus) => {
+                    let exitcode = exitstatus.code().unwrap_or(i32::MIN);
+                    process_error_builder.set_error_code(exitcode.into());
+                    process_error_builder.set_error_message("".into());
 
-                        Ok(())
-                    }
-                    Err(e) => Err(capnp::Error::failed(e.to_string())),
+                    Ok(())
                 }
-            })
+                Err(e) => Err(capnp::Error::failed(e.to_string())),
+            }
         }
 
-        fn kill<'b>(
-            &mut self,
-            _: KillParams,
-            _: KillResults,
-        ) -> Result<impl Future<Output = Result<(), capnp::Error>> + 'b, capnp::Error> {
-            let this = self.clone();
-            Ok(async move {
-                match this.borrow_mut().child.kill().await {
-                    Ok(_) => Ok(()),
-                    Err(e) => Err(capnp::Error::failed(e.to_string())),
-                }
-            })
+        #[async_backtrace::framed]
+        async fn kill(&self, _: KillParams, _: KillResults) -> Result<(), capnp::Error> {
+            match self.borrow_mut().child.kill().await {
+                Ok(_) => Ok(()),
+                Err(e) => Err(capnp::Error::failed(e.to_string())),
+            }
         }
 
-        fn get_api<'b>(
-            &mut self,
-            _: GetApiParams,
+        #[async_backtrace::framed]
+        async fn get_api(
+            &self,
+            params: GetApiParams,
             mut results: GetApiResults,
-        ) -> Result<impl Future<Output = Result<(), capnp::Error>> + 'b, capnp::Error> {
+        ) -> Result<(), capnp::Error> {
             let this = self.clone();
+            println!("called posix get_api ");
 
             let stdin_stream_server = ByteStreamImpl::new(move |bytes| {
+                println!("inside stdin_stream_server");
                 let this_inner = this.clone();
                 let owned_bytes = bytes.to_owned();
-                Promise::from_future(async move {
+                async move {
                     if let Some(mut stdin) = this_inner.borrow_mut().stdin.take() {
                         match stdin.write_all(&owned_bytes).await {
                             Ok(_) => Ok(()),
@@ -242,14 +237,14 @@ pub mod posix_process {
                     } else {
                         Ok(())
                     }
-                })
+                }
             });
 
             results
                 .get()
                 .set_api(capnp_rpc::new_client(stdin_stream_server))?;
 
-            capnp::ok()
+            Ok(())
         }
     }
 
@@ -273,14 +268,12 @@ pub mod posix_process {
     }
 
     impl program::Server<PosixArgs, ByteStream, PosixError> for PosixProgramImpl {
-        fn spawn<'a, 'b>(
-            &'a mut self,
+        #[async_backtrace::framed]
+        async fn spawn(
+            &self,
             params: SpawnParams<PosixArgs, ByteStream, PosixError>,
             mut results: SpawnResults<PosixArgs, ByteStream, PosixError>,
-        ) -> Result<
-            impl std::future::Future<Output = Result<(), ::capnp::Error>> + 'b,
-            ::capnp::Error,
-        > {
+        ) -> Result<(), ::capnp::Error> {
             let params_reader = params.get()?;
 
             let args = params_reader.get_args()?;
@@ -300,7 +293,7 @@ pub mod posix_process {
                     let server_pointer = Rc::new(RefCell::new(process_impl));
                     let process_client: PosixProcessClient = capnp_rpc::new_client(server_pointer);
                     results.get().set_result(process_client);
-                    capnp::ok()
+                    Ok(())
                 }
             }
         }
@@ -311,8 +304,6 @@ pub mod posix_process {
         use super::{PosixProgramClient, PosixProgramImpl};
         use crate::byte_stream::ByteStreamImpl;
         use cap_std::io_lifetimes::{FromFilelike, IntoFilelike};
-        use capnp::capability::Promise;
-        use dlopen::symbor::RefMut;
         use std::fs::File;
         use tokio::task;
 
@@ -335,17 +326,17 @@ pub mod posix_process {
                 capnp_rpc::new_client(spawn_process_server);
 
             let e = task::LocalSet::new()
-                .run_until(async {
+                .run_until(async_backtrace::location!().frame(async {
                     // Setting up stuff needed for RPC
                     let stdout_server = ByteStreamImpl::new(|bytes| {
                         println!("remote stdout: {}", std::str::from_utf8(bytes).unwrap());
-                        Promise::ok(())
+                        std::future::ready(Ok(()))
                     });
                     let stdout_client: super::ByteStreamClient =
                         capnp_rpc::new_client(stdout_server);
                     let stderr_server = ByteStreamImpl::new(|bytes| {
                         println!("remote stderr: {}", std::str::from_utf8(bytes).unwrap());
-                        Promise::ok(())
+                        std::future::ready(Ok(()))
                     });
                     let stderr_client: super::ByteStreamClient =
                         capnp_rpc::new_client(stderr_server);
@@ -381,94 +372,10 @@ pub mod posix_process {
                     assert!(error_message.is_empty() == true);
 
                     Ok::<(), eyre::Error>(())
-                })
+                }))
                 .await;
 
             e.unwrap();
         }
-
-        /*#[tokio::test]
-        async fn test_hello_world() {
-            console_subscriber::init();
-
-            #[cfg(windows)]
-            let spawn_process_server = PosixProgramImpl::new_std(
-                File::open("../target/debug/hello-world-module.exe").unwrap(),
-            );
-            #[cfg(not(windows))]
-            let spawn_process_server = PosixProgramImpl::new_std(
-                File::open("../target/debug/hello-world-module").unwrap(),
-            );
-
-            let spawn_process_client: PosixProgramClient =
-                capnp_rpc::new_client(spawn_process_server);
-
-            let e = task::LocalSet::new()
-                .run_until(async {
-                    // Setting up stuff needed for RPC
-                    let stdout_server = ByteStreamImpl::new(|bytes| {
-                        println!("remote stdout: {}", std::str::from_utf8(bytes).unwrap());
-                        Promise::ok(())
-                    });
-                    let stdout_client: super::ByteStreamClient =
-                        capnp_rpc::new_client(stdout_server);
-                    let stderr_server = ByteStreamImpl::new(|bytes| {
-                        println!("remote stderr: {}", std::str::from_utf8(bytes).unwrap());
-                        Promise::ok(())
-                    });
-                    let stderr_client: super::ByteStreamClient =
-                        capnp_rpc::new_client(stderr_server);
-
-                    let mut spawn_request = spawn_process_client.spawn_request();
-                    let params_builder = spawn_request.get();
-                    let mut args_builder = params_builder.init_args();
-                    args_builder.set_stdout(stdout_client);
-                    args_builder.set_stderr(stderr_client);
-
-                    let response = spawn_request.send().promise.await?;
-                    let process_client = response.get()?.get_result()?;
-
-                    let stdin_response = process_client.get_api_request().send().promise.await?;
-                    let stdin = stdin_response.get()?.get_api()?;
-
-                    let network = capnp_rpc::VatNetwork::new(
-                        stdoutbuf.clone(), // read from the output stream of the process
-                        stdin,             // write into the input stream of the process
-                        capnp_rpc::rpc_twoparty_capnp::Side::Server,
-                        Default::default(),
-                    );
-
-                    let keystone_client: keystone::Client = capnp_rpc::new_client(KeystoneImpl {});
-                    let mut rpc_system =
-                        RpcSystem::new(Box::new(network), Some(keystone_client.clone().client));
-
-                    let disconnector = rpc_system.get_disconnector();
-                    let bootstrap = rpc_system
-                        .bootstrap::<ClientExtraction>(rpc_twoparty_capnp::Side::Client)
-                        .into_client_hook();
-                    bootstrap.when_resolved().await?;
-                    let module_process = PosixModuleProcessImpl {
-                        posix_process: process,
-                        handle: tokio::task::spawn_local(rpc_system),
-                        disconnector: disconnector,
-                        bootstrap: bootstrap,
-                    };
-
-                    let geterror_response =
-                        process_client.get_error_request().send().promise.await?;
-                    let error_reader = geterror_response.get()?.get_result()?;
-
-                    let error_code = error_reader.get_error_code();
-                    assert_eq!(error_code, 2);
-
-                    let error_message = error_reader.get_error_message()?;
-                    assert!(error_message.is_empty() == true);
-
-                    Ok::<(), eyre::Error>(())
-                })
-                .await;
-
-            e.unwrap();
-        }*/
     }
 }

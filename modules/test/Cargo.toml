@@ -10,7 +10,13 @@ Core server application for managing internal company infrastructure using couch
 homepage = "https://github.com/Fundament-Software/keystone"
 repository = "https://github.com/Fundament-Software/keystone/tree/master/modules/test"
 readme = "README.md"
-keywords = ["backend", "infrastructure", "management", "enterprise", "distributed"]
+keywords = [
+  "backend",
+  "infrastructure",
+  "management",
+  "enterprise",
+  "distributed",
+]
 license = "Apache-2.0"
 
 [dependencies]
@@ -19,6 +25,7 @@ cap-std = "0.26"
 tokio = { version = "1.18", features = ["full"] }
 reqwest = { version = "0.11", features = ["json"] }
 log = { version = "0.4", features = ["kv_unstable"] }
+async-backtrace.workspace = true
 
 [dev-dependencies]
 assert_fs = "1.0"

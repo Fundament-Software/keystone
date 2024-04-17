@@ -23,36 +23,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     tokio::task::LocalSet::new()
-        .run_until(
-            #[async_backtrace::framed]
-            async move {
-                let hello_world_client: hello_world_capnp::hello_world::Client =
-                    capnp_rpc::new_client(HelloWorldImpl);
-                let reader = tokio::io::stdin();
-                let reader = tokio_util::compat::TokioAsyncReadCompatExt::compat(reader);
-                let writer = tokio::io::stdout();
-                let writer = tokio_util::compat::TokioAsyncWriteCompatExt::compat_write(writer);
+        .run_until(async_backtrace::location!().frame(async move {
+            let hello_world_client: hello_world_capnp::hello_world::Client =
+                capnp_rpc::new_client(HelloWorldImpl);
+            let reader = tokio::io::stdin();
+            let reader = tokio_util::compat::TokioAsyncReadCompatExt::compat(reader);
+            let writer = tokio::io::stdout();
+            let writer = tokio_util::compat::TokioAsyncWriteCompatExt::compat_write(writer);
 
-                let network = twoparty::VatNetwork::new(
-                    reader,
-                    writer,
-                    rpc_twoparty_capnp::Side::Client,
-                    Default::default(),
-                );
-                let mut rpc_system =
-                    RpcSystem::new(Box::new(network), Some(hello_world_client.clone().client));
+            let network = twoparty::VatNetwork::new(
+                reader,
+                writer,
+                rpc_twoparty_capnp::Side::Client,
+                Default::default(),
+            );
+            let mut rpc_system =
+                RpcSystem::new(Box::new(network), Some(hello_world_client.clone().client));
 
-                let bootstrap: keystone_capnp::keystone::Client =
-                    rpc_system.bootstrap(rpc_twoparty_capnp::Side::Server);
-                tokio::task::spawn_local(rpc_system);
-                tracing::info!("spawned rpc");
+            let bootstrap: keystone_capnp::keystone::Client =
+                rpc_system.bootstrap(rpc_twoparty_capnp::Side::Server);
+            tracing::info!("spawned rpc");
 
-                tracing::info!("looping");
-                loop {
-                    sleep(Duration::from_millis(100)).await;
-                }
-                tracing::error!("should never reach this");
-            },
-        )
+            tokio::task::spawn_local(async_backtrace::location!().frame(rpc_system));
+            tracing::info!("about to resolve bootstrap interface");
+
+            bootstrap.client.hook.when_resolved().await?;
+            tracing::info!("looping");
+            loop {
+                sleep(Duration::from_millis(100)).await;
+            }
+            tracing::error!("should never reach this");
+        }))
         .await
 }

@@ -51,7 +51,7 @@ tracing-subscriber.workspace = true
 tracing.workspace = true
 time = "0.3.34"
 toml = "0.8.12"
-async-backtrace = "0.2.7"
+async-backtrace.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2.139"

@@ -21,15 +21,12 @@ pub mod posix_module {
     use crate::spawn_capnp::program::SpawnResults;
     use capnp::any_pointer::Owned as any_pointer;
     use capnp::capability::FromClientHook;
-    use capnp::capability::Promise;
     use capnp::private::capability::ClientHook;
     use capnp_macros::capnproto_rpc;
     use capnp_rpc::twoparty::VatNetwork;
     use capnp_rpc::Disconnector;
     use capnp_rpc::{rpc_twoparty_capnp, twoparty, RpcSystem};
-    use futures::AsyncRead;
     use std::cell::RefCell;
-    use std::future::Future;
     use std::rc::Rc;
 
     pub struct PosixModuleProcessImpl {
@@ -109,6 +106,7 @@ pub mod posix_module {
             let mut request = self.posix_program.spawn_request();
             let mut args = request.get().init_args();
             args.reborrow().init_args(0);
+            let _gaurd = tokio::task::LocalSet::new().enter();
 
             // Here we create a bytestream implementation backed by a circular buffer. This is passed
             // into the new process so it can write to it, and then our RPC system reads from it.
@@ -128,7 +126,7 @@ pub mod posix_module {
                             let network = VatNetwork::new(
                                 stdout.clone(), // read from the output stream of the process
                                 stdin,          // write into the input stream of the process
-                                rpc_twoparty_capnp::Side::Server,
+                                rpc_twoparty_capnp::Side::Client,
                                 Default::default(),
                             );
 
@@ -141,11 +139,10 @@ pub mod posix_module {
 
                             let disconnector = rpc_system.get_disconnector();
                             let bootstrap = rpc_system
-                                .bootstrap::<ClientExtraction>(rpc_twoparty_capnp::Side::Client)
+                                .bootstrap::<ClientExtraction>(rpc_twoparty_capnp::Side::Server)
                                 .into_client_hook();
-                            println!("BEFORE RESOLVED: {}", async_backtrace::taskdump_tree(true));
 
-                            bootstrap.when_resolved().await?;
+                            println!("BEFORE SPAWN");
                             let module_process = PosixModuleProcessImpl {
                                 posix_process: process,
                                 handle: tokio::task::spawn_local(
@@ -194,9 +191,9 @@ pub mod posix_module {
         use super::{PosixModuleImpl, PosixModuleProgramImpl};
         use crate::byte_stream::ByteStreamImpl;
         use crate::spawn::posix_process::PosixProgramImpl;
-        use cap_std::fs::File;
         use cap_std::io_lifetimes::{FromFilelike, IntoFilelike};
         use capnp::capability::Promise;
+        use std::fs::File;
         use tokio::task;
 
         #[async_backtrace::framed]
@@ -205,33 +202,55 @@ pub mod posix_module {
             console_subscriber::init();
 
             #[cfg(windows)]
-            let spawn_process_server =
-                File::open("../target/debug/hello-world-module.exe").unwrap();
+            let spawn_process_server = cap_std::fs::File::from_filelike(
+                File::open("../target/debug/hello-world-module.exe")
+                    .unwrap()
+                    .into_filelike(),
+            );
             #[cfg(not(windows))]
-            let spawn_process_server = File::open("../target/debug/hello-world-module").unwrap();
+            let spawn_process_server = cap_std::fs::File::from_filelike(
+                File::open("../target/debug/hello-world-module")
+                    .unwrap()
+                    .into_filelike(),
+            );
 
             let args: Vec<Result<&str, ::capnp::Error>> = Vec::new();
-            let child = crate::spawn::spawn_process_native(&spawn_process_server, args.into_iter())
-                .unwrap();
+            let mut child =
+                crate::spawn::spawn_process_native(&spawn_process_server, args.into_iter())
+                    .unwrap();
 
             let network = capnp_rpc::twoparty::VatNetwork::new(
-                child.stdin.take().unwrap(), // read from the output stream of the process
-                child.stdout.take().unwrap(), // write into the input stream of the process
-                capnp_rpc::rpc_twoparty_capnp::Side::Server,
+                child.stdout.take().unwrap(), // read from the output stream of the process
+                child.stdin.take().unwrap(),  // write into the input stream of the process
+                capnp_rpc::rpc_twoparty_capnp::Side::Client,
                 Default::default(),
             );
 
-            let keystone_client: keystone::Client = capnp_rpc::new_client(KeystoneImpl {});
+            let keystone_client: super::keystone::Client =
+                capnp_rpc::new_client(super::KeystoneImpl {});
             let mut rpc_system =
-                RpcSystem::new(Box::new(network), Some(keystone_client.clone().client));
+                super::RpcSystem::new(Box::new(network), Some(keystone_client.clone().client));
 
             let disconnector = rpc_system.get_disconnector();
-            let bootstrap = rpc_system
-                .bootstrap::<ClientExtraction>(rpc_twoparty_capnp::Side::Client)
-                .into_client_hook();
 
-            bootstrap.when_resolved().await?;
+            task::LocalSet::new()
+                .run_until(async_backtrace::location!().frame(async {
+                    let hello_world: crate::hello_world_capnp::hello_world::Client =
+                        rpc_system.bootstrap(super::rpc_twoparty_capnp::Side::Server);
 
+                    tokio::task::spawn_local(rpc_system);
+
+                    let mut request = hello_world.say_hello_request();
+                    request.get().init_request().set_name("Keystone".into());
+
+                    let reply = request.send().promise.await?;
+                    let msg = reply.get()?.get_reply()?.get_message()?;
+
+                    println!("Got reply! {}", msg.to_string()?);
+
+                    Ok::<(), eyre::Error>(())
+                }))
+                .await;
             println!("resolved");
         }
 
@@ -278,6 +297,7 @@ pub mod posix_module {
                     let mut sayhello = hello_client.say_hello_request();
                     sayhello.get().init_request().set_name("Keystone".into());
                     let hello_response = sayhello.send().promise.await?;
+
                     let msg = hello_response.get()?.get_reply()?.get_message()?;
 
                     println!("Got reply! {}", msg.to_string()?);

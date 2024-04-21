@@ -4,14 +4,13 @@ use capnp::{
     ErrorKind,
 };
 use capnp_macros::capnproto_rpc;
-use futures::AsyncWrite;
-use futures::FutureExt;
+use futures_util::FutureExt;
 use std::future::Future;
 use std::sync::atomic::AtomicUsize;
 use std::task::Poll;
 use std::task::Waker;
 use std::{cell::RefCell, rc::Rc};
-use tokio::io::{AsyncRead, AsyncReadExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
 
 use crate::byte_stream_capnp::{
     self,
@@ -167,24 +166,24 @@ impl Server for ByteStreamBufferImpl {
     }
 }
 
-impl futures::AsyncRead for ByteStreamBufferImpl {
+impl AsyncRead for ByteStreamBufferImpl {
     fn poll_read(
         self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
-        buf: &mut [u8],
-    ) -> std::task::Poll<std::io::Result<usize>> {
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
         let mut this = self.0.borrow_mut();
         let pending = this.pending.load(std::sync::atomic::Ordering::Acquire);
         if pending > 0 {
             let start = this.buf.len() - pending;
-            let len = std::cmp::min(pending, buf.len());
-            buf[0..len].copy_from_slice(&this.buf[start..(start + len)]);
+            let len = std::cmp::min(pending, buf.remaining());
+            buf.put_slice(&this.buf[start..(start + len)]);
             this.pending
                 .fetch_sub(len, std::sync::atomic::Ordering::Release);
             if let Some(w) = this.write_waker.take() {
                 w.wake()
             }
-            std::task::Poll::Ready(Ok(len))
+            std::task::Poll::Ready(Ok(()))
         } else {
             this.read_waker = Some(cx.waker().clone());
             std::task::Poll::Pending
@@ -267,7 +266,7 @@ impl AsyncWrite for Client {
         std::task::Poll::Ready(Ok(()))
     }
 
-    fn poll_close(
+    fn poll_shutdown(
         self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<(), std::io::Error>> {
@@ -290,7 +289,9 @@ fn write_test() -> eyre::Result<()> {
     let mut write_request = client.write_request();
     write_request.get().set_bytes(&[73, 22, 66, 91]);
 
-    let write_result = futures::executor::block_on(write_request.send().promise);
+    let write_result = tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(write_request.send().promise);
     let _ = write_result.unwrap(); // Ensure that server didn't return an error
 
     eyre::Result::Ok(())

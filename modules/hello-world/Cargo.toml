@@ -21,7 +21,6 @@ capstone-futures.workspace = true
 capstone-import.workspace = true
 capstone-rpc.workspace = true
 capstone-macros.workspace = true
-futures.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 tracing-subscriber.workspace = true

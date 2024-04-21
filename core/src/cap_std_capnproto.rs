@@ -1551,30 +1551,16 @@ impl project_dirs::Server for ProjectDirsImpl {
 
 #[cfg(test)]
 pub mod tests {
-    use std::path::Path;
+    use std::fs::File;
 
     use crate::{
-        byte_stream::ByteStreamImpl,
-        cap_std_capnp::{
-            ambient_authority, dir, dir_entry, duration, file, instant, metadata, monotonic_clock,
-            open_options, permissions, project_dirs, read_dir, system_clock, system_time, temp_dir,
-            temp_file, user_dirs, FileType,
-        },
+        cap_std_capnp::{ambient_authority, dir_entry, metadata, permissions, system_time},
         cap_std_capnproto::AmbientAuthorityImpl,
-        spawn::posix_process::PosixProgramImpl,
     };
     use cap_directories::{self, ProjectDirs, UserDirs};
-    use cap_std::{
-        fs::{Dir, DirBuilder, DirEntry, File, Metadata, OpenOptions, Permissions, ReadDir},
-        time::{Duration, Instant, MonotonicClock, SystemClock, SystemTime},
-    };
-    use cap_tempfile::{TempDir, TempFile};
-    use capnp_macros::capnp_let;
-    use capnp_rpc::pry;
-    use tokio::io::{AsyncRead, AsyncReadExt};
 
-    #[test]
-    fn create_dir_all_canonicalize_test() -> eyre::Result<()> {
+    #[tokio::test]
+    async fn create_dir_all_canonicalize_test() -> eyre::Result<()> {
         let ambient_authority: ambient_authority::Client =
             capnp_rpc::new_client(AmbientAuthorityImpl {});
 
@@ -1583,7 +1569,10 @@ pub mod tests {
         open_ambient_request
             .get()
             .set_path(path.to_str().unwrap().into());
-        let dir = futures::executor::block_on(open_ambient_request.send().promise)?
+        let dir = open_ambient_request
+            .send()
+            .promise
+            .await?
             .get()?
             .get_result()?;
 
@@ -1591,20 +1580,20 @@ pub mod tests {
         create_dir_all_request
             .get()
             .set_path("test_dir/testing_recursively_creating_dirs".into());
-        futures::executor::block_on(create_dir_all_request.send().promise)?;
+        create_dir_all_request.send().promise.await?;
 
         let mut canonicalize_request = dir.canonicalize_request();
         canonicalize_request
             .get()
             .set_path("test_dir/testing_recursively_creating_dirs".into());
-        let results = futures::executor::block_on(canonicalize_request.send().promise)?;
+        let results = canonicalize_request.send().promise.await?;
         let p = results.get()?.get_path_buf()?.to_str()?;
         println!("path = {p}");
         return Ok(());
     }
 
-    #[test]
-    fn test_create_write_getmetadata() -> eyre::Result<()> {
+    #[tokio::test]
+    async fn test_create_write_getmetadata() -> eyre::Result<()> {
         //use ambient authority to open a dir, create a file(Or open it in write mode if it already exists), open a bytestream, use the bytestream to write some bytes, get file metadata
         let ambient_authority: ambient_authority::Client =
             capnp_rpc::new_client(AmbientAuthorityImpl {});
@@ -1614,114 +1603,119 @@ pub mod tests {
         open_ambient_request
             .get()
             .set_path(path.to_str().unwrap().into());
-        let dir = futures::executor::block_on(open_ambient_request.send().promise)?
+        let dir = open_ambient_request
+            .send()
+            .promise
+            .await?
             .get()?
             .get_result()?;
 
         let mut create_request = dir.create_request();
         create_request.get().set_path("capnp_test.txt".into());
-        let file = futures::executor::block_on(create_request.send().promise)?
-            .get()?
-            .get_file()?;
+        let file = create_request.send().promise.await?.get()?.get_file()?;
 
         let mut open_bytestream_request = file.open_request();
-        let stream = futures::executor::block_on(open_bytestream_request.send().promise)?
+        let stream = open_bytestream_request
+            .send()
+            .promise
+            .await?
             .get()?
             .get_stream()?;
 
         let mut write_request = stream.write_request();
         write_request.get().set_bytes(b"Writing some bytes test ");
-        let _res = futures::executor::block_on(write_request.send().promise)?;
+        let _res = write_request.send().promise.await?;
 
         let mut file_metadata_request = dir.metadata_request();
         file_metadata_request
             .get()
             .set_path("capnp_test.txt".into());
-        let metadata = futures::executor::block_on(file_metadata_request.send().promise)?
+        let metadata = file_metadata_request
+            .send()
+            .promise
+            .await?
             .get()?
             .get_metadata()?;
         println!("File metadata:");
-        test_metadata(metadata)?;
+        test_metadata(metadata).await?;
 
         let mut dir_metadata_request = dir.dir_metadata_request();
-        let metadata = futures::executor::block_on(dir_metadata_request.send().promise)?
+        let metadata = dir_metadata_request
+            .send()
+            .promise
+            .await?
             .get()?
             .get_metadata()?;
         println!("Dir metadata:");
-        test_metadata(metadata)?;
+        test_metadata(metadata).await?;
 
         return Ok(());
     }
 
-    #[test]
-    fn test_home_dir() -> eyre::Result<()> {
+    #[tokio::test]
+    async fn test_home_dir() -> eyre::Result<()> {
         let ambient_authority: ambient_authority::Client =
             capnp_rpc::new_client(AmbientAuthorityImpl {});
 
         let home_dir_request = ambient_authority.user_dirs_home_dir_request();
-        let home_dir = futures::executor::block_on(home_dir_request.send().promise)?
-            .get()?
-            .get_dir()?;
+        let home_dir = home_dir_request.send().promise.await?.get()?.get_dir()?;
         return Ok(());
     }
     #[cfg(not(target_os = "linux"))]
-    #[test]
-    fn test_user_dirs() -> eyre::Result<()> {
+    #[tokio::test]
+    async fn test_user_dirs() -> eyre::Result<()> {
         let ambient_authority: ambient_authority::Client =
             capnp_rpc::new_client(AmbientAuthorityImpl {});
 
         let audio_dir_request = ambient_authority.user_dirs_audio_dir_request();
-        let audio_dir = futures::executor::block_on(audio_dir_request.send().promise)?
-            .get()?
-            .get_dir()?;
+        let audio_dir = audio_dir_request.send().promise.await?.get()?.get_dir()?;
 
         let desktop_dir_request = ambient_authority.user_dirs_desktop_dir_request();
-        let desktop_dir = futures::executor::block_on(desktop_dir_request.send().promise)?
-            .get()?
-            .get_dir()?;
+        let desktop_dir = desktop_dir_request.send().promise.await?.get()?.get_dir()?;
 
         let document_dir_request = ambient_authority.user_dirs_document_dir_request();
-        let document_dir = futures::executor::block_on(document_dir_request.send().promise)?
+        let document_dir = document_dir_request
+            .send()
+            .promise
+            .await?
             .get()?
             .get_dir()?;
 
         let download_dir_request = ambient_authority.user_dirs_download_dir_request();
-        let download_dir = futures::executor::block_on(download_dir_request.send().promise)?
+        let download_dir = download_dir_request
+            .send()
+            .promise
+            .await?
             .get()?
             .get_dir()?;
 
         #[cfg(not(target_os = "windows"))]
         let font_dir_request = ambient_authority.user_dirs_font_dir_request();
         #[cfg(not(target_os = "windows"))]
-        let font_dir = futures::executor::block_on(font_dir_request.send().promise)?
-            .get()?
-            .get_dir()?;
+        let font_dir = font_dir_request.send().promise.await?.get()?.get_dir()?;
 
         let picture_dir_request = ambient_authority.user_dirs_picture_dir_request();
-        let picture_dir = futures::executor::block_on(picture_dir_request.send().promise)?
-            .get()?
-            .get_dir()?;
+        let picture_dir = picture_dir_request.send().promise.await?.get()?.get_dir()?;
 
         let public_dir_request = ambient_authority.user_dirs_public_dir_request();
-        let public_dir = futures::executor::block_on(public_dir_request.send().promise)?
-            .get()?
-            .get_dir()?;
+        let public_dir = public_dir_request.send().promise.await?.get()?.get_dir()?;
 
         let template_dir_request = ambient_authority.user_dirs_template_dir_request();
-        let template_dir = futures::executor::block_on(template_dir_request.send().promise)?
+        let template_dir = template_dir_request
+            .send()
+            .promise
+            .await?
             .get()?
             .get_dir()?;
 
         let video_dir_request = ambient_authority.user_dirs_video_dir_request();
-        let video_dir = futures::executor::block_on(video_dir_request.send().promise)?
-            .get()?
-            .get_dir()?;
+        let video_dir = video_dir_request.send().promise.await?.get()?.get_dir()?;
 
         return Ok(());
     }
 
-    #[test]
-    fn test_project_dirs() -> eyre::Result<()> {
+    #[tokio::test]
+    async fn test_project_dirs() -> eyre::Result<()> {
         //TODO maybe create some form of generic "dir" test
         let ambient_authority: ambient_authority::Client =
             capnp_rpc::new_client(AmbientAuthorityImpl {});
@@ -1731,27 +1725,27 @@ pub mod tests {
         project_dirs_builder.set_qualifier("".into());
         project_dirs_builder.set_organization("Fundament software".into());
         project_dirs_builder.set_application("Keystone".into());
-        let project_dirs = futures::executor::block_on(project_dirs_from_request.send().promise)?
+        let project_dirs = project_dirs_from_request
+            .send()
+            .promise
+            .await?
             .get()?
             .get_project_dirs()?;
 
         let cache_dir_request = project_dirs.cache_dir_request();
-        let cache_dir = futures::executor::block_on(cache_dir_request.send().promise)?
-            .get()?
-            .get_dir()?;
+        let cache_dir = cache_dir_request.send().promise.await?.get()?.get_dir()?;
 
         let config_dir_request = project_dirs.config_dir_request();
-        let config_dir = futures::executor::block_on(config_dir_request.send().promise)?
-            .get()?
-            .get_dir()?;
+        let config_dir = config_dir_request.send().promise.await?.get()?.get_dir()?;
 
         let data_dir_request = project_dirs.data_dir_request();
-        let data_dir = futures::executor::block_on(data_dir_request.send().promise)?
-            .get()?
-            .get_dir()?;
+        let data_dir = data_dir_request.send().promise.await?.get()?.get_dir()?;
 
         let data_local_dir_request = project_dirs.data_local_dir_request();
-        let data_local_dir = futures::executor::block_on(data_local_dir_request.send().promise)?
+        let data_local_dir = data_local_dir_request
+            .send()
+            .promise
+            .await?
             .get()?
             .get_dir()?;
 
@@ -1759,31 +1753,29 @@ pub mod tests {
         #[cfg(not(target_os = "windows"))]
         let runtime_dir_request = project_dirs.runtime_dir_request();
         #[cfg(not(target_os = "windows"))]
-        let runtime_dir = futures::executor::block_on(runtime_dir_request.send().promise)?
-            .get()?
-            .get_dir()?;
+        let runtime_dir = runtime_dir_request.send().promise.await?.get()?.get_dir()?;
 
         return Ok(());
     }
 
-    #[test]
-    fn test_system_clock() -> eyre::Result<()> {
+    #[tokio::test]
+    async fn test_system_clock() -> eyre::Result<()> {
         let ambient_authority: ambient_authority::Client =
             capnp_rpc::new_client(AmbientAuthorityImpl {});
 
         let system_clock_request = ambient_authority.system_clock_new_request();
-        let system_clock = futures::executor::block_on(system_clock_request.send().promise)?
+        let system_clock = system_clock_request
+            .send()
+            .promise
+            .await?
             .get()?
             .get_clock()?;
 
         let now_request = system_clock.now_request();
-        let now = futures::executor::block_on(now_request.send().promise)?
-            .get()?
-            .get_time()?;
+        let now = now_request.send().promise.await?.get()?.get_time()?;
 
         let duration_since_unix_epoch_request = now.get_duration_since_unix_epoch_request();
-        let results =
-            futures::executor::block_on(duration_since_unix_epoch_request.send().promise)?;
+        let results = duration_since_unix_epoch_request.send().promise.await?;
         let duration_since_unix_epoch = results.get()?.get_duration()?;
         let secs = duration_since_unix_epoch.get_secs();
         let nanos = duration_since_unix_epoch.get_nanos();
@@ -1796,7 +1788,7 @@ pub mod tests {
         let mut dur_param = elapsed_request.get().init_duration_since_unix_epoch();
         dur_param.set_secs(secs);
         dur_param.set_nanos(nanos);
-        let results = futures::executor::block_on(elapsed_request.send().promise)?;
+        let results = elapsed_request.send().promise.await?;
         let elapsed = results.get()?.get_result()?;
         let secs = elapsed.get_secs();
         let nanos = elapsed.get_nanos();
@@ -1805,8 +1797,8 @@ pub mod tests {
         return Ok(());
     }
 
-    #[test]
-    fn test_read_dir_iterator() -> eyre::Result<()> {
+    #[tokio::test]
+    async fn test_read_dir_iterator() -> eyre::Result<()> {
         let mut path = std::env::temp_dir();
         path.push("capnp_test_dir");
         std::fs::create_dir_all(path.clone())?;
@@ -1828,22 +1820,23 @@ pub mod tests {
         open_ambient_request
             .get()
             .set_path(path.to_str().unwrap().into());
-        let dir = futures::executor::block_on(open_ambient_request.send().promise)?
+        let dir = open_ambient_request
+            .send()
+            .promise
+            .await?
             .get()?
             .get_result()?;
 
         let entries_request = dir.entries_request();
-        let iter = futures::executor::block_on(entries_request.send().promise)?
-            .get()?
-            .get_iter()?;
+        let iter = entries_request.send().promise.await?.get()?.get_iter()?;
         loop {
-            match futures::executor::block_on(iter.next_request().send().promise) {
+            match iter.next_request().send().promise.await {
                 Ok(results) => {
                     println!("New entry:");
                     let entry = results.get()?.get_entry()?;
-                    dir_entry_test(entry)?;
+                    dir_entry_test(entry).await?;
                 }
-                Err(results) => {
+                Err(_results) => {
                     println!("Final entry reached");
                     break;
                 }
@@ -1852,121 +1845,118 @@ pub mod tests {
         return Ok(());
     }
 
-    fn dir_entry_test(entry: dir_entry::Client) -> eyre::Result<()> {
+    async fn dir_entry_test(entry: dir_entry::Client) -> eyre::Result<()> {
         println!("\nDir entry test:");
-        match futures::executor::block_on(entry.open_request().send().promise) {
+        match entry.open_request().send().promise.await {
             Ok(results) => {
                 println!("Is file");
-                let file = results.get()?.get_file()?;
+                let _file = results.get()?.get_file()?;
             }
-            Err(results) => println!("Isn't file"),
+            Err(_results) => println!("Isn't file"),
         }
 
-        match futures::executor::block_on(entry.open_dir_request().send().promise) {
+        match entry.open_dir_request().send().promise.await {
             Ok(results) => {
                 println!("Is dir");
-                let dir = results.get()?.get_dir()?;
+                let _dir = results.get()?.get_dir()?;
             }
-            Err(results) => println!("Isn't dir"),
+            Err(_results) => println!("Isn't dir"),
         }
 
-        let metadata = futures::executor::block_on(entry.metadata_request().send().promise)?
+        let metadata = entry
+            .metadata_request()
+            .send()
+            .promise
+            .await?
             .get()?
             .get_metadata()?;
-        test_metadata(metadata)?;
+        test_metadata(metadata).await?;
 
-        let file_type = futures::executor::block_on(entry.file_type_request().send().promise)?
+        let file_type = entry
+            .file_type_request()
+            .send()
+            .promise
+            .await?
             .get()?
             .get_type()?;
         println!("File type = {:?}", file_type);
 
-        let results = futures::executor::block_on(entry.file_name_request().send().promise)?;
+        let results = entry.file_name_request().send().promise.await?;
         let name = results.get()?.get_result()?.to_str()?;
         println!("File/dir name: {name}");
         return Ok(());
     }
 
-    pub fn test_metadata(metadata: metadata::Client) -> eyre::Result<()> {
+    pub async fn test_metadata(metadata: metadata::Client) -> eyre::Result<()> {
         println!("\nMetadata test:");
         let is_dir_request = metadata.is_dir_request();
-        let results = futures::executor::block_on(is_dir_request.send().promise)?
-            .get()?
-            .get_result();
+        let results = is_dir_request.send().promise.await?.get()?.get_result();
         println!("Is dir: {results}");
 
         let is_file_request = metadata.is_file_request();
-        let results = futures::executor::block_on(is_file_request.send().promise)?
-            .get()?
-            .get_result();
+        let results = is_file_request.send().promise.await?.get()?.get_result();
         println!("Is file: {results}");
 
         let is_symlink_request = metadata.is_symlink_request();
-        let results = futures::executor::block_on(is_symlink_request.send().promise)?
-            .get()?
-            .get_result();
+        let results = is_symlink_request.send().promise.await?.get()?.get_result();
         println!("Is symlink: {results}");
 
         let len_request = metadata.len_request();
-        let results = futures::executor::block_on(len_request.send().promise)?
-            .get()?
-            .get_result();
+        let results = len_request.send().promise.await?.get()?.get_result();
         println!("Len: {results}");
 
         let file_type_request = metadata.file_type_request();
-        let file_type = futures::executor::block_on(file_type_request.send().promise)?
+        let file_type = file_type_request
+            .send()
+            .promise
+            .await?
             .get()?
             .get_file_type()?;
         println!("File type = {:?}", file_type);
 
         let permissions_request = metadata.permissions_request();
-        let permissions = futures::executor::block_on(permissions_request.send().promise)?
+        let permissions = permissions_request
+            .send()
+            .promise
+            .await?
             .get()?
             .get_permissions()?;
-        test_permissions(permissions)?;
+        test_permissions(permissions).await?;
 
-        let mut modified_request = metadata.modified_request();
-        let modified_time = futures::executor::block_on(modified_request.send().promise)?
-            .get()?
-            .get_time()?;
+        let modified_request = metadata.modified_request();
+        let modified_time = modified_request.send().promise.await?.get()?.get_time()?;
         println!("Modified time:");
-        test_system_time(modified_time)?;
+        test_system_time(modified_time).await?;
 
-        let mut accessed_request = metadata.accessed_request();
-        let accessed_time = futures::executor::block_on(accessed_request.send().promise)?
-            .get()?
-            .get_time()?;
+        let accessed_request = metadata.accessed_request();
+        let accessed_time = accessed_request.send().promise.await?.get()?.get_time()?;
         println!("Accessed time:");
-        test_system_time(accessed_time)?;
+        test_system_time(accessed_time).await?;
 
-        let mut created_request = metadata.created_request();
-        let created_time = futures::executor::block_on(created_request.send().promise)?
-            .get()?
-            .get_time()?;
+        let created_request = metadata.created_request();
+        let created_time = created_request.send().promise.await?.get()?.get_time()?;
         println!("Created time:");
-        test_system_time(created_time)?;
+        test_system_time(created_time).await?;
 
         return Ok(());
     }
 
-    fn test_permissions(permissions: permissions::Client) -> eyre::Result<()> {
+    async fn test_permissions(permissions: permissions::Client) -> eyre::Result<()> {
         println!("\nPermissions test:");
         let readonly_request = permissions.readonly_request();
-        let results = futures::executor::block_on(readonly_request.send().promise)?
-            .get()?
-            .get_result();
+        let results = readonly_request.send().promise.await?.get()?.get_result();
         println!("Is readonly: {results}");
 
         //TODO test setting readonly
         return Ok(());
     }
 
-    fn test_system_time(time: system_time::Client) -> eyre::Result<()> {
+    async fn test_system_time(time: system_time::Client) -> eyre::Result<()> {
         println!("\nSystem time test:");
         //TODO test other stuff
 
         let get_duration_since_unix_epoch_request = time.get_duration_since_unix_epoch_request();
-        let results =
-            futures::executor::block_on(get_duration_since_unix_epoch_request.send().promise)?;
+        let results = get_duration_since_unix_epoch_request.send().promise.await?;
         let duration = results.get()?.get_duration()?;
         let secs = duration.get_secs();
         let nanos = duration.get_nanos();
@@ -1975,8 +1965,8 @@ pub mod tests {
         return Ok(());
     }
 
-    #[test]
-    fn test_open_read() -> eyre::Result<()> {
+    #[tokio::test]
+    async fn test_open_read() -> eyre::Result<()> {
         //use ambient authority to open directory, read contents of a file as bytes and print them out
         use std::io::{BufWriter, Write};
 
@@ -1995,13 +1985,16 @@ pub mod tests {
         open_ambient_request
             .get()
             .set_path(path.to_str().unwrap().into());
-        let dir = futures::executor::block_on(open_ambient_request.send().promise)?
+        let dir = open_ambient_request
+            .send()
+            .promise
+            .await?
             .get()?
             .get_result()?;
 
         let mut read_request = dir.read_request();
         read_request.get().set_path("capnp_test.txt".into());
-        let res = futures::executor::block_on(read_request.send().promise)?;
+        let res = read_request.send().promise.await?;
         let out = res.get()?.get_result()?;
         for c in out {
             print!("{}", *c as char)

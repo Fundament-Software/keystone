@@ -1,5 +1,3 @@
-use std::any::Any;
-
 use crate::toml_capnp;
 use capnp::{
     dynamic_struct, dynamic_value,
@@ -89,7 +87,6 @@ fn toml_to_capnp(v: &Value, mut builder: toml_capnp::value::Builder) -> Result<(
 
 fn value_to_struct(v: &Table, mut builder: ::capnp::dynamic_struct::Builder) -> Result<()> {
     'outer: for (k, v) in v.iter() {
-        println!("{}", k);
         let mut builder = builder.reborrow();
         let field = builder.get_schema().get_field_by_name(k)?;
 

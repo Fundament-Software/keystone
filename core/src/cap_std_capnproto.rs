@@ -19,7 +19,6 @@ use cap_tempfile::{TempDir, TempFile};
 use capnp::{capability::Promise, Error};
 use capnp_macros::{capnp_let, capnproto_rpc};
 use capnp_rpc::CapabilityServerSet;
-use tokio::io::AsyncReadExt;
 
 thread_local!(
     static DIR_SET: RefCell<CapabilityServerSet<DirImpl, dir::Client>> =
@@ -458,13 +457,13 @@ impl dir::Server for DirImpl {
     }
     async fn canonicalize(&self, path: Reader) {
         let path = path.to_str()?;
-        let Ok(_pathBuf) = self.dir.canonicalize(path) else {
+        let Ok(path_buf) = self.dir.canonicalize(path) else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
                 extra: String::from("Failed to canonicalize path"),
             });
         };
-        let Some(_str) = _pathBuf.to_str() else {
+        let Some(_str) = path_buf.to_str() else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
                 extra: String::from("Path contains non utf-8 characters"),
@@ -1565,7 +1564,7 @@ pub mod tests {
             capnp_rpc::new_client(AmbientAuthorityImpl {});
 
         let mut open_ambient_request = ambient_authority.dir_open_ambient_request();
-        let mut path = std::env::temp_dir();
+        let path = std::env::temp_dir();
         open_ambient_request
             .get()
             .set_path(path.to_str().unwrap().into());
@@ -1599,7 +1598,7 @@ pub mod tests {
             capnp_rpc::new_client(AmbientAuthorityImpl {});
 
         let mut open_ambient_request = ambient_authority.dir_open_ambient_request();
-        let mut path = std::env::temp_dir();
+        let path = std::env::temp_dir();
         open_ambient_request
             .get()
             .set_path(path.to_str().unwrap().into());
@@ -1614,7 +1613,7 @@ pub mod tests {
         create_request.get().set_path("capnp_test.txt".into());
         let file = create_request.send().promise.await?.get()?.get_file()?;
 
-        let mut open_bytestream_request = file.open_request();
+        let open_bytestream_request = file.open_request();
         let stream = open_bytestream_request
             .send()
             .promise
@@ -1639,7 +1638,7 @@ pub mod tests {
         println!("File metadata:");
         test_metadata(metadata).await?;
 
-        let mut dir_metadata_request = dir.dir_metadata_request();
+        let dir_metadata_request = dir.dir_metadata_request();
         let metadata = dir_metadata_request
             .send()
             .promise
@@ -1658,7 +1657,7 @@ pub mod tests {
             capnp_rpc::new_client(AmbientAuthorityImpl {});
 
         let home_dir_request = ambient_authority.user_dirs_home_dir_request();
-        let home_dir = home_dir_request.send().promise.await?.get()?.get_dir()?;
+        let _home_dir = home_dir_request.send().promise.await?.get()?.get_dir()?;
         return Ok(());
     }
     #[cfg(not(target_os = "linux"))]
@@ -1668,13 +1667,13 @@ pub mod tests {
             capnp_rpc::new_client(AmbientAuthorityImpl {});
 
         let audio_dir_request = ambient_authority.user_dirs_audio_dir_request();
-        let audio_dir = audio_dir_request.send().promise.await?.get()?.get_dir()?;
+        let _audio_dir = audio_dir_request.send().promise.await?.get()?.get_dir()?;
 
         let desktop_dir_request = ambient_authority.user_dirs_desktop_dir_request();
-        let desktop_dir = desktop_dir_request.send().promise.await?.get()?.get_dir()?;
+        let _desktop_dir = desktop_dir_request.send().promise.await?.get()?.get_dir()?;
 
         let document_dir_request = ambient_authority.user_dirs_document_dir_request();
-        let document_dir = document_dir_request
+        let _document_dir = document_dir_request
             .send()
             .promise
             .await?
@@ -1682,7 +1681,7 @@ pub mod tests {
             .get_dir()?;
 
         let download_dir_request = ambient_authority.user_dirs_download_dir_request();
-        let download_dir = download_dir_request
+        let _download_dir = download_dir_request
             .send()
             .promise
             .await?
@@ -1695,13 +1694,13 @@ pub mod tests {
         let font_dir = font_dir_request.send().promise.await?.get()?.get_dir()?;
 
         let picture_dir_request = ambient_authority.user_dirs_picture_dir_request();
-        let picture_dir = picture_dir_request.send().promise.await?.get()?.get_dir()?;
+        let _picture_dir = picture_dir_request.send().promise.await?.get()?.get_dir()?;
 
         let public_dir_request = ambient_authority.user_dirs_public_dir_request();
-        let public_dir = public_dir_request.send().promise.await?.get()?.get_dir()?;
+        let _public_dir = public_dir_request.send().promise.await?.get()?.get_dir()?;
 
         let template_dir_request = ambient_authority.user_dirs_template_dir_request();
-        let template_dir = template_dir_request
+        let _template_dir = template_dir_request
             .send()
             .promise
             .await?
@@ -1709,7 +1708,7 @@ pub mod tests {
             .get_dir()?;
 
         let video_dir_request = ambient_authority.user_dirs_video_dir_request();
-        let video_dir = video_dir_request.send().promise.await?.get()?.get_dir()?;
+        let _video_dir = video_dir_request.send().promise.await?.get()?.get_dir()?;
 
         return Ok(());
     }
@@ -1733,16 +1732,16 @@ pub mod tests {
             .get_project_dirs()?;
 
         let cache_dir_request = project_dirs.cache_dir_request();
-        let cache_dir = cache_dir_request.send().promise.await?.get()?.get_dir()?;
+        let _cache_dir = cache_dir_request.send().promise.await?.get()?.get_dir()?;
 
         let config_dir_request = project_dirs.config_dir_request();
-        let config_dir = config_dir_request.send().promise.await?.get()?.get_dir()?;
+        let _config_dir = config_dir_request.send().promise.await?.get()?.get_dir()?;
 
         let data_dir_request = project_dirs.data_dir_request();
-        let data_dir = data_dir_request.send().promise.await?.get()?.get_dir()?;
+        let _data_dir = data_dir_request.send().promise.await?.get()?.get_dir()?;
 
         let data_local_dir_request = project_dirs.data_local_dir_request();
-        let data_local_dir = data_local_dir_request
+        let _data_local_dir = data_local_dir_request
             .send()
             .promise
             .await?
@@ -1981,7 +1980,7 @@ pub mod tests {
             capnp_rpc::new_client(AmbientAuthorityImpl {});
 
         let mut open_ambient_request = ambient_authority.dir_open_ambient_request();
-        let mut path = std::env::temp_dir();
+        let path = std::env::temp_dir();
         open_ambient_request
             .get()
             .set_path(path.to_str().unwrap().into());

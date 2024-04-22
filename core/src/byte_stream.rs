@@ -56,7 +56,6 @@ where
     #[async_backtrace::framed]
     async fn write(&self, bytes: &[u8]) {
         if let Some(f) = &mut *self.consumer.borrow_mut() {
-            println!("inside ByteStreamImpl write");
             f(bytes).await
         } else {
             Err(capnp::Error {
@@ -125,10 +124,6 @@ impl std::future::Future for ByteStreamBufferImpl {
 impl Server for ByteStreamBufferImpl {
     #[async_backtrace::framed]
     async fn write(&self, bytes: &[u8]) {
-        println!(
-            "inside ByteStreamBufferImpl write: {}",
-            async_backtrace::taskdump_tree(true)
-        );
         let copy = self.clone();
         let closed = self.0.borrow().closed;
 
@@ -245,7 +240,7 @@ impl AsyncWrite for Client {
         cx: &mut std::task::Context<'_>,
         buf: &[u8],
     ) -> std::task::Poll<Result<usize, std::io::Error>> {
-        println!("inside CLIENT poll_write");
+        tracing::debug!("inside CLIENT poll_write");
         let mut write_request = self.write_request();
         write_request.get().set_bytes(buf);
         match write_request.send().promise.poll_unpin(cx) {
@@ -262,7 +257,7 @@ impl AsyncWrite for Client {
         self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<(), std::io::Error>> {
-        println!("inside CLIENT poll_flush");
+        tracing::debug!("inside CLIENT poll_flush");
         std::task::Poll::Ready(Ok(()))
     }
 
@@ -270,7 +265,7 @@ impl AsyncWrite for Client {
         self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<(), std::io::Error>> {
-        println!("inside CLIENT poll_close");
+        tracing::debug!("inside CLIENT poll_close");
         match self.end_request().send().promise.poll_unpin(cx) {
             std::task::Poll::Ready(_) => std::task::Poll::Ready(Ok(())),
             std::task::Poll::Pending => std::task::Poll::Pending,

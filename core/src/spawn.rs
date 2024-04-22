@@ -60,7 +60,6 @@ where
 }
 
 pub mod posix_process {
-    use crate::byte_stream::ByteStreamImpl;
     use crate::byte_stream_capnp::{
         byte_stream::Client as ByteStreamClient, byte_stream::Owned as ByteStream,
     };
@@ -71,9 +70,8 @@ pub mod posix_process {
     use crate::spawn_capnp::{process, program};
     use cap_std::fs::File;
     use cap_std::io_lifetimes::raw::{FromRawFilelike, RawFilelike};
-    use capnp::capability::Promise;
+    use capnp_macros::capnproto_rpc;
     use std::cell::RefCell;
-    use std::future::Future;
     use std::rc::Rc;
     use std::result::Result;
     use tokio::io::{AsyncRead, AsyncWriteExt};
@@ -90,6 +88,39 @@ pub mod posix_process {
         stdout_task: JoinHandle<eyre::Result<Option<usize>>>,
         stderr_task: JoinHandle<eyre::Result<Option<usize>>>,
         child: Child,
+    }
+
+    #[capnproto_rpc(crate::byte_stream_capnp::byte_stream)]
+    impl crate::byte_stream_capnp::byte_stream::Server for Rc<RefCell<PosixProcessImpl>> {
+        #[async_backtrace::framed]
+        async fn write(&self, bytes: &[u8]) {
+            let owned_bytes = bytes.to_owned();
+            if let Some(stdin) = &mut (self.borrow_mut().stdin) {
+                match stdin.write_all(&owned_bytes).await {
+                    Ok(_) => Ok(()),
+                    Err(e) => Err(capnp::Error::failed(e.to_string())),
+                }
+            } else {
+                Err(capnp::Error {
+                    kind: capnp::ErrorKind::Failed,
+                    extra: String::from("Write called on byte stream after closed."),
+                })
+            }
+        }
+
+        #[async_backtrace::framed]
+        async fn end(&self) {
+            self.borrow_mut().stdin = None;
+            Ok(())
+        }
+
+        #[async_backtrace::framed]
+        async fn get_substream(&self) {
+            Err(capnp::Error {
+                kind: capnp::ErrorKind::Unimplemented,
+                extra: String::from("Not implemented"),
+            })
+        }
     }
 
     /// Helper function for PosixProcessImpl::spawn_process.
@@ -148,17 +179,15 @@ pub mod posix_process {
             // Create a cancellation token to allow us to kill ("cancel") the process.
             let cancellation_token = CancellationToken::new();
 
-            let stdout = child.stdout.take();
             // Create the tasks to read stdout and stderr to the byte stream
             let stdout_task = spawn_iostream_task(
-                tokio::io::BufReader::new(stdout.unwrap()),
+                tokio::io::BufReader::new(child.stdout.take().unwrap()),
                 stdout_stream,
                 cancellation_token.child_token(),
             );
-            let stderr = child.stderr.take();
 
             let stderr_task = spawn_iostream_task(
-                tokio::io::BufReader::new(stderr.unwrap()),
+                tokio::io::BufReader::new(child.stderr.take().unwrap()),
                 stderr_stream,
                 cancellation_token.child_token(),
             );
@@ -218,31 +247,12 @@ pub mod posix_process {
         #[async_backtrace::framed]
         async fn get_api(
             &self,
-            params: GetApiParams,
+            _params: GetApiParams,
             mut results: GetApiResults,
         ) -> Result<(), capnp::Error> {
-            let this = self.clone();
-            println!("called posix get_api ");
+            tracing::info!("called posix get_api ");
 
-            let stdin_stream_server = ByteStreamImpl::new(move |bytes| {
-                println!("inside stdin_stream_server");
-                let this_inner = this.clone();
-                let owned_bytes = bytes.to_owned();
-                async move {
-                    if let Some(mut stdin) = this_inner.borrow_mut().stdin.take() {
-                        match stdin.write_all(&owned_bytes).await {
-                            Ok(_) => Ok(()),
-                            Err(e) => Err(capnp::Error::failed(e.to_string())),
-                        }
-                    } else {
-                        Ok(())
-                    }
-                }
-            });
-
-            results
-                .get()
-                .set_api(capnp_rpc::new_client(stdin_stream_server))?;
+            results.get().set_api(capnp_rpc::new_client(self.clone()))?;
 
             Ok(())
         }
@@ -309,7 +319,7 @@ pub mod posix_process {
 
         #[tokio::test]
         #[async_backtrace::framed]
-        async fn test_process_creation() {
+        async fn test_posix_process_creation() {
             let spawn_process_server = PosixProgramImpl {
                 #[cfg(windows)]
                 program: cap_std::fs::File::from_filelike(

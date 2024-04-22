@@ -232,13 +232,15 @@ pub mod posix_process {
             let results_builder = results.get();
             let mut process_error_builder = results_builder.init_result();
 
-            match self.borrow_mut().child.wait().await {
-                Ok(exitstatus) => {
+            match self.borrow_mut().child.try_wait() {
+                Ok(Some(exitstatus)) => {
+                    // TODO: use std::os::unix::process::ExitStatusExt on unix to handle None
                     let exitcode = exitstatus.code().unwrap_or(i32::MIN);
                     process_error_builder.set_error_code(exitcode.into());
 
                     Ok(())
                 }
+                Ok(None) => Ok(()),
                 Err(e) => Err(capnp::Error::failed(e.to_string())),
             }
         }

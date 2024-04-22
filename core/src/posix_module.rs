@@ -56,6 +56,17 @@ pub mod posix_module {
             _: process::GetErrorParams<any_pointer, module_error::Owned<any_pointer>>,
             mut results: process::GetErrorResults<any_pointer, module_error::Owned<any_pointer>>,
         ) -> Result<(), capnp::Error> {
+            let posix_err = self
+                .borrow_mut()
+                .posix_process
+                .get_error_request()
+                .send()
+                .promise
+                .await?;
+            let builder = results.get().init_result();
+            builder
+                .init_backing()
+                .set_as(posix_err.get()?.get_result()?);
             Ok(())
         }
 
@@ -65,6 +76,12 @@ pub mod posix_module {
             _: process::KillParams<any_pointer, module_error::Owned<any_pointer>>,
             _: process::KillResults<any_pointer, module_error::Owned<any_pointer>>,
         ) -> Result<(), capnp::Error> {
+            self.borrow_mut()
+                .posix_process
+                .kill_request()
+                .send()
+                .promise
+                .await?;
             Ok(())
         }
 
@@ -324,7 +341,6 @@ pub mod posix_module {
                     let hello_client: crate::hello_world_capnp::hello_world::Client =
                         api_response.get()?.get_api()?.get_as_capability()?;
 
-                    //tokio::time::sleep(tokio::time::Duration::from_millis(500));
                     let mut sayhello = hello_client.say_hello_request();
                     sayhello.get().init_request().set_name("Keystone".into());
                     let hello_response = sayhello.send().promise.await?;

@@ -133,7 +133,6 @@ pub mod posix_module {
                                 .bootstrap::<ClientExtraction>(rpc_twoparty_capnp::Side::Server)
                                 .into_client_hook();
 
-                            tracing::debug!("BEFORE SPAWN");
                             let module_process = PosixModuleProcessImpl {
                                 posix_process: process,
                                 handle: tokio::task::spawn_local(
@@ -291,7 +290,7 @@ pub mod posix_module {
             //console_subscriber::init();
 
             tracing_subscriber::fmt()
-                .with_max_level(LevelFilter::WARN)
+                .with_max_level(LevelFilter::DEBUG)
                 .with_target(true)
                 .init();
 
@@ -320,25 +319,22 @@ pub mod posix_module {
                     let mut spawn_request = wrapped_client.spawn_request();
                     // TODO: Pass in the hello_world structural config parameters
 
-                    tracing::debug!("STARTING");
                     let promise = spawn_request.send().promise;
                     let response = promise.await?;
                     let process_client = response.get()?.get_result()?;
 
-                    tracing::debug!("Got spawn request response");
                     let api_response = process_client.get_api_request().send().promise.await?;
                     let hello_client: crate::hello_world_capnp::hello_world::Client =
                         api_response.get()?.get_api()?.get_as_capability()?;
 
-                    tracing::debug!("Got api request response");
-
+                    //tokio::time::sleep(tokio::time::Duration::from_millis(500));
                     let mut sayhello = hello_client.say_hello_request();
                     sayhello.get().init_request().set_name("Keystone".into());
                     let hello_response = sayhello.send().promise.await?;
 
                     let msg = hello_response.get()?.get_reply()?.get_message()?;
 
-                    tracing::debug!("Got reply! {}", msg.to_string()?);
+                    assert_eq!(msg, "Hello, Keystone!");
 
                     let geterror_response =
                         process_client.get_error_request().send().promise.await?;

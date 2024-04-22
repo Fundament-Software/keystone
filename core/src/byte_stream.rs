@@ -257,7 +257,6 @@ impl AsyncWrite for Client {
         self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<(), std::io::Error>> {
-        tracing::debug!("inside CLIENT poll_flush");
         std::task::Poll::Ready(Ok(()))
     }
 
@@ -265,7 +264,6 @@ impl AsyncWrite for Client {
         self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<(), std::io::Error>> {
-        tracing::debug!("inside CLIENT poll_close");
         match self.end_request().send().promise.poll_unpin(cx) {
             std::task::Poll::Ready(_) => std::task::Poll::Ready(Ok(())),
             std::task::Poll::Pending => std::task::Poll::Pending,

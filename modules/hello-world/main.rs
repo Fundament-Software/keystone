@@ -2,7 +2,6 @@ capnp_import::capnp_import!("hello_world.capnp", "../../core/schema/**/*.capnp")
 
 pub mod hello_world;
 use crate::hello_world::HelloWorldImpl;
-use async_backtrace;
 use capnp_rpc::{rpc_twoparty_capnp, twoparty, RpcSystem};
 use std::fs::File;
 use tokio::sync::Mutex;
@@ -10,7 +9,7 @@ use tokio::time::{sleep, Duration};
 use tracing::Level;
 
 #[tokio::main(flavor = "current_thread")]
-#[async_backtrace::framed]
+
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = ::std::env::args().collect();
     tracing::info!("server started");
@@ -23,7 +22,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     tokio::task::LocalSet::new()
-        .run_until(async_backtrace::location!().frame(async move {
+        .run_until(async move {
             let hello_world_client: hello_world_capnp::hello_world::Client =
                 capnp_rpc::new_client(HelloWorldImpl);
             let reader = tokio::io::stdin();
@@ -42,11 +41,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 rpc_system.bootstrap(rpc_twoparty_capnp::Side::Client);
             tracing::info!("spawned rpc");
 
-            tokio::task::spawn_local(async_backtrace::location!().frame(rpc_system))
-                .await
-                .unwrap()
-                .unwrap();
-        }))
+            tokio::task::spawn_local(rpc_system).await.unwrap().unwrap();
+        })
         .await;
 
     tracing::error!("should never reach this");

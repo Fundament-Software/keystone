@@ -2,7 +2,6 @@ use crate::hello_world_capnp::hello_world;
 pub struct HelloWorldImpl;
 
 impl hello_world::Server for HelloWorldImpl {
-    #[async_backtrace::framed]
     async fn say_hello(
         &self,
         params: hello_world::SayHelloParams,

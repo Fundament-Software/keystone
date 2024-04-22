@@ -112,7 +112,7 @@ pub mod posix_module {
 
                     match process.get_api_request().send().promise.await {
                         Ok(s) => {
-                            let stdin = s.get()?.get_api()?;
+                            let stdin = crate::byte_stream::ClientWriter::new(s.get()?.get_api()?);
 
                             let network = VatNetwork::new(
                                 stdout.clone(), // read from the output stream of the process
@@ -219,15 +219,19 @@ pub mod posix_module {
                 let this_inner = stdinref.clone();
                 let owned_bytes = bytes.to_owned();
                 async move {
-                    match this_inner.borrow_mut().write_all(&owned_bytes).await {
-                        Ok(_) => Ok(()),
+                    let mut stdin = this_inner.borrow_mut();
+                    match stdin.write_all(&owned_bytes).await {
+                        Ok(_) => stdin
+                            .flush()
+                            .await
+                            .map_err(|e| capnp::Error::failed(e.to_string())),
                         Err(e) => Err(capnp::Error::failed(e.to_string())),
                     }
                 }
             });
 
-            let stdinclient: crate::byte_stream_capnp::byte_stream::Client =
-                capnp_rpc::new_client(stdin_stream_server);
+            let stdinclient =
+                crate::byte_stream::ClientWriter::new(capnp_rpc::new_client(stdin_stream_server));
 
             let cancellation_token = CancellationToken::new();
 
@@ -287,13 +291,6 @@ pub mod posix_module {
         #[async_backtrace::framed]
         #[tokio::test]
         async fn test_process_creation() {
-            //console_subscriber::init();
-
-            tracing_subscriber::fmt()
-                .with_max_level(LevelFilter::DEBUG)
-                .with_target(true)
-                .init();
-
             #[cfg(windows)]
             let spawn_process_server = PosixProgramImpl::new_std(
                 File::open("../target/debug/hello-world-module.exe").unwrap(),

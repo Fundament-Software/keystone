@@ -94,10 +94,12 @@ pub mod posix_process {
     impl crate::byte_stream_capnp::byte_stream::Server for Rc<RefCell<PosixProcessImpl>> {
         #[async_backtrace::framed]
         async fn write(&self, bytes: &[u8]) {
-            let owned_bytes = bytes.to_owned();
             if let Some(stdin) = &mut (self.borrow_mut().stdin) {
-                match stdin.write_all(&owned_bytes).await {
-                    Ok(_) => Ok(()),
+                match stdin.write_all(bytes).await {
+                    Ok(_) => stdin
+                        .flush()
+                        .await
+                        .map_err(|e| capnp::Error::failed(e.to_string())),
                     Err(e) => Err(capnp::Error::failed(e.to_string())),
                 }
             } else {
@@ -110,8 +112,14 @@ pub mod posix_process {
 
         #[async_backtrace::framed]
         async fn end(&self) {
-            self.borrow_mut().stdin = None;
-            Ok(())
+            if let Some(mut stdin) = self.borrow_mut().stdin.take() {
+                stdin
+                    .shutdown()
+                    .await
+                    .map_err(|e| capnp::Error::failed(e.to_string()))
+            } else {
+                Ok(())
+            }
         }
 
         #[async_backtrace::framed]
@@ -181,13 +189,13 @@ pub mod posix_process {
 
             // Create the tasks to read stdout and stderr to the byte stream
             let stdout_task = spawn_iostream_task(
-                tokio::io::BufReader::new(child.stdout.take().unwrap()),
+                child.stdout.take().unwrap(),
                 stdout_stream,
                 cancellation_token.child_token(),
             );
 
             let stderr_task = spawn_iostream_task(
-                tokio::io::BufReader::new(child.stderr.take().unwrap()),
+                child.stderr.take().unwrap(),
                 stderr_stream,
                 cancellation_token.child_token(),
             );
@@ -228,7 +236,6 @@ pub mod posix_process {
                 Ok(exitstatus) => {
                     let exitcode = exitstatus.code().unwrap_or(i32::MIN);
                     process_error_builder.set_error_code(exitcode.into());
-                    process_error_builder.set_error_message("".into());
 
                     Ok(())
                 }
@@ -238,6 +245,7 @@ pub mod posix_process {
 
         #[async_backtrace::framed]
         async fn kill(&self, _: KillParams, _: KillResults) -> Result<(), capnp::Error> {
+            self.borrow_mut().cancellation_token.cancel();
             match self.borrow_mut().child.kill().await {
                 Ok(_) => Ok(()),
                 Err(e) => Err(capnp::Error::failed(e.to_string())),
@@ -250,11 +258,7 @@ pub mod posix_process {
             _params: GetApiParams,
             mut results: GetApiResults,
         ) -> Result<(), capnp::Error> {
-            tracing::info!("called posix get_api ");
-
-            results.get().set_api(capnp_rpc::new_client(self.clone()))?;
-
-            Ok(())
+            results.get().set_api(capnp_rpc::new_client(self.clone()))
         }
     }
 

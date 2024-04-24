@@ -1,5 +1,3 @@
-use std::ffi::OsStr;
-
 #[cfg(not(windows))]
 pub fn spawn_process_native<'i, I>(
     source: &cap_std::fs::File,
@@ -8,17 +6,28 @@ pub fn spawn_process_native<'i, I>(
 where
     I: IntoIterator<Item = Result<&'i str, capnp::Error>>,
 {
-    todo!();
-    // let fd = linux::write_trampoline()?;
-    // skip_close_fd = fd.as_raw_fd();
-    // Box::new(move || {
-    //     // not using nix crate here, as it would allocate args after fork, which will
-    //     // lead to crashes on systems where allocator is not
-    //     // fork+thread safe
-    //     unsafe { libc::fexecve(fd.as_raw_fd(), argv.as_ptr(), envp.as_ptr()) };
-    //     // if we're here then exec has failed
-    //     panic!("{}", std::io::Error::last_os_error());
-    // })
+    use cap_std::io_lifetimes::raw::AsRawFilelike;
+    use std::ffi::OsString;
+    use std::process::Stdio;
+    use std::str::FromStr;
+    use tokio::process::Command;
+
+    let fd = source.as_raw_filelike();
+
+    let argv: Vec<OsString> = args
+        .into_iter()
+        .map(|x| x.map(|s| OsString::from_str(s).unwrap()))
+        .collect::<Result<Vec<OsString>, capnp::Error>>()?;
+
+    let path = format!("/proc/self/fd/{}", fd);
+    // We can't called fexecve without reimplementing the entire process handling logic, so we just do this
+    Command::new(path)
+        .args(argv)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .stdin(Stdio::piped())
+        .spawn()
+        .map_err(|e| capnp::Error::failed(e.to_string()))
 }
 
 #[cfg(windows)]

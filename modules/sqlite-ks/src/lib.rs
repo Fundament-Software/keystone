@@ -54,26 +54,29 @@ async fn main() -> eyre::Result<()> {
 }
 
 struct SqliteDatabase {
-    connection: Rc<Connection>
+    connection: Connection
 }
 impl SqliteDatabase {
-    pub fn new_read_only<P: AsRef<Path>>(path: P, flags: OpenFlags) -> eyre::Result<(r_o_database::Client, Rc<Connection>)> {
-        let connection = Rc::new(Connection::open_with_flags(path, flags)?);
+    pub fn new_read_only<P: AsRef<Path>>(path: P, flags: OpenFlags) -> eyre::Result<(r_o_database::Client, Connection)> {
+        let connection = Connection::open_with_flags(path, flags)?;
         let server = SqliteDatabase{connection: connection.clone()};
         let client: r_o_database::Client = capnp_rpc::new_client(server);
-        return Ok((client, connection));
+        let conn = Connection::open_with_flags(path, flags)?;
+        return Ok((client, conn));
     }
-    pub fn new<P: AsRef<Path>>(path: P, flags: OpenFlags) -> eyre::Result<(database::Client, Rc<Connection>)> {
-        let connection = Rc::new(Connection::open_with_flags(path, flags)?);
-        let server = SqliteDatabase{connection: connection.clone()};
+    pub fn new<P: AsRef<Path>>(path: P, flags: OpenFlags) -> eyre::Result<(database::Client, Connection)> {
+        let connection = Connection::open_with_flags(path, flags)?;
+        let server = SqliteDatabase{connection: connection};
         let client: database::Client = capnp_rpc::new_client(server);
-        return Ok((client, connection));
+        let conn = Connection::open_with_flags(path, flags)?;
+        return Ok((client, conn));
     }
-    pub fn new_add_db<P: AsRef<Path>>(path: P, flags: OpenFlags) -> eyre::Result<(add_d_b::Client, Rc<Connection>)> {
-        let connection = Rc::new(Connection::open_with_flags(path, flags)?);
-        let server = SqliteDatabase{connection: connection.clone()};
+    pub fn new_add_db<P: AsRef<Path>>(path: P, flags: OpenFlags) -> eyre::Result<(add_d_b::Client, Connection)> {
+        let connection = Connection::open_with_flags(path, flags)?;
+        let server = SqliteDatabase{connection: connection};
         let client: add_d_b::Client = capnp_rpc::new_client(server);
-        return Ok((client, connection));
+        let conn = Connection::open_with_flags(path, flags)?;
+        return Ok((client, conn));
     }
 }
 #[capnproto_rpc(r_o_database)]

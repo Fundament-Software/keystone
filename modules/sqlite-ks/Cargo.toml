@@ -32,3 +32,7 @@ rusqlite = { version = "0.31.0", features = ["bundled"] }
 #[features]
 #default = ["static"]
 #static = ["sqlite_nostd/static"]
+
+[[bin]]
+name = "sqlite-ks-module"
+path = "src/lib.rs"

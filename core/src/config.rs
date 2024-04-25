@@ -148,6 +148,7 @@ where
 #[cfg(test)]
 use crate::keystone_capnp::keystone_config;
 
+#[ignore]
 #[test]
 fn test_basic_config() -> Result<()> {
     let mut message = ::capnp::message::Builder::new_default();

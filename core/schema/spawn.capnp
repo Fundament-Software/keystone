@@ -5,6 +5,7 @@ interface Process(API, Error) {
     getApi @0 () -> (api :API);
     getError @1 () -> (result :Error);
     kill @2 () -> ();
+    join @3 () -> (result :Error);
 }
 
 interface Program(Args, API, Error) {

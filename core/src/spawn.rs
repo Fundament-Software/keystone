@@ -226,6 +226,8 @@ pub mod posix_process {
     type GetErrorResults = process::GetErrorResults<ByteStream, PosixError>;
     type KillParams = process::KillParams<ByteStream, PosixError>;
     type KillResults = process::KillResults<ByteStream, PosixError>;
+    type JoinParams = process::JoinParams<ByteStream, PosixError>;
+    type JoinResults = process::JoinResults<ByteStream, PosixError>;
     type PosixProcessClient = process::Client<ByteStream, PosixError>;
 
     // You might ask why this trait is implementated for an `Rc` + `RefCell` of `PosixProcessImpl`
@@ -273,6 +275,25 @@ pub mod posix_process {
             results
                 .get()
                 .set_api(capnp_rpc::new_client(self.borrow().stdin.clone()))
+        }
+
+        #[async_backtrace::framed]
+        async fn join(&self, _: JoinParams, mut results: JoinResults) -> Result<(), capnp::Error> {
+            let results_builder = results.get();
+            let mut process_error_builder = results_builder.init_result();
+
+            match self.borrow_mut().child.wait().await {
+                Ok(exitstatus) => {
+                    // TODO: use std::os::unix::process::ExitStatusExt on unix to handle None
+                    let exitcode = exitstatus.code().unwrap_or(0);
+                    if exitcode != 0 {
+                        process_error_builder.set_error_code(exitcode.into());
+                    }
+
+                    Ok(())
+                }
+                Err(e) => Err(capnp::Error::failed(e.to_string())),
+            }
         }
     }
 
@@ -389,9 +410,8 @@ pub mod posix_process {
                     let response = spawn_request.send().promise.await?;
                     let process_client = response.get()?.get_result()?;
 
-                    let geterror_response =
-                        process_client.get_error_request().send().promise.await?;
-                    let error_reader = geterror_response.get()?.get_result()?;
+                    let join_response = process_client.join_request().send().promise.await?;
+                    let error_reader = join_response.get()?.get_result()?;
 
                     let error_code = error_reader.get_error_code();
                     assert_eq!(error_code, 2);

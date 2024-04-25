@@ -1,7 +1,5 @@
 use super::Path;
-use capnp::capability::Promise;
 use capnp_macros::capnproto_rpc;
-use capnp_rpc::pry;
 use hyper::{
     client::{HttpConnector, ResponseFuture},
     http::uri::Authority,

@@ -214,9 +214,9 @@ async fn main() -> Result<()> {
         _ => todo!(),
     }
     // load config files
-    /// Keystone is provided with a sqlite database on boot, which contains all the configuration necessary to bootstrap it
-    /// while this bootstrap configuration can be anything, per-module configurations must be capnproto structs because they
-    /// must be able to save sturdyref capabilities. Our bootstrap configuration also contains capability references, but only
-    /// by calling the result of another interface.
+    // Keystone is provided with a sqlite database on boot, which contains all the configuration necessary to bootstrap it
+    // while this bootstrap configuration can be anything, per-module configurations must be capnproto structs because they
+    // must be able to save sturdyref capabilities. Our bootstrap configuration also contains capability references, but only
+    // by calling the result of another interface.
     Ok(())
 }

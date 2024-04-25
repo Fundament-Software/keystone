@@ -1,5 +1,3 @@
-use std::ffi::OsStr;
-
 #[cfg(not(windows))]
 pub fn spawn_process_native<'i, I>(
     source: &cap_std::fs::File,
@@ -8,17 +6,29 @@ pub fn spawn_process_native<'i, I>(
 where
     I: IntoIterator<Item = Result<&'i str, capnp::Error>>,
 {
-    todo!();
-    // let fd = linux::write_trampoline()?;
-    // skip_close_fd = fd.as_raw_fd();
-    // Box::new(move || {
-    //     // not using nix crate here, as it would allocate args after fork, which will
-    //     // lead to crashes on systems where allocator is not
-    //     // fork+thread safe
-    //     unsafe { libc::fexecve(fd.as_raw_fd(), argv.as_ptr(), envp.as_ptr()) };
-    //     // if we're here then exec has failed
-    //     panic!("{}", std::io::Error::last_os_error());
-    // })
+    use cap_std::io_lifetimes::raw::AsRawFilelike;
+    use std::ffi::OsString;
+    use std::process::Stdio;
+    use std::str::FromStr;
+    use tokio::process::Command;
+
+    let fd = source.as_raw_filelike();
+
+    let argv: Vec<OsString> = args
+        .into_iter()
+        .map(|x| x.map(|s| OsString::from_str(s).unwrap()))
+        .collect::<Result<Vec<OsString>, capnp::Error>>()?;
+
+    let path = format!("/proc/{}/fd/{}", std::process::id(), fd);
+
+    // We can't called fexecve without reimplementing the entire process handling logic, so we just do this
+    Command::new(path)
+        .args(argv)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .stdin(Stdio::piped())
+        .spawn()
+        .map_err(|e| capnp::Error::failed(e.to_string()))
 }
 
 #[cfg(windows)]
@@ -60,7 +70,6 @@ where
 }
 
 pub mod posix_process {
-    use crate::byte_stream::ByteStreamImpl;
     use crate::byte_stream_capnp::{
         byte_stream::Client as ByteStreamClient, byte_stream::Owned as ByteStream,
     };
@@ -71,9 +80,8 @@ pub mod posix_process {
     use crate::spawn_capnp::{process, program};
     use cap_std::fs::File;
     use cap_std::io_lifetimes::raw::{FromRawFilelike, RawFilelike};
-    use capnp::capability::Promise;
+    use capnp_macros::capnproto_rpc;
     use std::cell::RefCell;
-    use std::future::Future;
     use std::rc::Rc;
     use std::result::Result;
     use tokio::io::{AsyncRead, AsyncWriteExt};
@@ -86,10 +94,51 @@ pub mod posix_process {
 
     pub struct PosixProcessImpl {
         pub cancellation_token: CancellationToken,
-        stdin: Option<ChildStdin>,
+        stdin: Rc<RefCell<Option<ChildStdin>>>,
         stdout_task: JoinHandle<eyre::Result<Option<usize>>>,
         stderr_task: JoinHandle<eyre::Result<Option<usize>>>,
         child: Child,
+    }
+
+    #[capnproto_rpc(crate::byte_stream_capnp::byte_stream)]
+    impl crate::byte_stream_capnp::byte_stream::Server for Rc<RefCell<Option<ChildStdin>>> {
+        #[async_backtrace::framed]
+        async fn write(&self, bytes: &[u8]) {
+            if let Some(stdin) = self.borrow_mut().as_mut() {
+                match stdin.write_all(bytes).await {
+                    Ok(_) => stdin
+                        .flush()
+                        .await
+                        .map_err(|e| capnp::Error::failed(e.to_string())),
+                    Err(e) => Err(capnp::Error::failed(e.to_string())),
+                }
+            } else {
+                Err(capnp::Error {
+                    kind: capnp::ErrorKind::Failed,
+                    extra: String::from("Write called on byte stream after closed."),
+                })
+            }
+        }
+
+        #[async_backtrace::framed]
+        async fn end(&self) {
+            if let Some(mut stdin) = self.borrow_mut().take() {
+                stdin
+                    .shutdown()
+                    .await
+                    .map_err(|e| capnp::Error::failed(e.to_string()))
+            } else {
+                Ok(())
+            }
+        }
+
+        #[async_backtrace::framed]
+        async fn get_substream(&self) {
+            Err(capnp::Error {
+                kind: capnp::ErrorKind::Unimplemented,
+                extra: String::from("Not implemented"),
+            })
+        }
     }
 
     /// Helper function for PosixProcessImpl::spawn_process.
@@ -120,7 +169,7 @@ pub mod posix_process {
         ) -> Self {
             Self {
                 cancellation_token,
-                stdin,
+                stdin: Rc::new(RefCell::new(stdin)),
                 stdout_task,
                 stderr_task,
                 child,
@@ -148,17 +197,15 @@ pub mod posix_process {
             // Create a cancellation token to allow us to kill ("cancel") the process.
             let cancellation_token = CancellationToken::new();
 
-            let stdout = child.stdout.take();
             // Create the tasks to read stdout and stderr to the byte stream
             let stdout_task = spawn_iostream_task(
-                tokio::io::BufReader::new(stdout.unwrap()),
+                child.stdout.take().unwrap(),
                 stdout_stream,
                 cancellation_token.child_token(),
             );
-            let stderr = child.stderr.take();
 
             let stderr_task = spawn_iostream_task(
-                tokio::io::BufReader::new(stderr.unwrap()),
+                child.stderr.take().unwrap(),
                 stderr_stream,
                 cancellation_token.child_token(),
             );
@@ -179,6 +226,8 @@ pub mod posix_process {
     type GetErrorResults = process::GetErrorResults<ByteStream, PosixError>;
     type KillParams = process::KillParams<ByteStream, PosixError>;
     type KillResults = process::KillResults<ByteStream, PosixError>;
+    type JoinParams = process::JoinParams<ByteStream, PosixError>;
+    type JoinResults = process::JoinResults<ByteStream, PosixError>;
     type PosixProcessClient = process::Client<ByteStream, PosixError>;
 
     // You might ask why this trait is implementated for an `Rc` + `RefCell` of `PosixProcessImpl`
@@ -195,20 +244,22 @@ pub mod posix_process {
             let results_builder = results.get();
             let mut process_error_builder = results_builder.init_result();
 
-            match self.borrow_mut().child.wait().await {
-                Ok(exitstatus) => {
+            match self.borrow_mut().child.try_wait() {
+                Ok(Some(exitstatus)) => {
+                    // TODO: use std::os::unix::process::ExitStatusExt on unix to handle None
                     let exitcode = exitstatus.code().unwrap_or(i32::MIN);
                     process_error_builder.set_error_code(exitcode.into());
-                    process_error_builder.set_error_message("".into());
 
                     Ok(())
                 }
+                Ok(None) => Ok(()),
                 Err(e) => Err(capnp::Error::failed(e.to_string())),
             }
         }
 
         #[async_backtrace::framed]
         async fn kill(&self, _: KillParams, _: KillResults) -> Result<(), capnp::Error> {
+            self.borrow_mut().cancellation_token.cancel();
             match self.borrow_mut().child.kill().await {
                 Ok(_) => Ok(()),
                 Err(e) => Err(capnp::Error::failed(e.to_string())),
@@ -218,33 +269,31 @@ pub mod posix_process {
         #[async_backtrace::framed]
         async fn get_api(
             &self,
-            params: GetApiParams,
+            _params: GetApiParams,
             mut results: GetApiResults,
         ) -> Result<(), capnp::Error> {
-            let this = self.clone();
-            println!("called posix get_api ");
-
-            let stdin_stream_server = ByteStreamImpl::new(move |bytes| {
-                println!("inside stdin_stream_server");
-                let this_inner = this.clone();
-                let owned_bytes = bytes.to_owned();
-                async move {
-                    if let Some(mut stdin) = this_inner.borrow_mut().stdin.take() {
-                        match stdin.write_all(&owned_bytes).await {
-                            Ok(_) => Ok(()),
-                            Err(e) => Err(capnp::Error::failed(e.to_string())),
-                        }
-                    } else {
-                        Ok(())
-                    }
-                }
-            });
-
             results
                 .get()
-                .set_api(capnp_rpc::new_client(stdin_stream_server))?;
+                .set_api(capnp_rpc::new_client(self.borrow().stdin.clone()))
+        }
 
-            Ok(())
+        #[async_backtrace::framed]
+        async fn join(&self, _: JoinParams, mut results: JoinResults) -> Result<(), capnp::Error> {
+            let results_builder = results.get();
+            let mut process_error_builder = results_builder.init_result();
+
+            match self.borrow_mut().child.wait().await {
+                Ok(exitstatus) => {
+                    // TODO: use std::os::unix::process::ExitStatusExt on unix to handle None
+                    let exitcode = exitstatus.code().unwrap_or(0);
+                    if exitcode != 0 {
+                        process_error_builder.set_error_code(exitcode.into());
+                    }
+
+                    Ok(())
+                }
+                Err(e) => Err(capnp::Error::failed(e.to_string())),
+            }
         }
     }
 
@@ -309,7 +358,7 @@ pub mod posix_process {
 
         #[tokio::test]
         #[async_backtrace::framed]
-        async fn test_process_creation() {
+        async fn test_posix_process_creation() {
             let spawn_process_server = PosixProgramImpl {
                 #[cfg(windows)]
                 program: cap_std::fs::File::from_filelike(
@@ -361,9 +410,8 @@ pub mod posix_process {
                     let response = spawn_request.send().promise.await?;
                     let process_client = response.get()?.get_result()?;
 
-                    let geterror_response =
-                        process_client.get_error_request().send().promise.await?;
-                    let error_reader = geterror_response.get()?.get_result()?;
+                    let join_response = process_client.join_request().send().promise.await?;
+                    let error_reader = join_response.get()?.get_result()?;
 
                     let error_code = error_reader.get_error_code();
                     assert_eq!(error_code, 2);

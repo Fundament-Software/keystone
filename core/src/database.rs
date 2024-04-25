@@ -14,7 +14,7 @@ pub enum ModuleState {
     CloseFailure,
 }
 
-struct ModuleInstance {
+pub struct ModuleInstance {
     instance_id: u64,
     pid: u64,
     state: ModuleState,

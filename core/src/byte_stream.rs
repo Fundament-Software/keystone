@@ -1,17 +1,16 @@
 use bytes::BytesMut;
 use capnp::{
-    capability::{Promise, Response},
+    capability::{RemotePromise, Response},
     ErrorKind,
 };
 use capnp_macros::capnproto_rpc;
-use futures::AsyncWrite;
-use futures::FutureExt;
+use futures_util::FutureExt;
 use std::future::Future;
 use std::sync::atomic::AtomicUsize;
 use std::task::Poll;
 use std::task::Waker;
 use std::{cell::RefCell, rc::Rc};
-use tokio::io::{AsyncRead, AsyncReadExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
 
 use crate::byte_stream_capnp::{
     self,
@@ -57,7 +56,6 @@ where
     #[async_backtrace::framed]
     async fn write(&self, bytes: &[u8]) {
         if let Some(f) = &mut *self.consumer.borrow_mut() {
-            println!("inside ByteStreamImpl write");
             f(bytes).await
         } else {
             Err(capnp::Error {
@@ -126,18 +124,13 @@ impl std::future::Future for ByteStreamBufferImpl {
 impl Server for ByteStreamBufferImpl {
     #[async_backtrace::framed]
     async fn write(&self, bytes: &[u8]) {
-        println!(
-            "inside ByteStreamBufferImpl write: {}",
-            async_backtrace::taskdump_tree(true)
-        );
         let copy = self.clone();
         let closed = self.0.borrow().closed;
 
         if !closed {
-            let owned_bytes = bytes.to_owned();
             copy.await;
             let mut this = self.0.borrow_mut();
-            this.buf = owned_bytes;
+            this.buf = bytes.to_owned();
             this.pending
                 .store(this.buf.len(), std::sync::atomic::Ordering::Release);
             if let Some(w) = this.read_waker.take() {
@@ -167,24 +160,24 @@ impl Server for ByteStreamBufferImpl {
     }
 }
 
-impl futures::AsyncRead for ByteStreamBufferImpl {
+impl AsyncRead for ByteStreamBufferImpl {
     fn poll_read(
         self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
-        buf: &mut [u8],
-    ) -> std::task::Poll<std::io::Result<usize>> {
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
         let mut this = self.0.borrow_mut();
         let pending = this.pending.load(std::sync::atomic::Ordering::Acquire);
         if pending > 0 {
             let start = this.buf.len() - pending;
-            let len = std::cmp::min(pending, buf.len());
-            buf[0..len].copy_from_slice(&this.buf[start..(start + len)]);
+            let len = std::cmp::min(pending, buf.remaining());
+            buf.put_slice(&this.buf[start..(start + len)]);
             this.pending
                 .fetch_sub(len, std::sync::atomic::Ordering::Release);
             if let Some(w) = this.write_waker.take() {
                 w.wake()
             }
-            std::task::Poll::Ready(Ok(len))
+            std::task::Poll::Ready(Ok(()))
         } else {
             this.read_waker = Some(cx.waker().clone());
             std::task::Poll::Pending
@@ -240,40 +233,70 @@ impl Client {
     }
 }
 
-impl AsyncWrite for Client {
+pub struct ClientWriter {
+    client: Client,
+    writer: Option<RemotePromise<crate::stream_capnp::stream_result::Owned>>,
+    ender: Option<RemotePromise<crate::byte_stream_capnp::byte_stream::end_results::Owned>>,
+}
+
+impl ClientWriter {
+    pub fn new(client: Client) -> Self {
+        Self {
+            client,
+            writer: None::<RemotePromise<crate::stream_capnp::stream_result::Owned>>,
+            ender: None::<RemotePromise<crate::byte_stream_capnp::byte_stream::end_results::Owned>>,
+        }
+    }
+}
+
+impl AsyncWrite for ClientWriter {
     fn poll_write(
         self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
         buf: &[u8],
     ) -> std::task::Poll<Result<usize, std::io::Error>> {
-        println!("inside CLIENT poll_write");
-        let mut write_request = self.write_request();
-        write_request.get().set_bytes(buf);
-        match write_request.send().promise.poll_unpin(cx) {
-            std::task::Poll::Ready(Ok(_)) => std::task::Poll::Ready(Ok(buf.len())),
-            std::task::Poll::Ready(Err(e)) => std::task::Poll::Ready(Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                e.to_string(),
-            ))),
+        let this = self.get_mut();
+        if this.writer.is_none() {
+            let mut write_request = this.client.write_request();
+            write_request.get().set_bytes(buf);
+            this.writer = Some(write_request.send());
+        }
+        match this.writer.as_mut().unwrap().promise.poll_unpin(cx) {
+            std::task::Poll::Ready(Ok(_)) => {
+                this.writer = None;
+                std::task::Poll::Ready(Ok(buf.len()))
+            }
+            std::task::Poll::Ready(Err(e)) => {
+                this.writer = None;
+                std::task::Poll::Ready(Err(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    e.to_string(),
+                )))
+            }
             std::task::Poll::Pending => std::task::Poll::Pending,
         }
     }
 
     fn poll_flush(
         self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
+        _cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<(), std::io::Error>> {
-        println!("inside CLIENT poll_flush");
         std::task::Poll::Ready(Ok(()))
     }
 
-    fn poll_close(
+    fn poll_shutdown(
         self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<(), std::io::Error>> {
-        println!("inside CLIENT poll_close");
-        match self.end_request().send().promise.poll_unpin(cx) {
-            std::task::Poll::Ready(_) => std::task::Poll::Ready(Ok(())),
+        let this = self.get_mut();
+        if this.ender.is_none() {
+            this.ender = Some(this.client.end_request().send());
+        }
+        match this.ender.as_mut().unwrap().promise.poll_unpin(cx) {
+            std::task::Poll::Ready(_) => {
+                this.ender = None;
+                std::task::Poll::Ready(Ok(()))
+            }
             std::task::Poll::Pending => std::task::Poll::Pending,
         }
     }
@@ -290,7 +313,9 @@ fn write_test() -> eyre::Result<()> {
     let mut write_request = client.write_request();
     write_request.get().set_bytes(&[73, 22, 66, 91]);
 
-    let write_result = futures::executor::block_on(write_request.send().promise);
+    let write_result = tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(write_request.send().promise);
     let _ = write_result.unwrap(); // Ensure that server didn't return an error
 
     eyre::Result::Ok(())

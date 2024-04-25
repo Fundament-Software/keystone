@@ -1,8 +1,6 @@
 use super::domain::DomainImpl;
 use super::{Domain, Https};
-use capnp::capability::Promise;
 use capnp_macros::capnproto_rpc;
-use capnp_rpc::pry;
 use hyper::client::HttpConnector;
 use hyper_tls::HttpsConnector;
 

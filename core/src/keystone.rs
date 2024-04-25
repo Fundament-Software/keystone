@@ -1,25 +1,23 @@
-use crate::keystone_capnp::keystone;
-use crate::keystone_capnp::keystone::GetConfigParams;
-use crate::keystone_capnp::keystone::GetConfigResults;
-use crate::keystone_capnp::keystone::SetConfigParams;
-use crate::keystone_capnp::keystone::SetConfigResults;
+use std::marker::PhantomData;
 
-pub struct KeystoneImpl;
+use crate::keystone_capnp::host;
+use capnp_macros::capnproto_rpc;
 
-impl keystone::Server for KeystoneImpl {
-    async fn get_config(
-        &self,
-        _: GetConfigParams,
-        _: GetConfigResults,
-    ) -> Result<(), ::capnp::Error> {
-        Ok(())
-    }
+pub struct HostImpl<State> {
+    instance_id: u64,
+    phantom: PhantomData<State>,
+}
 
-    async fn set_config(
-        &self,
-        _: SetConfigParams,
-        _: SetConfigResults,
-    ) -> Result<(), ::capnp::Error> {
-        Ok(())
+impl<State> HostImpl<State>
+where
+    State: ::capnp::traits::Owned,
+{
+    pub fn new(id: u64) -> Self {
+        Self {
+            instance_id: id,
+            phantom: PhantomData,
+        }
     }
 }
+
+impl host::Server<capnp::any_pointer::Owned> for HostImpl<capnp::any_pointer::Owned> {}

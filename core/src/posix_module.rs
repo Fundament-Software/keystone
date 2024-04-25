@@ -1,17 +1,9 @@
 pub mod posix_module {
-    use std::collections::VecDeque;
-    use std::io::Stdin;
-    use std::ops::DerefMut;
-    use std::sync::atomic::AtomicBool;
-    use std::sync::atomic::AtomicUsize;
-    use std::sync::Arc;
-
     use crate::byte_stream::ByteStreamBufferImpl;
-    use crate::byte_stream::ByteStreamImpl;
     use crate::byte_stream_capnp::byte_stream::Owned as ByteStream;
-    use crate::keystone::KeystoneImpl;
-    use crate::keystone_capnp::keystone;
+    use crate::keystone::HostImpl;
     use crate::module_capnp::module_error;
+    use crate::module_capnp::module_start;
     use crate::posix_module_capnp::posix_module;
     use crate::posix_spawn_capnp::posix_args::Owned as PosixArgs;
     use crate::posix_spawn_capnp::posix_error::Owned as PosixError;
@@ -20,43 +12,26 @@ pub mod posix_module {
     use crate::spawn_capnp::program::SpawnParams;
     use crate::spawn_capnp::program::SpawnResults;
     use capnp::any_pointer::Owned as any_pointer;
-    use capnp::capability::FromClientHook;
-    use capnp::capability::Promise;
-    use capnp::private::capability::ClientHook;
+    use capnp::any_pointer::Owned as cap_pointer;
+    use capnp::capability::RemotePromise;
     use capnp_macros::capnproto_rpc;
     use capnp_rpc::twoparty::VatNetwork;
     use capnp_rpc::Disconnector;
     use capnp_rpc::{rpc_twoparty_capnp, twoparty, RpcSystem};
-    use futures::AsyncRead;
     use std::cell::RefCell;
-    use std::future::Future;
     use std::rc::Rc;
 
     pub struct PosixModuleProcessImpl {
         posix_process: process::Client<ByteStream, PosixError>,
-        //rpc_system: RpcSystem<rpc_twoparty_capnp::Side>,
         handle: tokio::task::JoinHandle<Result<(), capnp::Error>>,
         disconnector: Disconnector<rpc_twoparty_capnp::Side>,
-        bootstrap: Box<dyn ClientHook>,
+        bootstrap: module_start::Client<any_pointer, any_pointer, cap_pointer>,
+        api: RemotePromise<
+            module_start::start_results::Owned<any_pointer, any_pointer, cap_pointer>,
+        >,
     }
 
-    struct ClientExtraction(Box<dyn ClientHook>);
-
-    impl FromClientHook for ClientExtraction {
-        fn new(hook: Box<dyn ClientHook>) -> Self {
-            Self(hook)
-        }
-
-        fn into_client_hook(self) -> Box<dyn ClientHook> {
-            self.0
-        }
-
-        fn as_client_hook(&self) -> &dyn ClientHook {
-            self.0.as_ref()
-        }
-    }
-
-    impl process::Server<any_pointer, module_error::Owned<any_pointer>>
+    impl process::Server<cap_pointer, module_error::Owned<any_pointer>>
         for Rc<RefCell<PosixModuleProcessImpl>>
     {
         #[async_backtrace::framed]
@@ -64,31 +39,48 @@ pub mod posix_module {
         /// process.
         async fn get_error(
             &self,
-            _: process::GetErrorParams<any_pointer, module_error::Owned<any_pointer>>,
-            mut results: process::GetErrorResults<any_pointer, module_error::Owned<any_pointer>>,
+            _: process::GetErrorParams<cap_pointer, module_error::Owned<any_pointer>>,
+            mut results: process::GetErrorResults<cap_pointer, module_error::Owned<any_pointer>>,
         ) -> Result<(), capnp::Error> {
+            let posix_err = self
+                .borrow_mut()
+                .posix_process
+                .get_error_request()
+                .send()
+                .promise
+                .await?;
+            let builder = results.get().init_result();
+            builder
+                .init_backing()
+                .set_as(posix_err.get()?.get_result()?)?;
             Ok(())
         }
 
         #[async_backtrace::framed]
         async fn kill(
             &self,
-            _: process::KillParams<any_pointer, module_error::Owned<any_pointer>>,
-            _: process::KillResults<any_pointer, module_error::Owned<any_pointer>>,
+            _: process::KillParams<cap_pointer, module_error::Owned<any_pointer>>,
+            _: process::KillResults<cap_pointer, module_error::Owned<any_pointer>>,
         ) -> Result<(), capnp::Error> {
+            self.borrow_mut()
+                .posix_process
+                .kill_request()
+                .send()
+                .promise
+                .await?;
             Ok(())
         }
 
         #[async_backtrace::framed]
         async fn get_api(
             &self,
-            _: process::GetApiParams<any_pointer, module_error::Owned<any_pointer>>,
-            mut results: process::GetApiResults<any_pointer, module_error::Owned<any_pointer>>,
+            _: process::GetApiParams<cap_pointer, module_error::Owned<any_pointer>>,
+            mut results: process::GetApiResults<cap_pointer, module_error::Owned<any_pointer>>,
         ) -> Result<(), capnp::Error> {
             results
                 .get()
                 .init_api()
-                .set_as_capability(self.borrow_mut().bootstrap.clone());
+                .set_as_capability(self.borrow_mut().api.pipeline.get_api().as_cap());
             Ok(())
         }
     }
@@ -97,14 +89,14 @@ pub mod posix_module {
         posix_program: program::Client<PosixArgs, ByteStream, PosixError>,
     }
 
-    impl program::Server<any_pointer, any_pointer, module_error::Owned<any_pointer>>
+    impl program::Server<any_pointer, cap_pointer, module_error::Owned<any_pointer>>
         for PosixModuleProgramImpl
     {
         #[async_backtrace::framed]
         async fn spawn(
             &self,
-            params: SpawnParams<any_pointer, any_pointer, module_error::Owned<any_pointer>>,
-            mut results: SpawnResults<any_pointer, any_pointer, module_error::Owned<any_pointer>>,
+            params: SpawnParams<any_pointer, cap_pointer, module_error::Owned<any_pointer>>,
+            mut results: SpawnResults<any_pointer, cap_pointer, module_error::Owned<any_pointer>>,
         ) -> Result<(), ::capnp::Error> {
             let mut request = self.posix_program.spawn_request();
             let mut args = request.get().init_args();
@@ -123,29 +115,38 @@ pub mod posix_module {
 
                     match process.get_api_request().send().promise.await {
                         Ok(s) => {
-                            let stdin = s.get()?.get_api()?;
+                            let stdin = crate::byte_stream::ClientWriter::new(s.get()?.get_api()?);
 
                             let network = VatNetwork::new(
                                 stdout.clone(), // read from the output stream of the process
                                 stdin,          // write into the input stream of the process
-                                rpc_twoparty_capnp::Side::Server,
+                                rpc_twoparty_capnp::Side::Client,
                                 Default::default(),
                             );
 
-                            let keystone_client: keystone::Client =
-                                capnp_rpc::new_client(KeystoneImpl {});
+                            let keystone_client: crate::keystone_capnp::host::Client<any_pointer> =
+                                capnp_rpc::new_client(HostImpl::new(0));
                             let mut rpc_system = RpcSystem::new(
                                 Box::new(network),
                                 Some(keystone_client.clone().client),
                             );
 
                             let disconnector = rpc_system.get_disconnector();
-                            let bootstrap = rpc_system
-                                .bootstrap::<ClientExtraction>(rpc_twoparty_capnp::Side::Client)
-                                .into_client_hook();
-                            println!("BEFORE RESOLVED: {}", async_backtrace::taskdump_tree(true));
+                            let bootstrap: module_start::Client<
+                                any_pointer,
+                                any_pointer,
+                                cap_pointer,
+                            > = rpc_system.bootstrap(rpc_twoparty_capnp::Side::Server);
 
-                            bootstrap.when_resolved().await?;
+                            let mut api_request = bootstrap.start_request();
+                            let mut builder = api_request.get();
+                            builder.set_config(params.get()?.get_args()?)?;
+
+                            // TODO: pass in state if it exists
+                            // builder.set_state();
+
+                            let api = api_request.send();
+
                             let module_process = PosixModuleProcessImpl {
                                 posix_process: process,
                                 handle: tokio::task::spawn_local(
@@ -153,10 +154,11 @@ pub mod posix_module {
                                 ),
                                 disconnector: disconnector,
                                 bootstrap: bootstrap,
+                                api: api,
                             };
 
                             let module_process_client: process::Client<
-                                any_pointer,
+                                cap_pointer,
                                 module_error::Owned<any_pointer>,
                             > = capnp_rpc::new_client(Rc::new(RefCell::new(module_process)));
                             results.get().set_result(module_process_client);
@@ -181,7 +183,7 @@ pub mod posix_module {
             };
             let program_client: program::Client<
                 any_pointer,
-                any_pointer,
+                cap_pointer,
                 module_error::Owned<any_pointer>,
             > = capnp_rpc::new_client(program);
             results.get().set_result(program_client);
@@ -191,55 +193,122 @@ pub mod posix_module {
 
     #[cfg(test)]
     mod tests {
-        use super::{PosixModuleImpl, PosixModuleProgramImpl};
+        use super::{any_pointer, PosixModuleImpl, PosixModuleProgramImpl};
+        use crate::byte_stream::ByteStreamBufferImpl;
         use crate::byte_stream::ByteStreamImpl;
         use crate::spawn::posix_process::PosixProgramImpl;
-        use cap_std::fs::File;
         use cap_std::io_lifetimes::{FromFilelike, IntoFilelike};
-        use capnp::capability::Promise;
+        use capnp::capability::FromClientHook;
+        use std::cell::RefCell;
+        use std::fs::File;
+        use std::rc::Rc;
+        use tokio::io::AsyncWriteExt;
         use tokio::task;
+        use tokio_util::sync::CancellationToken;
+        use tracing_subscriber::filter::LevelFilter;
 
         #[async_backtrace::framed]
         #[tokio::test]
         async fn test_raw_pipes() {
-            console_subscriber::init();
-
             #[cfg(windows)]
-            let spawn_process_server =
-                File::open("../target/debug/hello-world-module.exe").unwrap();
+            let spawn_process_server = cap_std::fs::File::from_filelike(
+                File::open("../target/debug/hello-world-module.exe")
+                    .unwrap()
+                    .into_filelike(),
+            );
             #[cfg(not(windows))]
-            let spawn_process_server = File::open("../target/debug/hello-world-module").unwrap();
+            let spawn_process_server = cap_std::fs::File::from_filelike(
+                File::open("../target/debug/hello-world-module")
+                    .unwrap()
+                    .into_filelike(),
+            );
 
             let args: Vec<Result<&str, ::capnp::Error>> = Vec::new();
-            let child = crate::spawn::spawn_process_native(&spawn_process_server, args.into_iter())
-                .unwrap();
+            let mut child =
+                crate::spawn::spawn_process_native(&spawn_process_server, args.into_iter())
+                    .unwrap();
+
+            let stdinref = Rc::new(RefCell::new(child.stdin.take().unwrap()));
+
+            let stdin_stream_server = ByteStreamImpl::new(move |bytes| {
+                let this_inner = stdinref.clone();
+                let owned_bytes = bytes.to_owned();
+                async move {
+                    let mut stdin = this_inner.borrow_mut();
+                    match stdin.write_all(&owned_bytes).await {
+                        Ok(_) => stdin
+                            .flush()
+                            .await
+                            .map_err(|e| capnp::Error::failed(e.to_string())),
+                        Err(e) => Err(capnp::Error::failed(e.to_string())),
+                    }
+                }
+            });
+
+            let stdinclient =
+                crate::byte_stream::ClientWriter::new(capnp_rpc::new_client(stdin_stream_server));
+
+            let cancellation_token = CancellationToken::new();
+
+            let stdoutbuf = ByteStreamBufferImpl::new();
+            let stdoutclient: crate::byte_stream_capnp::byte_stream::Client =
+                capnp_rpc::new_client(stdoutbuf.clone());
+
+            let mut stdout = child.stdout.take().unwrap();
 
             let network = capnp_rpc::twoparty::VatNetwork::new(
-                child.stdin.take().unwrap(), // read from the output stream of the process
-                child.stdout.take().unwrap(), // write into the input stream of the process
-                capnp_rpc::rpc_twoparty_capnp::Side::Server,
+                stdoutbuf,   // read from the output stream of the process
+                stdinclient, // write into the input stream of the process
+                capnp_rpc::rpc_twoparty_capnp::Side::Client,
                 Default::default(),
             );
 
-            let keystone_client: keystone::Client = capnp_rpc::new_client(KeystoneImpl {});
+            let keystone_client: crate::keystone_capnp::host::Client<any_pointer> =
+                capnp_rpc::new_client(super::HostImpl::new(0));
             let mut rpc_system =
-                RpcSystem::new(Box::new(network), Some(keystone_client.clone().client));
+                super::RpcSystem::new(Box::new(network), Some(keystone_client.clone().client));
 
             let disconnector = rpc_system.get_disconnector();
-            let bootstrap = rpc_system
-                .bootstrap::<ClientExtraction>(rpc_twoparty_capnp::Side::Client)
-                .into_client_hook();
 
-            bootstrap.when_resolved().await?;
+            task::LocalSet::new()
+                .run_until(async_backtrace::location!().frame(async {
+                    let bootstrap: crate::module_capnp::module_start::Client<
+                        crate::hello_world_capnp::config::Owned,
+                        any_pointer,
+                        crate::hello_world_capnp::root::Owned,
+                    > = rpc_system.bootstrap(super::rpc_twoparty_capnp::Side::Server);
 
-            println!("resolved");
+                    tokio::task::spawn_local(async move {
+                        tokio::select! {
+                            _ = cancellation_token.cancelled() => Ok(None),
+                            result = stdoutclient.copy(&mut stdout) => result.map(Some)
+                        }
+                    });
+
+                    tokio::task::spawn_local(rpc_system);
+
+                    let mut start_request = bootstrap.start_request();
+                    //start_request.get().set_config()
+                    let root_response = start_request.send().promise.await?;
+                    let hello_world = root_response.get()?.get_api()?;
+
+                    let mut request = hello_world.say_hello_request();
+                    request.get().init_request().set_name("Keystone".into());
+
+                    let reply = request.send().promise.await?;
+                    let msg = reply.get()?.get_reply()?.get_message()?;
+
+                    println!("Got reply! {}", msg.to_string()?);
+
+                    Ok::<(), eyre::Error>(())
+                }))
+                .await
+                .unwrap();
         }
 
         #[async_backtrace::framed]
         #[tokio::test]
         async fn test_process_creation() {
-            console_subscriber::init();
-
             #[cfg(windows)]
             let spawn_process_server = PosixProgramImpl::new_std(
                 File::open("../target/debug/hello-world-module.exe").unwrap(),
@@ -263,24 +332,28 @@ pub mod posix_module {
             let e = task::LocalSet::new()
                 .run_until(async_backtrace::location!().frame(async {
                     let mut spawn_request = wrapped_client.spawn_request();
+                    let mut builder = spawn_request.get();
+                    let mut args = builder.init_args();
+                    let mut config: crate::hello_world_capnp::config::Builder = args.init_as();
+                    config.set_greeting("Hello".into());
+
                     // TODO: Pass in the hello_world structural config parameters
 
-                    println!("STARTING");
-                    println!("{}", async_backtrace::taskdump_tree(true));
                     let promise = spawn_request.send().promise;
                     let response = promise.await?;
                     let process_client = response.get()?.get_result()?;
 
                     let api_response = process_client.get_api_request().send().promise.await?;
-                    let hello_client: crate::hello_world_capnp::hello_world::Client =
+                    let hello_client: crate::hello_world_capnp::root::Client =
                         api_response.get()?.get_api()?.get_as_capability()?;
 
                     let mut sayhello = hello_client.say_hello_request();
                     sayhello.get().init_request().set_name("Keystone".into());
                     let hello_response = sayhello.send().promise.await?;
+
                     let msg = hello_response.get()?.get_reply()?.get_message()?;
 
-                    println!("Got reply! {}", msg.to_string()?);
+                    assert_eq!(msg, "Hello, Keystone!");
 
                     let geterror_response =
                         process_client.get_error_request().send().promise.await?;

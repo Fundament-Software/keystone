@@ -19,7 +19,8 @@ where
         .map(|x| x.map(|s| OsString::from_str(s).unwrap()))
         .collect::<Result<Vec<OsString>, capnp::Error>>()?;
 
-    let path = format!("/proc/self/fd/{}", fd);
+    let path = format!("/proc/{}/fd/{}", std::process::id(), fd);
+
     // We can't called fexecve without reimplementing the entire process handling logic, so we just do this
     Command::new(path)
         .args(argv)
@@ -93,17 +94,17 @@ pub mod posix_process {
 
     pub struct PosixProcessImpl {
         pub cancellation_token: CancellationToken,
-        stdin: Option<ChildStdin>,
+        stdin: Rc<RefCell<Option<ChildStdin>>>,
         stdout_task: JoinHandle<eyre::Result<Option<usize>>>,
         stderr_task: JoinHandle<eyre::Result<Option<usize>>>,
         child: Child,
     }
 
     #[capnproto_rpc(crate::byte_stream_capnp::byte_stream)]
-    impl crate::byte_stream_capnp::byte_stream::Server for Rc<RefCell<PosixProcessImpl>> {
+    impl crate::byte_stream_capnp::byte_stream::Server for Rc<RefCell<Option<ChildStdin>>> {
         #[async_backtrace::framed]
         async fn write(&self, bytes: &[u8]) {
-            if let Some(stdin) = &mut (self.borrow_mut().stdin) {
+            if let Some(stdin) = self.borrow_mut().as_mut() {
                 match stdin.write_all(bytes).await {
                     Ok(_) => stdin
                         .flush()
@@ -121,7 +122,7 @@ pub mod posix_process {
 
         #[async_backtrace::framed]
         async fn end(&self) {
-            if let Some(mut stdin) = self.borrow_mut().stdin.take() {
+            if let Some(mut stdin) = self.borrow_mut().take() {
                 stdin
                     .shutdown()
                     .await
@@ -168,7 +169,7 @@ pub mod posix_process {
         ) -> Self {
             Self {
                 cancellation_token,
-                stdin,
+                stdin: Rc::new(RefCell::new(stdin)),
                 stdout_task,
                 stderr_task,
                 child,
@@ -269,7 +270,9 @@ pub mod posix_process {
             _params: GetApiParams,
             mut results: GetApiResults,
         ) -> Result<(), capnp::Error> {
-            results.get().set_api(capnp_rpc::new_client(self.clone()))
+            results
+                .get()
+                .set_api(capnp_rpc::new_client(self.borrow().stdin.clone()))
         }
     }
 

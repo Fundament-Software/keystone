@@ -30,9 +30,9 @@ struct KeystoneConfig {
   caplog @1 :CapLogConfig;
 
   struct ModuleConfig {
-    path @0 :Text;
+    path @0 :Text; # todo: replace with hash value once we have a store
     transient @1 :Bool;
-    config @2 :TOML.Value;
+    config @2 :AnyPointer;
   }
 
   modules @2 :List(ModuleConfig);
@@ -43,7 +43,16 @@ struct KeystoneConfig {
   keys @7 :List(Text); # also optional, but will warn if no password or key is used.
 }
 
-interface Keystone {
-  getConfig @0 [T] () -> (config :T);
-  setConfig @1 [T] (config :T) -> ();
+interface Sealer(T) {
+  seal @0 (unsealed :T) -> (sealed :UInt64);
+}
+
+interface Unsealer(T) {
+  unseal @0  (sealed :UInt64)-> (unsealed :T);
+} 
+
+interface Host(State) {
+  getState @0 () -> (state :State);
+  setState @1 (state :State) -> ();
+  #getSealerPair @2 [T] () -> (sealer :Sealer(T), unsealer :Unsealer(T));
 }

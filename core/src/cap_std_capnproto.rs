@@ -7,11 +7,10 @@ use crate::{
         open_options, permissions, project_dirs, read_dir, system_clock, system_time, temp_dir,
         temp_file, user_dirs, FileType,
     },
-    spawn::posix_process::PosixProgramImpl,
 };
 use cap_directories::{self, ProjectDirs, UserDirs};
 use cap_std::{
-    fs::{Dir, DirBuilder, DirEntry, File, Metadata, OpenOptions, Permissions, ReadDir},
+    fs::{Dir, DirEntry, File, Metadata, OpenOptions, Permissions, ReadDir},
     io_lifetimes::raw::AsRawFilelike,
     time::{Duration, Instant, MonotonicClock, SystemClock, SystemTime},
 };

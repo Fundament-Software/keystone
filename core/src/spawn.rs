@@ -368,7 +368,7 @@ pub mod posix_process {
                 ),
                 #[cfg(not(windows))]
                 program: cap_std::fs::File::from_filelike(
-                    File::open("sh").unwrap().into_filelike(),
+                    File::open("/bin/sh").unwrap().into_filelike(),
                 ),
             };
             let spawn_process_client: PosixProgramClient =

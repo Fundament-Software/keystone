@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use crate::keystone_capnp::host;
+use crate::{cap_std_capnproto::AmbientAuthorityImpl, keystone_capnp::host};
 use capnp_macros::capnproto_rpc;
 
 pub struct HostImpl<State> {
@@ -21,3 +21,9 @@ where
 }
 
 impl host::Server<capnp::any_pointer::Owned> for HostImpl<capnp::any_pointer::Owned> {}
+
+pub struct Keystone {
+    //db: BackingDB
+    //log: caplog::
+    file_server: AmbientAuthorityImpl,
+}

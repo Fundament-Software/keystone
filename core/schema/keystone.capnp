@@ -43,16 +43,7 @@ struct KeystoneConfig {
   keys @7 :List(Text); # also optional, but will warn if no password or key is used.
 }
 
-interface Sealer(T) {
-  seal @0 (unsealed :T) -> (sealed :UInt64);
-}
-
-interface Unsealer(T) {
-  unseal @0  (sealed :UInt64)-> (unsealed :T);
-} 
-
 interface Host(State) {
   getState @0 () -> (state :State);
   setState @1 (state :State) -> ();
-  #getSealerPair @2 [T] () -> (sealer :Sealer(T), unsealer :Unsealer(T));
 }

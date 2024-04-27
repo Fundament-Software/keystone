@@ -13,6 +13,7 @@ use cap_std::{
     fs::{Dir, DirEntry, File, Metadata, OpenOptions, Permissions, ReadDir},
     io_lifetimes::raw::AsRawFilelike,
     time::{Duration, Instant, MonotonicClock, SystemClock, SystemTime},
+    AmbientAuthority,
 };
 use cap_tempfile::{TempDir, TempFile};
 use capnp::{capability::Promise, Error};
@@ -26,14 +27,36 @@ thread_local!(
         RefCell::new(CapabilityServerSet::new());
 );
 
-pub struct AmbientAuthorityImpl;
+pub struct AmbientAuthorityImpl {
+    authority: AmbientAuthority,
+    file_set: capnp_rpc::CapabilityServerSet<FileImpl, file::Client>,
+}
+
+impl AmbientAuthorityImpl {
+    pub fn new() -> Self {
+        Self {
+            authority: cap_std::ambient_authority(),
+            file_set: capnp_rpc::CapabilityServerSet::new(),
+        }
+    }
+
+    pub async fn get_file_handle(&self, client: &file::Client) -> Option<u64> {
+        Some(
+            self.file_set
+                .get_local_server(client)
+                .await?
+                .file
+                .as_raw_filelike() as u64,
+        )
+    }
+}
 
 #[capnproto_rpc(ambient_authority)]
-impl ambient_authority::Server for AmbientAuthorityImpl {
+impl ambient_authority::Server for RefCell<AmbientAuthorityImpl> {
     async fn file_open_ambient(&self, path: Reader) {
+        let mut this = self.borrow_mut();
         let path = path.to_str()?;
-        let ambient_authority = cap_std::ambient_authority();
-        let Ok(_file) = File::open_ambient(path, ambient_authority) else {
+        let Ok(_file) = File::open_ambient(path, this.authority) else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
                 extra: String::from("Failed to open file using ambient authority"),
@@ -41,13 +64,13 @@ impl ambient_authority::Server for AmbientAuthorityImpl {
         };
         results
             .get()
-            .set_file(capnp_rpc::new_client(FileImpl { file: _file }));
+            .set_file(this.file_set.new_client(FileImpl { file: _file }));
         Ok(())
     }
     async fn file_create_ambient(&self, path: Reader) {
+        let mut this = self.borrow_mut();
         let path = path.to_str()?;
-        let ambient_authority = cap_std::ambient_authority();
-        let Ok(_file) = File::create_ambient(path, ambient_authority) else {
+        let Ok(_file) = File::create_ambient(path, this.authority) else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
                 extra: String::from("Failed to create file using ambient authority"),
@@ -55,10 +78,11 @@ impl ambient_authority::Server for AmbientAuthorityImpl {
         };
         results
             .get()
-            .set_file(capnp_rpc::new_client(FileImpl { file: _file }));
+            .set_file(this.file_set.new_client(FileImpl { file: _file }));
         Ok(())
     }
     async fn file_open_ambient_with(&self, path: Reader, open_options: Reader) {
+        let mut this = self.borrow_mut();
         capnp_let!({read, write, append, truncate, create, create_new} = open_options);
         let mut options = OpenOptions::new();
         let path = path.to_str()?;
@@ -69,8 +93,7 @@ impl ambient_authority::Server for AmbientAuthorityImpl {
             .truncate(truncate)
             .create(create)
             .create_new(create_new);
-        let ambient_authority = cap_std::ambient_authority();
-        let Ok(_file) = File::open_ambient_with(path, &options, ambient_authority) else {
+        let Ok(_file) = File::open_ambient_with(path, &options, this.authority) else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
                 extra: String::from(
@@ -80,13 +103,13 @@ impl ambient_authority::Server for AmbientAuthorityImpl {
         };
         results
             .get()
-            .set_file(capnp_rpc::new_client(FileImpl { file: _file }));
+            .set_file(this.file_set.new_client(FileImpl { file: _file }));
         Ok(())
     }
     async fn dir_open_ambient(&self, path: Reader) {
+        let this = self.borrow_mut();
         let path = path.to_str()?;
-        let ambient_authority = cap_std::ambient_authority();
-        let Ok(_dir) = Dir::open_ambient_dir(path, ambient_authority) else {
+        let Ok(_dir) = Dir::open_ambient_dir(path, this.authority) else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
                 extra: String::from("Failed to open dir using ambient authority"),
@@ -98,6 +121,7 @@ impl ambient_authority::Server for AmbientAuthorityImpl {
         Ok(())
     }
     async fn dir_open_parent(&self, dir: Dir) {
+        let this = self.borrow_mut();
         let Some(dir_impl) = DIR_SET.with_borrow(|set| set.get_local_server_of_resolved(&dir))
         else {
             return Err(Error {
@@ -105,9 +129,8 @@ impl ambient_authority::Server for AmbientAuthorityImpl {
                 extra: String::from("Dir not from the same machine"),
             });
         };
-        let ambient_authority = cap_std::ambient_authority();
         let dir = &dir_impl.as_ref().borrow().dir;
-        let Ok(_dir) = dir.open_parent_dir(ambient_authority) else {
+        let Ok(_dir) = dir.open_parent_dir(this.authority) else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
                 extra: String::from("Failed to open parent dir using ambient authority"),
@@ -119,9 +142,9 @@ impl ambient_authority::Server for AmbientAuthorityImpl {
         Ok(())
     }
     async fn dir_create_ambient_all(&self, path: Reader) {
+        let this = self.borrow_mut();
         let path = path.to_str()?;
-        let ambient_authority = cap_std::ambient_authority();
-        let Ok(()) = Dir::create_ambient_dir_all(path, ambient_authority) else {
+        let Ok(()) = Dir::create_ambient_dir_all(path, this.authority) else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
                 extra: String::from(
@@ -132,20 +155,20 @@ impl ambient_authority::Server for AmbientAuthorityImpl {
         Ok(())
     }
     async fn monotonic_clock_new(&self) {
-        let ambient_authority = cap_std::ambient_authority();
+        let this = self.borrow_mut();
         results
             .get()
             .set_clock(capnp_rpc::new_client(MonotonicClockImpl {
-                monotonic_clock: MonotonicClock::new(ambient_authority),
+                monotonic_clock: MonotonicClock::new(this.authority),
             }));
         Ok(())
     }
     async fn system_clock_new(&self) {
-        let ambient_authority = cap_std::ambient_authority();
+        let this = self.borrow_mut();
         results
             .get()
             .set_clock(capnp_rpc::new_client(SystemClockImpl {
-                system_clock: SystemClock::new(ambient_authority),
+                system_clock: SystemClock::new(this.authority),
             }));
         Ok(())
     }
@@ -155,12 +178,12 @@ impl ambient_authority::Server for AmbientAuthorityImpl {
         organization: Reader,
         application: Reader,
     ) {
-        let ambient_authority = cap_std::ambient_authority();
+        let this = self.borrow_mut();
         let Some(_project_dirs) = ProjectDirs::from(
             qualifier.to_str()?,
             organization.to_str()?,
             application.to_str()?,
-            ambient_authority,
+            this.authority,
         ) else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
@@ -175,14 +198,14 @@ impl ambient_authority::Server for AmbientAuthorityImpl {
         Ok(())
     }
     async fn user_dirs_home_dir(&self) {
-        let ambient_authority = cap_std::ambient_authority();
+        let this = self.borrow_mut();
         let Some(user_dirs) = UserDirs::new() else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
                 extra: String::from("No valid $HOME directory"),
             });
         };
-        let Ok(_dir) = UserDirs::home_dir(&user_dirs, ambient_authority) else {
+        let Ok(_dir) = UserDirs::home_dir(&user_dirs, this.authority) else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
                 extra: String::from("Failed to open home dir"),
@@ -194,14 +217,14 @@ impl ambient_authority::Server for AmbientAuthorityImpl {
         Ok(())
     }
     async fn user_dirs_audio_dir(&self) {
-        let ambient_authority = cap_std::ambient_authority();
+        let this = self.borrow_mut();
         let Some(user_dirs) = UserDirs::new() else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
                 extra: String::from("No valid $HOME directory"),
             });
         };
-        let Ok(_dir) = UserDirs::audio_dir(&user_dirs, ambient_authority) else {
+        let Ok(_dir) = UserDirs::audio_dir(&user_dirs, this.authority) else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
                 extra: String::from("Failed to open audio dir"),
@@ -213,14 +236,14 @@ impl ambient_authority::Server for AmbientAuthorityImpl {
         Ok(())
     }
     async fn user_dirs_desktop_dir(&self) {
-        let ambient_authority = cap_std::ambient_authority();
+        let this = self.borrow_mut();
         let Some(user_dirs) = UserDirs::new() else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
                 extra: String::from("No valid $HOME directory"),
             });
         };
-        let Ok(_dir) = UserDirs::desktop_dir(&user_dirs, ambient_authority) else {
+        let Ok(_dir) = UserDirs::desktop_dir(&user_dirs, this.authority) else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
                 extra: String::from("Failed to open desktop dir"),
@@ -232,14 +255,14 @@ impl ambient_authority::Server for AmbientAuthorityImpl {
         Ok(())
     }
     async fn user_dirs_document_dir(&self) {
-        let ambient_authority = cap_std::ambient_authority();
+        let this = self.borrow_mut();
         let Some(user_dirs) = UserDirs::new() else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
                 extra: String::from("No valid $HOME directory"),
             });
         };
-        let Ok(_dir) = UserDirs::document_dir(&user_dirs, ambient_authority) else {
+        let Ok(_dir) = UserDirs::document_dir(&user_dirs, this.authority) else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
                 extra: String::from("Failed to open document dir"),
@@ -251,14 +274,14 @@ impl ambient_authority::Server for AmbientAuthorityImpl {
         Ok(())
     }
     async fn user_dirs_download_dir(&self) {
-        let ambient_authority = cap_std::ambient_authority();
+        let this = self.borrow_mut();
         let Some(user_dirs) = UserDirs::new() else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
                 extra: String::from("No valid $HOME directory"),
             });
         };
-        let Ok(_dir) = UserDirs::download_dir(&user_dirs, ambient_authority) else {
+        let Ok(_dir) = UserDirs::download_dir(&user_dirs, this.authority) else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
                 extra: String::from("Failed to open download dir"),
@@ -270,14 +293,14 @@ impl ambient_authority::Server for AmbientAuthorityImpl {
         Ok(())
     }
     async fn user_dirs_font_dir(&self) {
-        let ambient_authority = cap_std::ambient_authority();
+        let this = self.borrow_mut();
         let Some(user_dirs) = UserDirs::new() else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
                 extra: String::from("No valid $HOME directory"),
             });
         };
-        let Ok(_dir) = UserDirs::font_dir(&user_dirs, ambient_authority) else {
+        let Ok(_dir) = UserDirs::font_dir(&user_dirs, this.authority) else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
                 extra: String::from("Failed to open font dir"),
@@ -289,14 +312,14 @@ impl ambient_authority::Server for AmbientAuthorityImpl {
         Ok(())
     }
     async fn user_dirs_picture_dir(&self) {
-        let ambient_authority = cap_std::ambient_authority();
+        let this = self.borrow_mut();
         let Some(user_dirs) = UserDirs::new() else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
                 extra: String::from("No valid $HOME directory"),
             });
         };
-        let Ok(_dir) = UserDirs::picture_dir(&user_dirs, ambient_authority) else {
+        let Ok(_dir) = UserDirs::picture_dir(&user_dirs, this.authority) else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
                 extra: String::from("Failed to open picture dir"),
@@ -308,14 +331,14 @@ impl ambient_authority::Server for AmbientAuthorityImpl {
         Ok(())
     }
     async fn user_dirs_public_dir(&self) {
-        let ambient_authority = cap_std::ambient_authority();
+        let this = self.borrow_mut();
         let Some(user_dirs) = UserDirs::new() else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
                 extra: String::from("No valid $HOME directory"),
             });
         };
-        let Ok(_dir) = UserDirs::public_dir(&user_dirs, ambient_authority) else {
+        let Ok(_dir) = UserDirs::public_dir(&user_dirs, this.authority) else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
                 extra: String::from("Failed to open user's public dir"),
@@ -327,14 +350,14 @@ impl ambient_authority::Server for AmbientAuthorityImpl {
         Ok(())
     }
     async fn user_dirs_template_dir(&self) {
-        let ambient_authority = cap_std::ambient_authority();
+        let this = self.borrow_mut();
         let Some(user_dirs) = UserDirs::new() else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
                 extra: String::from("No valid $HOME directory"),
             });
         };
-        let Ok(_dir) = UserDirs::template_dir(&user_dirs, ambient_authority) else {
+        let Ok(_dir) = UserDirs::template_dir(&user_dirs, this.authority) else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
                 extra: String::from("Failed to open template dir"),
@@ -346,14 +369,14 @@ impl ambient_authority::Server for AmbientAuthorityImpl {
         Ok(())
     }
     async fn user_dirs_video_dir(&self) {
-        let ambient_authority = cap_std::ambient_authority();
+        let this = self.borrow_mut();
         let Some(user_dirs) = UserDirs::new() else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
                 extra: String::from("No valid $HOME directory"),
             });
         };
-        let Ok(_dir) = UserDirs::video_dir(&user_dirs, ambient_authority) else {
+        let Ok(_dir) = UserDirs::video_dir(&user_dirs, this.authority) else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
                 extra: String::from("Failed to open video dir"),
@@ -365,8 +388,8 @@ impl ambient_authority::Server for AmbientAuthorityImpl {
         Ok(())
     }
     async fn temp_dir_new(&self) {
-        let ambient_authority = cap_std::ambient_authority();
-        let Ok(dir) = TempDir::new(ambient_authority) else {
+        let this = self.borrow_mut();
+        let Ok(dir) = TempDir::new(this.authority) else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
                 extra: String::from("Failed to create temp dir"),
@@ -1049,10 +1072,6 @@ impl file::Server for FileImpl {
         results.get().set_stream(capnp_rpc::new_client(_stream));
         Ok(())
     }
-    async fn raw_handle(&self) {
-        results.get().set_handle(self.file.as_raw_filelike() as u64);
-        Ok(())
-    }
 }
 
 pub struct MetadataImpl {
@@ -1556,11 +1575,12 @@ pub mod tests {
         cap_std_capnproto::AmbientAuthorityImpl,
     };
     use cap_directories::{self, ProjectDirs, UserDirs};
+    use std::cell::RefCell;
 
     #[tokio::test]
     async fn create_dir_all_canonicalize_test() -> eyre::Result<()> {
         let ambient_authority: ambient_authority::Client =
-            capnp_rpc::new_client(AmbientAuthorityImpl {});
+            capnp_rpc::new_client(RefCell::new(AmbientAuthorityImpl::new()));
 
         let mut open_ambient_request = ambient_authority.dir_open_ambient_request();
         let path = std::env::temp_dir();
@@ -1594,7 +1614,7 @@ pub mod tests {
     async fn test_create_write_getmetadata() -> eyre::Result<()> {
         //use ambient authority to open a dir, create a file(Or open it in write mode if it already exists), open a bytestream, use the bytestream to write some bytes, get file metadata
         let ambient_authority: ambient_authority::Client =
-            capnp_rpc::new_client(AmbientAuthorityImpl {});
+            capnp_rpc::new_client(RefCell::new(AmbientAuthorityImpl::new()));
 
         let mut open_ambient_request = ambient_authority.dir_open_ambient_request();
         let path = std::env::temp_dir();
@@ -1653,7 +1673,7 @@ pub mod tests {
     #[tokio::test]
     async fn test_home_dir() -> eyre::Result<()> {
         let ambient_authority: ambient_authority::Client =
-            capnp_rpc::new_client(AmbientAuthorityImpl {});
+            capnp_rpc::new_client(RefCell::new(AmbientAuthorityImpl::new()));
 
         let home_dir_request = ambient_authority.user_dirs_home_dir_request();
         let _home_dir = home_dir_request.send().promise.await?.get()?.get_dir()?;
@@ -1663,7 +1683,7 @@ pub mod tests {
     #[tokio::test]
     async fn test_user_dirs() -> eyre::Result<()> {
         let ambient_authority: ambient_authority::Client =
-            capnp_rpc::new_client(AmbientAuthorityImpl {});
+            capnp_rpc::new_client(RefCell::new(AmbientAuthorityImpl::new()));
 
         let audio_dir_request = ambient_authority.user_dirs_audio_dir_request();
         let _audio_dir = audio_dir_request.send().promise.await?.get()?.get_dir()?;
@@ -1716,7 +1736,7 @@ pub mod tests {
     async fn test_project_dirs() -> eyre::Result<()> {
         //TODO maybe create some form of generic "dir" test
         let ambient_authority: ambient_authority::Client =
-            capnp_rpc::new_client(AmbientAuthorityImpl {});
+            capnp_rpc::new_client(RefCell::new(AmbientAuthorityImpl::new()));
 
         let mut project_dirs_from_request = ambient_authority.project_dirs_from_request();
         let mut project_dirs_builder = project_dirs_from_request.get();
@@ -1759,7 +1779,7 @@ pub mod tests {
     #[tokio::test]
     async fn test_system_clock() -> eyre::Result<()> {
         let ambient_authority: ambient_authority::Client =
-            capnp_rpc::new_client(AmbientAuthorityImpl {});
+            capnp_rpc::new_client(RefCell::new(AmbientAuthorityImpl::new()));
 
         let system_clock_request = ambient_authority.system_clock_new_request();
         let system_clock = system_clock_request
@@ -1810,7 +1830,7 @@ pub mod tests {
         std::fs::create_dir_all(path)?;
 
         let ambient_authority: ambient_authority::Client =
-            capnp_rpc::new_client(AmbientAuthorityImpl {});
+            capnp_rpc::new_client(RefCell::new(AmbientAuthorityImpl::new()));
 
         let mut open_ambient_request = ambient_authority.dir_open_ambient_request();
         let mut path = std::env::temp_dir();
@@ -1976,7 +1996,7 @@ pub mod tests {
         writer.flush()?;
 
         let ambient_authority: ambient_authority::Client =
-            capnp_rpc::new_client(AmbientAuthorityImpl {});
+            capnp_rpc::new_client(RefCell::new(AmbientAuthorityImpl::new()));
 
         let mut open_ambient_request = ambient_authority.dir_open_ambient_request();
         let path = std::env::temp_dir();

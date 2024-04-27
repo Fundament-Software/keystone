@@ -1,0 +1,27 @@
+[package]
+name = "hello-world-module"
+edition.workspace = true
+rust-version.workspace = true
+version = "0.1.0"
+authors = [
+  "Sonata",
+  "Erik McClure <erikm@fundament.software>",
+  "Original code: Mostafa Sedaghat Joo <mostafa.sedaghat@gmail.com>",
+]
+homepage.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "hello-world-module"
+path = "main.rs"
+
+[dependencies]
+capstone.workspace = true
+capstone-futures.workspace = true
+capstone-import.workspace = true
+capstone-rpc.workspace = true
+capstone-macros.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing-subscriber.workspace = true
+tracing.workspace = true

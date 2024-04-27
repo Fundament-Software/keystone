@@ -14,13 +14,13 @@ pub enum ModuleState {
     CloseFailure,
 }
 
-struct ModuleInstance {
+pub struct ModuleInstance {
     instance_id: u64,
     pid: u64,
     state: ModuleState,
 }
 
-pub trait Database {
+pub trait RootDatabase {
     fn get_config(&mut self, instance_id: u64) -> Result<capnp::any_pointer::Owned>;
     fn get_sturdyref(&mut self, sturdy_id: u64) -> Result<capnp::any_pointer::Owned>;
     fn set_sturdyref(&mut self, sturdy_id: u64, data: capnp::any_pointer::Reader) -> Result<()>;
@@ -31,13 +31,13 @@ pub trait Database {
         pid: Option<u64>,
         state: Option<ModuleState>,
     ) -> Result<()>;
-    fn clear_modules() -> Result<()>;
+    fn clear_modules(&mut self) -> Result<()>;
 }
 
-pub trait RootDatabase {
-    type DB: Database;
-
-    fn get_root_database(&mut self) -> Result<Self::DB>;
+pub trait Sqlite<DB: RootDatabase> {
+    fn get_root_database(&mut self, name: &str) -> Result<DB>;
+    fn create_database(&mut self, name: &str, schema: &str) -> Result<()>;
+    fn delete_database(&mut self, name: &str, schema: &str) -> Result<()>;
 }
 
 #[derive(Debug, Serialize, Deserialize)]

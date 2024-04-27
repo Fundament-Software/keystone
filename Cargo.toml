@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["core", "modules/sqlite-ks", "modules/test"]
+members = ["core", "modules/sqlite-ks", "modules/hello-world", "modules/test"]
 default-members = ["core"]
 
 [workspace.package]
@@ -19,7 +19,17 @@ color-eyre = "0.6"
 eyre = "0.6"
 tracing-subscriber = { version = "0.3.18", features = ["time"] }
 tracing = "0.1.40"
-tokio = { version = "1.18", features = ["full"] }
+tokio = { version = "1.18", features = [
+  "net",
+  "rt",
+  "macros",
+  "io-std",
+  "time",
+  "tracing",
+] }
+tokio-util = { version = "0.7.4", features = ["compat"] }
+async-backtrace = "0.2.7"
+futures-util = "0.3"
 capstone = { git = "https://github.com/Fundament-Software/capstone-rs" }
 capstone-futures = { git = "https://github.com/Fundament-Software/capstone-rs" }
 capstone-import = { git = "https://github.com/Fundament-Software/capstone-rs" }

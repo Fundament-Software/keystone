@@ -1,8 +1,6 @@
 use super::path::PathImpl;
 use super::{Domain, Path};
-use capnp::capability::Promise;
 use capnp_macros::capnproto_rpc;
-use capnp_rpc::pry;
 use hyper::client::HttpConnector;
 use hyper::http::uri::Authority;
 use hyper_tls::HttpsConnector;
@@ -30,7 +28,7 @@ impl DomainImpl {
 }
 #[capnproto_rpc(Domain)]
 impl Domain::Server for DomainImpl {
-    fn subdomain(&mut self, name: capnp::text::Reader) {
+    async fn subdomain(&self, name: capnp::text::Reader) {
         if !self.modifiable {
             return Err(capnp::Error::failed(
                 "Can't add subdomain, because domain was finalized".to_string(),
@@ -41,10 +39,10 @@ impl Domain::Server for DomainImpl {
         let domain_impl = DomainImpl::new(new_domain_name, self.https_client.clone())?;
         let domain: Domain::Client = capnp_rpc::new_client(domain_impl);
         results.get().set_result(domain);
-        capnp::ok()
+        Ok(())
     }
 
-    fn path(&mut self, values: capnp::text_list::Reader) {
+    async fn path(&self, values: capnp::text_list::Reader) {
         let path_list: Result<Vec<String>, capnp::Error> =
             values.iter().map(|i| Ok(i?.to_string()?)).collect();
         let path_impl = PathImpl::new(
@@ -54,14 +52,14 @@ impl Domain::Server for DomainImpl {
         )?;
         let path: Path::Client = capnp_rpc::new_client(path_impl);
         results.get().set_result(path);
-        capnp::ok()
+        Ok(())
     }
 
-    fn finalize_domain(&mut self) {
+    async fn finalize_domain(&self) {
         let mut return_domain = self.clone();
         return_domain.modifiable = false;
         let client = capnp_rpc::new_client(return_domain);
         results.get().set_result(client);
-        capnp::ok()
+        Ok(())
     }
 }

@@ -1,9 +1,5 @@
 @0x8f5d14e1c273738d;
 
-using Cxx = import "/capnp/c++.capnp";
-$Cxx.namespace("capnp");
-$Cxx.allowCancellation;
-
 interface ByteStream {
   write @0 (bytes :Data) -> import "stream.capnp".StreamResult;
   # Write a chunk.

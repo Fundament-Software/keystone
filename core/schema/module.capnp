@@ -1,5 +1,12 @@
 @0xd520bf098db5b69e;
 
+using Cell = import "storage.capnp".Cell;
+
+struct StatefulConfig(Config, State) {
+    config @0 :Config;
+    state @1 :Cell(State);
+}
+
 struct ModuleError(BackingError) {
     union {
         backing @0 :BackingError;

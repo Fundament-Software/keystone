@@ -14,7 +14,6 @@ capnp_import::capnp_import!("schema/**/*.capnp");
 capnp_import::capnp_import!("../modules/hello-world/*.capnp");
 
 use crate::keystone_capnp::keystone_config;
-use capnp::{dynamic_value, introspect::Introspect};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use eyre::Result;
 use std::convert::Into;

@@ -20,4 +20,16 @@ struct Config {
 }
 
 # The state is called State by convention, but this is not required.
-# struct State {}
+struct State {
+    previous @0 :Text;
+}
+
+#const properties :ModuleProperties = (
+#    friendlyName = "Hello World",
+#    stateful = true,
+#    spawnID = PosixExecutable,
+#    spawnDesc = (
+#        path = "/usr/bin/hello",
+#        arch = Native
+#    )
+#);

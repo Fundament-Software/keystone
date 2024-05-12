@@ -20,19 +20,20 @@ enum CallLogLevel {
 
 struct KeystoneConfig {
   struct CapLogConfig {
-    trieFile @0 :Text;
-    dataPrefix @1 :Text;
-    maxFileSize @2 :UInt64;
-    maxOpenFiles @3 :UInt64;
+    trieFile @0 :Text = "caplog.trie";
+    dataPrefix @1 :Text = "caplog";
+    maxFileSize @2 :UInt64 = 268435456;
+    maxOpenFiles @3 :UInt64 = 10;
   }
 
-  database @0 :Text;
+  database @0 :Text = "keystone.sqlite";
   caplog @1 :CapLogConfig;
 
-  struct ModuleConfig {
-    path @0 :Text; # todo: replace with hash value once we have a store
-    transient @1 :Bool;
-    config @2 :AnyPointer;
+  struct ModuleConfig(T) {
+    name @0 :Text;
+    config @1 :T;
+    path @2 :Text; # todo: replace with hash value once we have a store
+    schema @3 :Text = "keystone.schema"; # relative to path
   }
 
   modules @2 :List(ModuleConfig);

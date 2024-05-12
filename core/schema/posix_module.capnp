@@ -1,5 +1,6 @@
 @0xbffb60321ec097ca;
 
+
 using import "std/byte_stream.capnp".ByteStream;
 using Program = import "spawn.capnp".Program;
 using ModuleError = import "module.capnp".ModuleError;

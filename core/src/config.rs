@@ -1,7 +1,10 @@
+use std::{fs::File, io::BufReader, path::Path};
+
+use crate::keystone_capnp::keystone_config;
 use crate::toml_capnp;
 use capnp::{
     dynamic_struct, dynamic_value,
-    introspect::{Introspect, TypeVariant},
+    introspect::{Introspect, RawBrandedStructSchema, RawStructSchema, TypeVariant},
     schema_capnp,
     traits::HasTypeId,
 };
@@ -85,6 +88,45 @@ fn toml_to_capnp(v: &Value, mut builder: toml_capnp::value::Builder) -> Result<(
     Ok(())
 }
 
+fn toml_to_config(
+    v: &Table,
+    mut builder: keystone_config::module_config::Builder<capnp::any_pointer::Owned>,
+) -> Result<()> {
+    let path = v.get("path").ok_or(eyre!("Can't find path!"))?;
+    let path = Path::new(path.as_str().ok_or(eyre!("Path isn't a string?!"))?);
+    let schemafile = path.parent().unwrap_or(&Path::new("")).join(
+        v.get("schema")
+            .unwrap_or(&Value::String("keystone.schema".to_string()))
+            .as_str()
+            .ok_or(eyre!("Schema isn't a string?!"))?,
+    );
+
+    let f = File::open(schemafile)?;
+    let mut bufread = BufReader::new(f);
+
+    let msg = capnp::serialize::read_message(
+        bufread,
+        capnp::message::ReaderOptions {
+            traversal_limit_in_words: None,
+            nesting_limit: 128,
+        },
+    )?;
+
+    let schema: capnp::schema_capnp::node::Reader = msg.get_root()?;
+    if let capnp::schema_capnp::node::Which::Struct(s) = schema.which()? {
+s.get_discriminant_count()
+    }
+
+    RawStructSchema{encoded_node: msg.into_segments(), nonunion_members: todo!(), members_by_discriminant: todo!() }
+    let dynbuild: capnp::dynamic_struct::Builder = builder.into();
+    
+    capnp::dynamic_struct::Builder::new(builder, schema)
+
+    //RawBrandedStructSchema
+
+    Ok(())
+}
+
 fn value_to_struct(v: &Table, mut builder: ::capnp::dynamic_struct::Builder) -> Result<()> {
     'outer: for (k, v) in v.iter() {
         let mut builder = builder.reborrow();
@@ -96,6 +138,23 @@ fn value_to_struct(v: &Table, mut builder: ::capnp::dynamic_struct::Builder) -> 
                 if s.get_type_id() == toml_capnp::value::Builder::TYPE_ID {
                     let dynamic: dynamic_struct::Builder = builder.init(field)?.downcast();
                     toml_to_capnp(v, dynamic.downcast()?)?;
+                    return Ok(());
+                }
+            }
+        }
+
+        // If we have reached a ModuleConfig value, call our handler function so we can look up the schema
+        if let capnp::schema_capnp::field::Slot(x) = field.get_proto().which()? {
+            if let schema_capnp::type_::Which::Struct(s) = x.get_type()?.which()? {
+                if s.get_type_id()
+                    == keystone_config::module_config::Builder::<capnp::any_pointer::Owned>::TYPE_ID
+                {
+                    let dynamic: dynamic_struct::Builder = builder.init(field)?.downcast();
+                    if let Value::Table(t) = v {
+                        toml_to_config(t, dynamic.downcast()?)?;
+                    } else {
+                        return Err(eyre!("Config value must be a table!"));
+                    }
                     return Ok(());
                 }
             }
@@ -145,9 +204,6 @@ where
     Ok(value_to_struct(config, dynamic.downcast())?)
 }
 
-#[cfg(test)]
-use crate::keystone_capnp::keystone_config;
-
 #[ignore]
 #[test]
 fn test_basic_config() -> Result<()> {
@@ -158,9 +214,9 @@ database = "test.sqlite"
 defaultLog = "debug"
 
 [[modules]]
+name = "test"
 path = "/test/"
 transient = false
-config = { x = 1, y = 2 }
 
 "#;
 

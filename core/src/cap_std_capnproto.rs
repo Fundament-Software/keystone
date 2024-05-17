@@ -1,4 +1,5 @@
-use std::{borrow::Borrow, cell::RefCell, io::Write};
+use std::borrow::Borrow;
+use std::{cell::RefCell, io::Write, rc::Rc};
 
 use crate::{
     byte_stream::ByteStreamImpl,
@@ -20,16 +21,11 @@ use capnp::{capability::Promise, Error};
 use capnp_macros::{capnp_let, capnproto_rpc};
 use capnp_rpc::CapabilityServerSet;
 
-thread_local!(
-    static DIR_SET: RefCell<CapabilityServerSet<DirImpl, dir::Client>> =
-        RefCell::new(CapabilityServerSet::new());
-    static INSTANT_SET: RefCell<CapabilityServerSet<InstantImpl, instant::Client>> =
-        RefCell::new(CapabilityServerSet::new());
-);
-
 pub struct AmbientAuthorityImpl {
-    authority: AmbientAuthority,
-    file_set: capnp_rpc::CapabilityServerSet<FileImpl, file::Client>,
+    pub authority: AmbientAuthority,
+    pub file_set: capnp_rpc::CapabilityServerSet<FileImpl, file::Client>,
+    pub dir_set: capnp_rpc::CapabilityServerSet<DirImpl, dir::Client>,
+    pub instant_set: capnp_rpc::CapabilityServerSet<InstantImpl, instant::Client>,
 }
 
 impl AmbientAuthorityImpl {
@@ -37,6 +33,8 @@ impl AmbientAuthorityImpl {
         Self {
             authority: cap_std::ambient_authority(),
             file_set: capnp_rpc::CapabilityServerSet::new(),
+            dir_set: capnp_rpc::CapabilityServerSet::new(),
+            instant_set: capnp_rpc::CapabilityServerSet::new(),
         }
     }
 
@@ -49,14 +47,34 @@ impl AmbientAuthorityImpl {
                 .as_raw_filelike() as u64,
         )
     }
+
+    pub fn new_file(this: &Rc<RefCell<Self>>, file: File) -> file::Client {
+        this.borrow_mut().file_set.new_client(FileImpl {
+            file,
+            ambient: this.clone(),
+        })
+    }
+
+    pub fn new_dir(this: &Rc<RefCell<Self>>, dir: Dir) -> dir::Client {
+        this.borrow_mut().dir_set.new_client(DirImpl {
+            dir,
+            ambient: this.clone(),
+        })
+    }
+
+    pub fn new_instant(this: &Rc<RefCell<Self>>, instant: Instant) -> instant::Client {
+        this.borrow_mut().instant_set.new_client(InstantImpl {
+            instant,
+            ambient: this.clone(),
+        })
+    }
 }
 
 #[capnproto_rpc(ambient_authority)]
-impl ambient_authority::Server for RefCell<AmbientAuthorityImpl> {
+impl ambient_authority::Server for Rc<RefCell<AmbientAuthorityImpl>> {
     async fn file_open_ambient(&self, path: Reader) {
-        let mut this = self.borrow_mut();
         let path = path.to_str()?;
-        let Ok(_file) = File::open_ambient(path, this.authority) else {
+        let Ok(_file) = File::open_ambient(path, self.as_ref().borrow().authority) else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
                 extra: String::from("Failed to open file using ambient authority"),
@@ -64,13 +82,12 @@ impl ambient_authority::Server for RefCell<AmbientAuthorityImpl> {
         };
         results
             .get()
-            .set_file(this.file_set.new_client(FileImpl { file: _file }));
+            .set_file(AmbientAuthorityImpl::new_file(self, _file));
         Ok(())
     }
     async fn file_create_ambient(&self, path: Reader) {
-        let mut this = self.borrow_mut();
         let path = path.to_str()?;
-        let Ok(_file) = File::create_ambient(path, this.authority) else {
+        let Ok(_file) = File::create_ambient(path, self.as_ref().borrow().authority) else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
                 extra: String::from("Failed to create file using ambient authority"),
@@ -78,11 +95,10 @@ impl ambient_authority::Server for RefCell<AmbientAuthorityImpl> {
         };
         results
             .get()
-            .set_file(this.file_set.new_client(FileImpl { file: _file }));
+            .set_file(AmbientAuthorityImpl::new_file(self, _file));
         Ok(())
     }
     async fn file_open_ambient_with(&self, path: Reader, open_options: Reader) {
-        let mut this = self.borrow_mut();
         capnp_let!({read, write, append, truncate, create, create_new} = open_options);
         let mut options = OpenOptions::new();
         let path = path.to_str()?;
@@ -93,7 +109,8 @@ impl ambient_authority::Server for RefCell<AmbientAuthorityImpl> {
             .truncate(truncate)
             .create(create)
             .create_new(create_new);
-        let Ok(_file) = File::open_ambient_with(path, &options, this.authority) else {
+        let Ok(_file) = File::open_ambient_with(path, &options, self.as_ref().borrow().authority)
+        else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
                 extra: String::from(
@@ -103,13 +120,12 @@ impl ambient_authority::Server for RefCell<AmbientAuthorityImpl> {
         };
         results
             .get()
-            .set_file(this.file_set.new_client(FileImpl { file: _file }));
+            .set_file(AmbientAuthorityImpl::new_file(self, _file));
         Ok(())
     }
     async fn dir_open_ambient(&self, path: Reader) {
-        let this = self.borrow_mut();
         let path = path.to_str()?;
-        let Ok(_dir) = Dir::open_ambient_dir(path, this.authority) else {
+        let Ok(_dir) = Dir::open_ambient_dir(path, self.as_ref().borrow().authority) else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
                 extra: String::from("Failed to open dir using ambient authority"),
@@ -117,12 +133,15 @@ impl ambient_authority::Server for RefCell<AmbientAuthorityImpl> {
         };
         results
             .get()
-            .set_result(DIR_SET.with_borrow_mut(|set| set.new_client(DirImpl { dir: _dir })));
+            .set_result(AmbientAuthorityImpl::new_dir(self, _dir));
         Ok(())
     }
     async fn dir_open_parent(&self, dir: Dir) {
-        let this = self.borrow_mut();
-        let Some(dir_impl) = DIR_SET.with_borrow(|set| set.get_local_server_of_resolved(&dir))
+        let Some(dir_impl) = self
+            .as_ref()
+            .borrow()
+            .dir_set
+            .get_local_server_of_resolved(&dir)
         else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
@@ -130,7 +149,7 @@ impl ambient_authority::Server for RefCell<AmbientAuthorityImpl> {
             });
         };
         let dir = &dir_impl.as_ref().borrow().dir;
-        let Ok(_dir) = dir.open_parent_dir(this.authority) else {
+        let Ok(_dir) = dir.open_parent_dir(self.as_ref().borrow().authority) else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
                 extra: String::from("Failed to open parent dir using ambient authority"),
@@ -138,13 +157,12 @@ impl ambient_authority::Server for RefCell<AmbientAuthorityImpl> {
         };
         results
             .get()
-            .set_result(DIR_SET.with_borrow_mut(|set| set.new_client(DirImpl { dir: _dir })));
+            .set_result(AmbientAuthorityImpl::new_dir(self, _dir));
         Ok(())
     }
     async fn dir_create_ambient_all(&self, path: Reader) {
-        let this = self.borrow_mut();
         let path = path.to_str()?;
-        let Ok(()) = Dir::create_ambient_dir_all(path, this.authority) else {
+        let Ok(()) = Dir::create_ambient_dir_all(path, self.as_ref().borrow().authority) else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
                 extra: String::from(
@@ -155,20 +173,19 @@ impl ambient_authority::Server for RefCell<AmbientAuthorityImpl> {
         Ok(())
     }
     async fn monotonic_clock_new(&self) {
-        let this = self.borrow_mut();
         results
             .get()
             .set_clock(capnp_rpc::new_client(MonotonicClockImpl {
-                monotonic_clock: MonotonicClock::new(this.authority),
+                monotonic_clock: MonotonicClock::new(self.as_ref().borrow().authority),
+                ambient: self.clone(),
             }));
         Ok(())
     }
     async fn system_clock_new(&self) {
-        let this = self.borrow_mut();
         results
             .get()
             .set_clock(capnp_rpc::new_client(SystemClockImpl {
-                system_clock: SystemClock::new(this.authority),
+                system_clock: SystemClock::new(self.as_ref().borrow().authority),
             }));
         Ok(())
     }
@@ -178,12 +195,11 @@ impl ambient_authority::Server for RefCell<AmbientAuthorityImpl> {
         organization: Reader,
         application: Reader,
     ) {
-        let this = self.borrow_mut();
         let Some(_project_dirs) = ProjectDirs::from(
             qualifier.to_str()?,
             organization.to_str()?,
             application.to_str()?,
-            this.authority,
+            self.as_ref().borrow().authority,
         ) else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
@@ -194,18 +210,18 @@ impl ambient_authority::Server for RefCell<AmbientAuthorityImpl> {
             .get()
             .set_project_dirs(capnp_rpc::new_client(ProjectDirsImpl {
                 project_dirs: _project_dirs,
+                ambient: self.clone(),
             }));
         Ok(())
     }
     async fn user_dirs_home_dir(&self) {
-        let this = self.borrow_mut();
         let Some(user_dirs) = UserDirs::new() else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
                 extra: String::from("No valid $HOME directory"),
             });
         };
-        let Ok(_dir) = UserDirs::home_dir(&user_dirs, this.authority) else {
+        let Ok(_dir) = UserDirs::home_dir(&user_dirs, self.as_ref().borrow().authority) else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
                 extra: String::from("Failed to open home dir"),
@@ -213,18 +229,17 @@ impl ambient_authority::Server for RefCell<AmbientAuthorityImpl> {
         };
         results
             .get()
-            .set_dir(DIR_SET.with_borrow_mut(|set| set.new_client(DirImpl { dir: _dir })));
+            .set_dir(AmbientAuthorityImpl::new_dir(self, _dir));
         Ok(())
     }
     async fn user_dirs_audio_dir(&self) {
-        let this = self.borrow_mut();
         let Some(user_dirs) = UserDirs::new() else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
                 extra: String::from("No valid $HOME directory"),
             });
         };
-        let Ok(_dir) = UserDirs::audio_dir(&user_dirs, this.authority) else {
+        let Ok(_dir) = UserDirs::audio_dir(&user_dirs, self.as_ref().borrow().authority) else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
                 extra: String::from("Failed to open audio dir"),
@@ -232,18 +247,17 @@ impl ambient_authority::Server for RefCell<AmbientAuthorityImpl> {
         };
         results
             .get()
-            .set_dir(DIR_SET.with_borrow_mut(|set| set.new_client(DirImpl { dir: _dir })));
+            .set_dir(AmbientAuthorityImpl::new_dir(self, _dir));
         Ok(())
     }
     async fn user_dirs_desktop_dir(&self) {
-        let this = self.borrow_mut();
         let Some(user_dirs) = UserDirs::new() else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
                 extra: String::from("No valid $HOME directory"),
             });
         };
-        let Ok(_dir) = UserDirs::desktop_dir(&user_dirs, this.authority) else {
+        let Ok(_dir) = UserDirs::desktop_dir(&user_dirs, self.as_ref().borrow().authority) else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
                 extra: String::from("Failed to open desktop dir"),
@@ -251,18 +265,17 @@ impl ambient_authority::Server for RefCell<AmbientAuthorityImpl> {
         };
         results
             .get()
-            .set_dir(DIR_SET.with_borrow_mut(|set| set.new_client(DirImpl { dir: _dir })));
+            .set_dir(AmbientAuthorityImpl::new_dir(self, _dir));
         Ok(())
     }
     async fn user_dirs_document_dir(&self) {
-        let this = self.borrow_mut();
         let Some(user_dirs) = UserDirs::new() else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
                 extra: String::from("No valid $HOME directory"),
             });
         };
-        let Ok(_dir) = UserDirs::document_dir(&user_dirs, this.authority) else {
+        let Ok(_dir) = UserDirs::document_dir(&user_dirs, self.as_ref().borrow().authority) else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
                 extra: String::from("Failed to open document dir"),
@@ -270,18 +283,17 @@ impl ambient_authority::Server for RefCell<AmbientAuthorityImpl> {
         };
         results
             .get()
-            .set_dir(DIR_SET.with_borrow_mut(|set| set.new_client(DirImpl { dir: _dir })));
+            .set_dir(AmbientAuthorityImpl::new_dir(self, _dir));
         Ok(())
     }
     async fn user_dirs_download_dir(&self) {
-        let this = self.borrow_mut();
         let Some(user_dirs) = UserDirs::new() else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
                 extra: String::from("No valid $HOME directory"),
             });
         };
-        let Ok(_dir) = UserDirs::download_dir(&user_dirs, this.authority) else {
+        let Ok(_dir) = UserDirs::download_dir(&user_dirs, self.as_ref().borrow().authority) else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
                 extra: String::from("Failed to open download dir"),
@@ -289,18 +301,17 @@ impl ambient_authority::Server for RefCell<AmbientAuthorityImpl> {
         };
         results
             .get()
-            .set_dir(DIR_SET.with_borrow_mut(|set| set.new_client(DirImpl { dir: _dir })));
+            .set_dir(AmbientAuthorityImpl::new_dir(self, _dir));
         Ok(())
     }
     async fn user_dirs_font_dir(&self) {
-        let this = self.borrow_mut();
         let Some(user_dirs) = UserDirs::new() else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
                 extra: String::from("No valid $HOME directory"),
             });
         };
-        let Ok(_dir) = UserDirs::font_dir(&user_dirs, this.authority) else {
+        let Ok(_dir) = UserDirs::font_dir(&user_dirs, self.as_ref().borrow().authority) else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
                 extra: String::from("Failed to open font dir"),
@@ -308,18 +319,17 @@ impl ambient_authority::Server for RefCell<AmbientAuthorityImpl> {
         };
         results
             .get()
-            .set_dir(DIR_SET.with_borrow_mut(|set| set.new_client(DirImpl { dir: _dir })));
+            .set_dir(AmbientAuthorityImpl::new_dir(self, _dir));
         Ok(())
     }
     async fn user_dirs_picture_dir(&self) {
-        let this = self.borrow_mut();
         let Some(user_dirs) = UserDirs::new() else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
                 extra: String::from("No valid $HOME directory"),
             });
         };
-        let Ok(_dir) = UserDirs::picture_dir(&user_dirs, this.authority) else {
+        let Ok(_dir) = UserDirs::picture_dir(&user_dirs, self.as_ref().borrow().authority) else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
                 extra: String::from("Failed to open picture dir"),
@@ -327,18 +337,17 @@ impl ambient_authority::Server for RefCell<AmbientAuthorityImpl> {
         };
         results
             .get()
-            .set_dir(DIR_SET.with_borrow_mut(|set| set.new_client(DirImpl { dir: _dir })));
+            .set_dir(AmbientAuthorityImpl::new_dir(self, _dir));
         Ok(())
     }
     async fn user_dirs_public_dir(&self) {
-        let this = self.borrow_mut();
         let Some(user_dirs) = UserDirs::new() else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
                 extra: String::from("No valid $HOME directory"),
             });
         };
-        let Ok(_dir) = UserDirs::public_dir(&user_dirs, this.authority) else {
+        let Ok(_dir) = UserDirs::public_dir(&user_dirs, self.as_ref().borrow().authority) else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
                 extra: String::from("Failed to open user's public dir"),
@@ -346,18 +355,17 @@ impl ambient_authority::Server for RefCell<AmbientAuthorityImpl> {
         };
         results
             .get()
-            .set_dir(DIR_SET.with_borrow_mut(|set| set.new_client(DirImpl { dir: _dir })));
+            .set_dir(AmbientAuthorityImpl::new_dir(self, _dir));
         Ok(())
     }
     async fn user_dirs_template_dir(&self) {
-        let this = self.borrow_mut();
         let Some(user_dirs) = UserDirs::new() else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
                 extra: String::from("No valid $HOME directory"),
             });
         };
-        let Ok(_dir) = UserDirs::template_dir(&user_dirs, this.authority) else {
+        let Ok(_dir) = UserDirs::template_dir(&user_dirs, self.as_ref().borrow().authority) else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
                 extra: String::from("Failed to open template dir"),
@@ -365,18 +373,17 @@ impl ambient_authority::Server for RefCell<AmbientAuthorityImpl> {
         };
         results
             .get()
-            .set_dir(DIR_SET.with_borrow_mut(|set| set.new_client(DirImpl { dir: _dir })));
+            .set_dir(AmbientAuthorityImpl::new_dir(self, _dir));
         Ok(())
     }
     async fn user_dirs_video_dir(&self) {
-        let this = self.borrow_mut();
         let Some(user_dirs) = UserDirs::new() else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
                 extra: String::from("No valid $HOME directory"),
             });
         };
-        let Ok(_dir) = UserDirs::video_dir(&user_dirs, this.authority) else {
+        let Ok(_dir) = UserDirs::video_dir(&user_dirs, self.as_ref().borrow().authority) else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
                 extra: String::from("Failed to open video dir"),
@@ -384,12 +391,11 @@ impl ambient_authority::Server for RefCell<AmbientAuthorityImpl> {
         };
         results
             .get()
-            .set_dir(DIR_SET.with_borrow_mut(|set| set.new_client(DirImpl { dir: _dir })));
+            .set_dir(AmbientAuthorityImpl::new_dir(self, _dir));
         Ok(())
     }
     async fn temp_dir_new(&self) {
-        let this = self.borrow_mut();
-        let Ok(dir) = TempDir::new(this.authority) else {
+        let Ok(dir) = TempDir::new(self.as_ref().borrow().authority) else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
                 extra: String::from("Failed to create temp dir"),
@@ -399,6 +405,7 @@ impl ambient_authority::Server for RefCell<AmbientAuthorityImpl> {
             .get()
             .set_temp_dir(capnp_rpc::new_client(TempDirImpl {
                 temp_dir: RefCell::new(Some(dir)),
+                ambient: self.clone(),
             }));
         Ok(())
     }
@@ -406,6 +413,7 @@ impl ambient_authority::Server for RefCell<AmbientAuthorityImpl> {
 
 pub struct DirImpl {
     pub dir: Dir,
+    ambient: Rc<RefCell<AmbientAuthorityImpl>>,
 }
 #[capnproto_rpc(dir)]
 impl dir::Server for DirImpl {
@@ -419,7 +427,7 @@ impl dir::Server for DirImpl {
         };
         results
             .get()
-            .set_file(capnp_rpc::new_client(FileImpl { file: _file }));
+            .set_file(AmbientAuthorityImpl::new_file(&self.ambient, _file));
         Ok(())
     }
     async fn open_with(&self, open_options: Reader, path: Reader) {
@@ -441,7 +449,7 @@ impl dir::Server for DirImpl {
         };
         results
             .get()
-            .set_file(capnp_rpc::new_client(FileImpl { file: _file }));
+            .set_file(AmbientAuthorityImpl::new_file(&self.ambient, _file));
         Ok(())
     }
     async fn create_dir(&self, path: Reader) {
@@ -474,7 +482,7 @@ impl dir::Server for DirImpl {
         };
         results
             .get()
-            .set_file(capnp_rpc::new_client(FileImpl { file: _file }));
+            .set_file(AmbientAuthorityImpl::new_file(&self.ambient, _file));
         Ok(())
     }
     async fn canonicalize(&self, path: Reader) {
@@ -497,7 +505,12 @@ impl dir::Server for DirImpl {
     async fn copy(&self, path_from: Reader, path_to: Reader, dir_to: Capability) {
         let from = path_from.to_str()?;
         let to = path_to.to_str()?;
-        let Some(dir_impl) = DIR_SET.with_borrow(|set| set.get_local_server_of_resolved(&dir_to))
+        let Some(dir_impl) = self
+            .ambient
+            .as_ref()
+            .borrow()
+            .dir_set
+            .get_local_server_of_resolved(&dir_to)
         else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
@@ -518,7 +531,12 @@ impl dir::Server for DirImpl {
         let src = src_path.to_str()?;
         let dst = dst_path.to_str()?;
 
-        let Some(dir_impl) = DIR_SET.with_borrow(|set| set.get_local_server_of_resolved(&dst_dir))
+        let Some(dir_impl) = self
+            .ambient
+            .as_ref()
+            .borrow()
+            .dir_set
+            .get_local_server_of_resolved(&dst_dir)
         else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
@@ -572,6 +590,7 @@ impl dir::Server for DirImpl {
         };
         results.get().set_iter(capnp_rpc::new_client(ReadDirImpl {
             iter: RefCell::new(_iter),
+            ambient: self.ambient.clone(),
         }));
         Ok(())
     }
@@ -585,6 +604,7 @@ impl dir::Server for DirImpl {
         };
         results.get().set_iter(capnp_rpc::new_client(ReadDirImpl {
             iter: RefCell::new(_iter),
+            ambient: self.ambient.clone(),
         }));
         Ok(())
     }
@@ -804,13 +824,14 @@ impl dir::Server for DirImpl {
             .get()
             .set_temp_dir(capnp_rpc::new_client(TempDirImpl {
                 temp_dir: RefCell::new(Some(temp_dir)),
+                ambient: self.ambient.clone(),
             }));
         Ok(())
     } /*
       async fn temp_file_new(&self,  params: dir::TempFileNewParams, mut results: dir::TempFileNewresultss) {
 
           let dir_cap = pry!(params_reader.get_dir());
-          let Some(underlying_dir) = DIR_SET.with_borrow(|set| set.get_local_server_of_resolved(&dir_cap)) else {
+          let Some(underlying_dir) = DIR_SET.borrow().get_local_server_of_resolved(&dir_cap)) else {
               return Err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Dir not from the same machine")});
           };
           let dir = underlying_dir.borrow().dir.try_clone().unwrap();
@@ -829,13 +850,14 @@ impl dir::Server for DirImpl {
         };
         results
             .get()
-            .set_file(capnp_rpc::new_client(FileImpl { file: file }));
+            .set_file(AmbientAuthorityImpl::new_file(&self.ambient, file));
         Ok(())
     }
 }
 
 pub struct ReadDirImpl {
     iter: RefCell<ReadDir>,
+    ambient: Rc<RefCell<AmbientAuthorityImpl>>,
 }
 #[capnproto_rpc(read_dir)]
 impl read_dir::Server for ReadDirImpl {
@@ -852,16 +874,19 @@ impl read_dir::Server for ReadDirImpl {
                 extra: String::from("Encountered an error while getting dir entry"),
             });
         };
-        results
-            .get()
-            .set_entry(capnp_rpc::new_client(DirEntryImpl { entry: _entry }));
+        results.get().set_entry(capnp_rpc::new_client(DirEntryImpl {
+            entry: _entry,
+            ambient: self.ambient.clone(),
+        }));
         Ok(())
     }
 }
 
 pub struct DirEntryImpl {
     entry: DirEntry,
+    ambient: Rc<RefCell<AmbientAuthorityImpl>>,
 }
+
 #[capnproto_rpc(dir_entry)]
 impl dir_entry::Server for DirEntryImpl {
     async fn open(&self) {
@@ -873,7 +898,7 @@ impl dir_entry::Server for DirEntryImpl {
         };
         results
             .get()
-            .set_file(capnp_rpc::new_client(FileImpl { file: _file }));
+            .set_file(AmbientAuthorityImpl::new_file(&self.ambient, _file));
         Ok(())
     }
 
@@ -895,7 +920,7 @@ impl dir_entry::Server for DirEntryImpl {
         };
         results
             .get()
-            .set_file(capnp_rpc::new_client(FileImpl { file: _file }));
+            .set_file(AmbientAuthorityImpl::new_file(&self.ambient, _file));
         Ok(())
     }
     async fn open_dir(&self) {
@@ -907,7 +932,7 @@ impl dir_entry::Server for DirEntryImpl {
         };
         results
             .get()
-            .set_dir(DIR_SET.with_borrow_mut(|set| set.new_client(DirImpl { dir: _dir })));
+            .set_dir(AmbientAuthorityImpl::new_dir(&self.ambient, _dir));
         Ok(())
     }
     async fn remove_file(&self) {
@@ -979,6 +1004,7 @@ impl dir_entry::Server for DirEntryImpl {
 
 pub struct FileImpl {
     file: File,
+    ambient: Rc<RefCell<AmbientAuthorityImpl>>,
 }
 #[capnproto_rpc(file)]
 impl file::Server for FileImpl {
@@ -1032,7 +1058,7 @@ impl file::Server for FileImpl {
         };
         results
             .get()
-            .set_cloned(capnp_rpc::new_client(FileImpl { file: _file }));
+            .set_cloned(AmbientAuthorityImpl::new_file(&self.ambient, _file));
         Ok(())
     }
     async fn set_readonly(&self, readonly: bool) {
@@ -1181,6 +1207,7 @@ impl permissions::Server for PermissionsImpl {
 
 pub struct TempDirImpl {
     temp_dir: RefCell<Option<TempDir>>,
+    ambient: Rc<RefCell<AmbientAuthorityImpl>>,
 }
 #[capnproto_rpc(temp_dir)]
 impl temp_dir::Server for TempDirImpl {
@@ -1215,12 +1242,13 @@ impl temp_dir::Server for TempDirImpl {
         *self.temp_dir.borrow_mut() = Some(dir);
         results
             .get()
-            .set_dir(DIR_SET.with_borrow_mut(|set| set.new_client(DirImpl { dir: cloned })));
+            .set_dir(AmbientAuthorityImpl::new_dir(&self.ambient, cloned));
         Ok(())
     }
 }
 pub struct TempFileImpl<'a> {
     temp_file: RefCell<Option<TempFile<'a>>>,
+    ambient: Rc<RefCell<AmbientAuthorityImpl>>,
 }
 #[capnproto_rpc(temp_file)]
 impl temp_file::Server for TempFileImpl<'_> {
@@ -1240,7 +1268,7 @@ impl temp_file::Server for TempFileImpl<'_> {
         *self.temp_file.borrow_mut() = Some(_file);
         results
             .get()
-            .set_file(capnp_rpc::new_client(FileImpl { file: _cloned }));
+            .set_file(AmbientAuthorityImpl::new_file(&self.ambient, _cloned));
         Ok(())
     }
     async fn replace(&self, dest: Reader) {
@@ -1349,12 +1377,17 @@ impl system_time::Server for SystemTimeImpl {
 
 pub struct InstantImpl {
     instant: Instant,
+    ambient: Rc<RefCell<AmbientAuthorityImpl>>,
 }
 #[capnproto_rpc(instant)]
 impl instant::Server for InstantImpl {
     async fn duration_since(&self, earlier: Reader) {
-        let Some(instant_impl) =
-            INSTANT_SET.with_borrow(|set| set.get_local_server_of_resolved(&earlier))
+        let Some(instant_impl) = self
+            .ambient
+            .as_ref()
+            .borrow()
+            .instant_set
+            .get_local_server_of_resolved(&earlier)
         else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
@@ -1369,8 +1402,12 @@ impl instant::Server for InstantImpl {
         Ok(())
     }
     async fn checked_duration_since(&self, earlier: Capability) {
-        let Some(instant_impl) =
-            INSTANT_SET.with_borrow(|set| set.get_local_server_of_resolved(&earlier))
+        let Some(instant_impl) = self
+            .ambient
+            .as_ref()
+            .borrow()
+            .instant_set
+            .get_local_server_of_resolved(&earlier)
         else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
@@ -1390,8 +1427,12 @@ impl instant::Server for InstantImpl {
         Ok(())
     }
     async fn saturating_duration_since(&self, earlier: Capability) {
-        let Some(instant_impl) =
-            INSTANT_SET.with_borrow(|set| set.get_local_server_of_resolved(&earlier))
+        let Some(instant_impl) = self
+            .ambient
+            .as_ref()
+            .borrow()
+            .instant_set
+            .get_local_server_of_resolved(&earlier)
         else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
@@ -1415,9 +1456,9 @@ impl instant::Server for InstantImpl {
                 extra: String::from("Failed to add duration to instant"),
             });
         };
-        results.get().set_instant(
-            INSTANT_SET.with_borrow_mut(|set| set.new_client(InstantImpl { instant: _instant })),
-        );
+        results
+            .get()
+            .set_instant(AmbientAuthorityImpl::new_instant(&self.ambient, _instant));
         Ok(())
     }
     async fn checked_sub(&self, duration: Reader) {
@@ -1430,28 +1471,33 @@ impl instant::Server for InstantImpl {
                 extra: String::from("Failed to subtract duration from instant"),
             });
         };
-        results.get().set_instant(
-            INSTANT_SET.with_borrow_mut(|set| set.new_client(InstantImpl { instant: _instant })),
-        );
+        results
+            .get()
+            .set_instant(AmbientAuthorityImpl::new_instant(&self.ambient, _instant));
         Ok(())
     }
 }
 
 pub struct MonotonicClockImpl {
     monotonic_clock: MonotonicClock,
+    ambient: Rc<RefCell<AmbientAuthorityImpl>>,
 }
 #[capnproto_rpc(monotonic_clock)]
 impl monotonic_clock::Server for MonotonicClockImpl {
     async fn now(&self) {
         let _instant = self.monotonic_clock.now();
-        results.get().set_instant(
-            INSTANT_SET.with_borrow_mut(|set| set.new_client(InstantImpl { instant: _instant })),
-        );
+        results
+            .get()
+            .set_instant(AmbientAuthorityImpl::new_instant(&self.ambient, _instant));
         Ok(())
     }
     async fn elapsed(&self, instant: Capability) {
-        let Some(instant_impl) =
-            INSTANT_SET.with_borrow(|set| set.get_local_server_of_resolved(&instant))
+        let Some(instant_impl) = self
+            .ambient
+            .as_ref()
+            .borrow()
+            .instant_set
+            .get_local_server_of_resolved(&instant)
         else {
             return Err(Error {
                 kind: capnp::ErrorKind::Failed,
@@ -1501,6 +1547,7 @@ impl system_clock::Server for SystemClockImpl {
 
 pub struct ProjectDirsImpl {
     project_dirs: ProjectDirs,
+    ambient: Rc<RefCell<AmbientAuthorityImpl>>,
 }
 #[capnproto_rpc(project_dirs)]
 impl project_dirs::Server for ProjectDirsImpl {
@@ -1513,7 +1560,7 @@ impl project_dirs::Server for ProjectDirsImpl {
         };
         results
             .get()
-            .set_dir(DIR_SET.with_borrow_mut(|set| set.new_client(DirImpl { dir: _dir })));
+            .set_dir(AmbientAuthorityImpl::new_dir(&self.ambient, _dir));
         Ok(())
     }
     async fn config_dir(&self) {
@@ -1525,7 +1572,7 @@ impl project_dirs::Server for ProjectDirsImpl {
         };
         results
             .get()
-            .set_dir(DIR_SET.with_borrow_mut(|set| set.new_client(DirImpl { dir: _dir })));
+            .set_dir(AmbientAuthorityImpl::new_dir(&self.ambient, _dir));
         Ok(())
     }
     async fn data_dir(&self) {
@@ -1537,7 +1584,7 @@ impl project_dirs::Server for ProjectDirsImpl {
         };
         results
             .get()
-            .set_dir(DIR_SET.with_borrow_mut(|set| set.new_client(DirImpl { dir: _dir })));
+            .set_dir(AmbientAuthorityImpl::new_dir(&self.ambient, _dir));
         Ok(())
     }
     async fn data_local_dir(&self) {
@@ -1549,7 +1596,7 @@ impl project_dirs::Server for ProjectDirsImpl {
         };
         results
             .get()
-            .set_dir(DIR_SET.with_borrow_mut(|set| set.new_client(DirImpl { dir: _dir })));
+            .set_dir(AmbientAuthorityImpl::new_dir(&self.ambient, _dir));
         Ok(())
     }
     async fn runtime_dir(&self) {
@@ -1561,7 +1608,7 @@ impl project_dirs::Server for ProjectDirsImpl {
         };
         results
             .get()
-            .set_dir(DIR_SET.with_borrow_mut(|set| set.new_client(DirImpl { dir: _dir })));
+            .set_dir(AmbientAuthorityImpl::new_dir(&self.ambient, _dir));
         Ok(())
     }
 }

@@ -4,6 +4,7 @@ use crate::keystone::HostImpl;
 use crate::module_capnp::module_error;
 use crate::module_capnp::module_start;
 use crate::posix_module_capnp::posix_module;
+use crate::posix_module_capnp::posix_module_args;
 use crate::posix_spawn_capnp::posix_args::Owned as PosixArgs;
 use crate::posix_spawn_capnp::posix_error::Owned as PosixError;
 use crate::spawn_capnp::process;
@@ -24,8 +25,8 @@ pub struct PosixModuleProcessImpl {
     posix_process: process::Client<ByteStream, PosixError>,
     handle: tokio::task::JoinHandle<Result<(), capnp::Error>>,
     disconnector: Disconnector<rpc_twoparty_capnp::Side>,
-    bootstrap: module_start::Client<any_pointer, any_pointer, cap_pointer>,
-    api: RemotePromise<module_start::start_results::Owned<any_pointer, any_pointer, cap_pointer>>,
+    bootstrap: module_start::Client<any_pointer, cap_pointer>,
+    api: RemotePromise<module_start::start_results::Owned<any_pointer, cap_pointer>>,
 }
 
 impl process::Server<cap_pointer, module_error::Owned<any_pointer>>
@@ -86,14 +87,26 @@ pub struct PosixModuleProgramImpl {
     posix_program: program::Client<PosixArgs, ByteStream, PosixError>,
 }
 
-impl program::Server<any_pointer, cap_pointer, module_error::Owned<any_pointer>>
-    for PosixModuleProgramImpl
+impl
+    program::Server<
+        posix_module_args::Owned<any_pointer>,
+        cap_pointer,
+        module_error::Owned<any_pointer>,
+    > for PosixModuleProgramImpl
 {
     #[async_backtrace::framed]
     async fn spawn(
         &self,
-        params: SpawnParams<any_pointer, cap_pointer, module_error::Owned<any_pointer>>,
-        mut results: SpawnResults<any_pointer, cap_pointer, module_error::Owned<any_pointer>>,
+        params: SpawnParams<
+            posix_module_args::Owned<any_pointer>,
+            cap_pointer,
+            module_error::Owned<any_pointer>,
+        >,
+        mut results: SpawnResults<
+            posix_module_args::Owned<any_pointer>,
+            cap_pointer,
+            module_error::Owned<any_pointer>,
+        >,
     ) -> Result<(), ::capnp::Error> {
         let mut request = self.posix_program.spawn_request();
         let mut args = request.get().init_args();
@@ -127,15 +140,13 @@ impl program::Server<any_pointer, cap_pointer, module_error::Owned<any_pointer>>
                             RpcSystem::new(Box::new(network), Some(keystone_client.clone().client));
 
                         let disconnector = rpc_system.get_disconnector();
-                        let bootstrap: module_start::Client<any_pointer, any_pointer, cap_pointer> =
+                        let bootstrap: module_start::Client<any_pointer, cap_pointer> =
                             rpc_system.bootstrap(rpc_twoparty_capnp::Side::Server);
 
                         let mut api_request = bootstrap.start_request();
                         let mut builder = api_request.get();
-                        builder.set_config(params.get()?.get_args()?)?;
-
-                        // TODO: pass in state if it exists
-                        // builder.set_state();
+                        let pair = params.get()?.get_args()?;
+                        builder.set_config(pair.get_config()?)?;
 
                         let api = api_request.send();
 
@@ -174,7 +185,7 @@ impl posix_module::Server for PosixModuleImpl {
             posix_program: prog,
         };
         let program_client: program::Client<
-            any_pointer,
+            posix_module_args::Owned<any_pointer>,
             cap_pointer,
             module_error::Owned<any_pointer>,
         > = capnp_rpc::new_client(program);
@@ -265,7 +276,6 @@ mod tests {
             .run_until(async_backtrace::location!().frame(async {
                 let bootstrap: crate::module_capnp::module_start::Client<
                     crate::hello_world_capnp::config::Owned,
-                    any_pointer,
                     crate::hello_world_capnp::root::Owned,
                 > = rpc_system.bootstrap(super::rpc_twoparty_capnp::Side::Server);
 

@@ -15,11 +15,11 @@ use tracing::Level;
 
 pub struct ModuleImpl;
 
-impl module_start::Server<config::Owned, any_pointer, root::Owned> for ModuleImpl {
+impl module_start::Server<config::Owned, root::Owned> for ModuleImpl {
     async fn start(
         &self,
-        params: module_start::StartParams<config::Owned, any_pointer, root::Owned>,
-        mut result: module_start::StartResults<config::Owned, any_pointer, root::Owned>,
+        params: module_start::StartParams<config::Owned, root::Owned>,
+        mut result: module_start::StartResults<config::Owned, root::Owned>,
     ) -> Result<(), ::capnp::Error> {
         let client: root::Client = capnp_rpc::new_client(HelloWorldImpl {
             greeting: params.get()?.get_config()?.get_greeting()?.to_string()?,
@@ -29,8 +29,8 @@ impl module_start::Server<config::Owned, any_pointer, root::Owned> for ModuleImp
     }
     async fn stop(
         &self,
-        _: module_start::StopParams<config::Owned, any_pointer, root::Owned>,
-        _: module_start::StopResults<config::Owned, any_pointer, root::Owned>,
+        _: module_start::StopParams<config::Owned, root::Owned>,
+        _: module_start::StopResults<config::Owned, root::Owned>,
     ) -> Result<(), ::capnp::Error> {
         Result::<(), capnp::Error>::Err(::capnp::Error::unimplemented(
             "method module_start::Server::stop not implemented".to_string(),
@@ -54,7 +54,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .run_until(async move {
             let module_client: module_start::Client<
                 crate::hello_world_capnp::config::Owned,
-                any_pointer,
                 root::Owned,
             > = capnp_rpc::new_client(ModuleImpl);
             let reader = tokio::io::stdin();

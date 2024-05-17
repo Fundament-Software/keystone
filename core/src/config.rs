@@ -5,6 +5,7 @@ use crate::toml_capnp;
 use capnp::{
     dynamic_struct, dynamic_value,
     introspect::{Introspect, RawBrandedStructSchema, RawStructSchema, TypeVariant},
+    schema::DynamicStructSchema,
     schema_capnp,
     traits::HasTypeId,
 };
@@ -101,6 +102,24 @@ fn toml_to_config(
             .ok_or(eyre!("Schema isn't a string?!"))?,
     );
 
+    if let Some(name) = v.get("name") {
+        if let Some(str) = name.as_str() {
+            builder.set_name(str.into());
+        }
+    }
+
+    if let Some(path) = v.get("path") {
+        if let Some(str) = path.as_str() {
+            builder.set_path(str.into());
+        }
+    }
+
+    if let Some(schema) = v.get("schema") {
+        if let Some(str) = schema.as_str() {
+            builder.set_schema(str.into());
+        }
+    }
+
     let f = File::open(schemafile)?;
     let mut bufread = BufReader::new(f);
 
@@ -112,17 +131,42 @@ fn toml_to_config(
         },
     )?;
 
-    let schema: capnp::schema_capnp::node::Reader = msg.get_root()?;
-    if let capnp::schema_capnp::node::Which::Struct(s) = schema.which()? {
-s.get_discriminant_count()
-    }
+    let anyconfig: capnp::any_pointer::Builder = builder.init_config();
 
-    RawStructSchema{encoded_node: msg.into_segments(), nonunion_members: todo!(), members_by_discriminant: todo!() }
-    let dynbuild: capnp::dynamic_struct::Builder = builder.into();
-    
-    capnp::dynamic_struct::Builder::new(builder, schema)
+    let schema = DynamicStructSchema::new_schema(msg)?;
+    let dynobj: capnp::dynamic_struct::Builder = anyconfig.init_dynamic(schema)?;
+    /*
+    let segments = msg.into_segments();
+    if let capnp::schema_capnp::node::Which::Struct(st) = schema.which()? {
+        let mut union_member_indexes = vec![];
+        let mut nonunion_member_indexes = vec![];
+        for (index, field) in st.get_fields()?.iter().enumerate() {
+            let disc = field.get_discriminant_value();
+            if disc == capnp::schema_capnp::field::NO_DISCRIMINANT {
+                nonunion_member_indexes.push(index as u16);
+            } else {
+                union_member_indexes.push((disc, index as u16));
+            }
+        }
+        union_member_indexes.sort();
+        let members_by_discriminant: Vec<u16> =
+            union_member_indexes.iter().map(|(i, d)| d).collect();
+        let raw = RawStructSchema {
+            encoded_node: msg.into_segments(),
+            nonunion_members: nonunion_member_indexes.as_slice(),
+            members_by_discriminant: members_by_discriminant.as_slice(),
+        };
 
-    //RawBrandedStructSchema
+
+        capnp::dynamic_value::
+        let dynbuild: capnp::dynamic_struct::Builder = builder.into();
+        //let field: dynamic_value::Builder = dynbuild.get_named("config")?;
+        let field = dynbuild.get_schema().find_field_by_name("config")?.unwrap();
+
+        let anybuild = dynbuild.init(field)?;
+
+        let instance = capnp::dynamic_struct::Builder::new(dynbuild.into(), raw.into());
+    }*/
 
     Ok(())
 }

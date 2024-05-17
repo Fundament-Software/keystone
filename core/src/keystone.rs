@@ -2,19 +2,22 @@ use caplog::{CapLog, MAX_BUFFER_SIZE};
 use capnp::any_pointer::Owned as any_pointer;
 use capnp::capability::RemotePromise;
 use eyre::Result;
-use std::{collections::HashMap, marker::PhantomData, path::Path};
+use std::{cell::RefCell, collections::HashMap, marker::PhantomData, path::Path, rc::Rc};
 
 use crate::{
-    cap_std_capnproto::AmbientAuthorityImpl,
+    cap_std_capnproto::{self, AmbientAuthorityImpl},
     database::RootDatabase,
     keystone_capnp::{host, keystone_config},
     module_capnp::module_error,
     posix_module::PosixModuleImpl,
-    posix_module_capnp::posix_module,
+    posix_module_capnp::{posix_module, posix_module_args},
     spawn::posix_process::PosixProgramImpl,
 };
-type SpawnProgram =
-    crate::spawn_capnp::program::Client<any_pointer, any_pointer, module_error::Owned<any_pointer>>;
+type SpawnProgram = crate::spawn_capnp::program::Client<
+    posix_module_args::Owned<any_pointer>,
+    any_pointer,
+    module_error::Owned<any_pointer>,
+>;
 type SpawnProcess =
     crate::spawn_capnp::process::Client<any_pointer, module_error::Owned<any_pointer>>;
 use capnp_macros::capnproto_rpc;
@@ -71,7 +74,7 @@ pub struct ModuleInstance {
 pub struct Keystone {
     db: crate::database::RootDatabase,
     log: CapLog<MAX_BUFFER_SIZE>,
-    file_server: AmbientAuthorityImpl,
+    file_server: Rc<RefCell<AmbientAuthorityImpl>>,
     modules: HashMap<u64, ModuleInstance>,
 }
 
@@ -110,7 +113,7 @@ impl Keystone {
                 caplog_config.get_max_open_files() as usize,
                 check_consistency,
             )?,
-            file_server: AmbientAuthorityImpl::new(),
+            file_server: Rc::new(RefCell::new(AmbientAuthorityImpl::new())),
             modules,
         })
     }
@@ -139,28 +142,86 @@ impl Keystone {
         Ok(Self::wrap_posix(spawn_process_client).await?)
     }
 
+    #[inline]
+    fn extract_config_pair<'a>(
+        config: keystone_config::module_config::Reader<'a, any_pointer>,
+    ) -> Result<(capnp::any_pointer::Reader<'a>, &'a Path)> {
+        Ok((
+            config.get_config()?,
+            Path::new(config.get_path()?.to_str()?),
+        ))
+    }
+
     async fn init_module(
-        module: &mut ModuleInstance,
+        &mut self,
+        id: u64,
         config: keystone_config::module_config::Reader<'_, any_pointer>,
     ) -> Result<()> {
+        let module = self
+            .modules
+            .get_mut(&id)
+            .ok_or(eyre::eyre!("Couldn't find module!"))?;
         module.client = Self::posix_spawn(config).await.ok();
+        module.state = ModuleState::Initialized;
 
+        let mut msg = capnp::message::Builder::new_default();
+        // Build our posix_module_args, first by setting the config
+        let mut pair: posix_module_args::Builder<any_pointer> = msg.init_root();
+
+        let (conf, workpath) = match Self::extract_config_pair(config) {
+            Ok((c, d)) => (c, d),
+            Err(e) => {
+                module.state = ModuleState::StartFailure;
+                return Err(e.into());
+            }
+        };
+
+        if let Err(e) = pair.set_config(conf) {
+            module.state = ModuleState::StartFailure;
+            return Err(e.into());
+        }
+        // Then we get a path to our current app dir
+        let workpath = workpath.parent().unwrap_or(workpath);
+        let dir = match cap_std::fs::Dir::open_ambient_dir(
+            workpath,
+            self.file_server.as_ref().borrow().authority,
+        ) {
+            Ok(x) => x,
+            Err(e) => {
+                module.state = ModuleState::StartFailure;
+                return Err(e.into());
+            }
+        };
+
+        let dirclient = AmbientAuthorityImpl::new_dir(&self.file_server, dir);
+        pair.set_workdir(dirclient);
+
+        // Pass our pair of arguments to the spawn request
         if let Some(client) = module.client.as_ref() {
-            module.state = ModuleState::Initialized;
             let mut spawn_request = client.spawn_request();
             let mut builder = spawn_request.get();
-            builder.set_args(config.get_config()?)?;
+            if let Err(e) = builder.set_args(pair.into_reader()) {
+                module.state = ModuleState::StartFailure;
+                return Err(e.into());
+            }
 
-            //if let Ok(_) = self.db.get_state(module.instance_id as i64, &mut builder) {
-            //TODO: How to pass in state to spawn?
-            //}
-            let response = spawn_request.send().promise.await?;
-            module.process = response.get()?.get_result().ok();
+            let response = match spawn_request.send().promise.await {
+                Ok(x) => x,
+                Err(e) => {
+                    module.state = ModuleState::StartFailure;
+                    return Err(e.into());
+                }
+            };
+
+            module.process = Some(response.get()?.get_result()?);
 
             if let Some(process) = module.process.as_ref() {
                 module.api = Some(process.get_api_request().send());
                 module.state = ModuleState::Ready;
             }
+        } else {
+            module.state = ModuleState::StartFailure;
+            return Err(eyre::eyre!("Failed to acquire client!"));
         }
 
         Ok(())
@@ -177,11 +238,8 @@ impl Keystone {
         let modules = config.get_modules()?;
         for s in modules.iter() {
             let iderr = self.get_id(s);
-            let instance = iderr.map_or(None, |id| self.modules.get_mut(&id));
-
-            if let Some(module) = instance {
-                if let Err(e) = Self::init_module(module, s).await {
-                    module.state = ModuleState::StartFailure;
+            if let Ok(id) = iderr {
+                if let Err(e) = self.init_module(id, s).await {
                     // TODO: log error
                 }
             }

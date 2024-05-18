@@ -17,6 +17,8 @@ readme = "README.md"
 cap-std = "2.0.0"
 color-eyre = "0.6"
 eyre = "0.6"
+rusqlite = { version = "0.31.0", features = ["bundled", "array"] }
+rand = { version = "0.8.5", features = ["std_rng"] }
 tracing-subscriber = { version = "0.3.18", features = ["time"] }
 tracing = "0.1.40"
 tokio = { version = "1.18", features = [

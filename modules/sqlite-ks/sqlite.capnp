@@ -192,7 +192,7 @@ struct Select {
 
 struct SelectCore {
  	from @0 :JoinClause; # May be null; if null then the results must be constant expressions and generated select will not have a from clause
-  results @1 :List(Expr); # Must be provided
+  result @1 :List(Expr); # Must be provided
   where @2 :Expr; # may be null; if null then the generated select will not have a where clause; must be a boolean valued expression
 }
 

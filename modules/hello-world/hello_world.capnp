@@ -14,14 +14,9 @@ interface Root {
 }
 
 # All modules must have a struct named "Config" that keystone can look up when compiling
-# the root configuration file.
+# the root configuration file. This is a stateless config - a stateful config is provided in memory-example
 struct Config {
     greeting @0 :Text;
-}
-
-# The state is called State by convention, but this is not required.
-struct State {
-    previous @0 :Text;
 }
 
 #const properties :ModuleProperties = (

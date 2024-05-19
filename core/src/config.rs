@@ -5,14 +5,38 @@ use crate::toml_capnp;
 use capnp::{
     dynamic_struct, dynamic_value,
     introspect::{Introspect, RawBrandedStructSchema, RawStructSchema, TypeVariant},
-    schema::DynamicStructSchema,
+    schema::{DynamicSchema, StructSchema},
     schema_capnp,
     traits::HasTypeId,
 };
 use eyre::{eyre, Result};
 use toml::{value::Offset, Table, Value};
 
-fn value_to_list(l: &Vec<Value>, mut builder: ::capnp::dynamic_list::Builder) -> Result<()> {
+fn value_to_list(
+    l: &Vec<Value>,
+    mut builder: ::capnp::dynamic_list::Builder,
+    schema: capnp::schema_capnp::type_::Reader,
+) -> Result<()> {
+    // If this is a ModuleConfig list, call our handler function so we can look up the schema
+    if let schema_capnp::type_::Which::List(s) = schema.which()? {
+        if let schema_capnp::type_::Which::Struct(s) = s.get_element_type()?.which()? {
+            if s.get_type_id()
+                == keystone_config::module_config::Builder::<capnp::any_pointer::Owned>::TYPE_ID
+            {
+                for idx in 0..builder.len() {
+                    let mut builder = builder.reborrow();
+                    let dynamic: dynamic_struct::Builder = builder.get(idx)?.downcast();
+                    if let Value::Table(t) = &l[idx as usize] {
+                        toml_to_config(t, dynamic.downcast()?)?;
+                    } else {
+                        return Err(eyre!("Config value must be a table!"));
+                    }
+                }
+                return Ok(());
+            }
+        }
+    }
+
     'outer: for idx in 0..builder.len() {
         let mut builder = builder.reborrow();
 
@@ -38,7 +62,15 @@ fn value_to_list(l: &Vec<Value>, mut builder: ::capnp::dynamic_list::Builder) ->
             Value::Float(f) => builder.set(idx, (*f).into())?,
             Value::Boolean(b) => builder.set(idx, (*b).into())?,
             Value::Datetime(d) => builder.set(idx, d.to_string().as_str().into())?,
-            Value::Array(l) => value_to_list(l, builder.init(idx, l.len() as u32)?.downcast())?,
+            Value::Array(l) => {
+                if let schema_capnp::type_::Which::List(s) = schema.which()? {
+                    value_to_list(
+                        l,
+                        builder.init(idx, l.len() as u32)?.downcast(),
+                        s.get_element_type()?,
+                    )?
+                }
+            }
             Value::Table(t) => value_to_struct(t, builder.get(idx)?.downcast())?,
         }
     }
@@ -120,55 +152,42 @@ fn toml_to_config(
         }
     }
 
-    let f = File::open(schemafile)?;
-    let mut bufread = BufReader::new(f);
+    if let Some(c) = v.get("config") {
+        let binding = std::env::current_dir()?;
+        let inspect = binding.as_os_str().to_string_lossy();
 
-    let msg = capnp::serialize::read_message(
-        bufread,
-        capnp::message::ReaderOptions {
-            traversal_limit_in_words: None,
-            nesting_limit: 128,
-        },
-    )?;
+        let f = File::open(schemafile)?;
+        let bufread = BufReader::new(f);
 
-    let anyconfig: capnp::any_pointer::Builder = builder.init_config();
+        let msg = capnp::serialize::read_message(
+            bufread,
+            capnp::message::ReaderOptions {
+                traversal_limit_in_words: None,
+                nesting_limit: 128,
+            },
+        )?;
 
-    let schema = DynamicStructSchema::new_schema(msg)?;
-    let dynobj: capnp::dynamic_struct::Builder = anyconfig.init_dynamic(schema)?;
-    /*
-    let segments = msg.into_segments();
-    if let capnp::schema_capnp::node::Which::Struct(st) = schema.which()? {
-        let mut union_member_indexes = vec![];
-        let mut nonunion_member_indexes = vec![];
-        for (index, field) in st.get_fields()?.iter().enumerate() {
-            let disc = field.get_discriminant_value();
-            if disc == capnp::schema_capnp::field::NO_DISCRIMINANT {
-                nonunion_member_indexes.push(index as u16);
+        let anyconfig: capnp::any_pointer::Builder = builder.init_config();
+
+        let schema = DynamicSchema::new(msg)?;
+        let configtype = schema
+            .get_type_by_scope(vec!["Config".to_string()])
+            .ok_or(eyre::eyre!("Can't find 'Config' type in schema!"))?;
+
+        if let TypeVariant::Struct(st) = configtype {
+            let mut dynobj: capnp::dynamic_struct::Builder =
+                anyconfig.init_dynamic((*st).into())?;
+            if let Value::Table(t) = c {
+                value_to_struct(t, dynobj)
             } else {
-                union_member_indexes.push((disc, index as u16));
+                Err(eyre::eyre!("Config value must be a table!"))
             }
+        } else {
+            Err(eyre::eyre!("Config type must be a struct!"))
         }
-        union_member_indexes.sort();
-        let members_by_discriminant: Vec<u16> =
-            union_member_indexes.iter().map(|(i, d)| d).collect();
-        let raw = RawStructSchema {
-            encoded_node: msg.into_segments(),
-            nonunion_members: nonunion_member_indexes.as_slice(),
-            members_by_discriminant: members_by_discriminant.as_slice(),
-        };
-
-
-        capnp::dynamic_value::
-        let dynbuild: capnp::dynamic_struct::Builder = builder.into();
-        //let field: dynamic_value::Builder = dynbuild.get_named("config")?;
-        let field = dynbuild.get_schema().find_field_by_name("config")?.unwrap();
-
-        let anybuild = dynbuild.init(field)?;
-
-        let instance = capnp::dynamic_struct::Builder::new(dynbuild.into(), raw.into());
-    }*/
-
-    Ok(())
+    } else {
+        Ok(())
+    }
 }
 
 fn value_to_struct(v: &Table, mut builder: ::capnp::dynamic_struct::Builder) -> Result<()> {
@@ -182,23 +201,6 @@ fn value_to_struct(v: &Table, mut builder: ::capnp::dynamic_struct::Builder) -> 
                 if s.get_type_id() == toml_capnp::value::Builder::TYPE_ID {
                     let dynamic: dynamic_struct::Builder = builder.init(field)?.downcast();
                     toml_to_capnp(v, dynamic.downcast()?)?;
-                    return Ok(());
-                }
-            }
-        }
-
-        // If we have reached a ModuleConfig value, call our handler function so we can look up the schema
-        if let capnp::schema_capnp::field::Slot(x) = field.get_proto().which()? {
-            if let schema_capnp::type_::Which::Struct(s) = x.get_type()?.which()? {
-                if s.get_type_id()
-                    == keystone_config::module_config::Builder::<capnp::any_pointer::Owned>::TYPE_ID
-                {
-                    let dynamic: dynamic_struct::Builder = builder.init(field)?.downcast();
-                    if let Value::Table(t) = v {
-                        toml_to_config(t, dynamic.downcast()?)?;
-                    } else {
-                        return Err(eyre!("Config value must be a table!"));
-                    }
                     return Ok(());
                 }
             }
@@ -226,7 +228,17 @@ fn value_to_struct(v: &Table, mut builder: ::capnp::dynamic_struct::Builder) -> 
             Value::Float(f) => builder.set(field, (*f).into())?,
             Value::Boolean(b) => builder.set(field, (*b).into())?,
             Value::Datetime(d) => builder.set(field, d.to_string().as_str().into())?,
-            Value::Array(l) => value_to_list(l, builder.initn(field, l.len() as u32)?.downcast())?,
+            Value::Array(l) => {
+                if let capnp::schema_capnp::field::Slot(x) = field.get_proto().which()? {
+                    value_to_list(
+                        l,
+                        builder.initn(field, l.len() as u32)?.downcast(),
+                        x.get_type()?,
+                    )?
+                } else {
+                    return Err(eyre!("{:?} is a group, no groups allowed in configs!", k));
+                }
+            }
             Value::Table(t) => value_to_struct(t, builder.init(field)?.downcast())?,
         }
     }
@@ -248,7 +260,6 @@ where
     Ok(value_to_struct(config, dynamic.downcast())?)
 }
 
-#[ignore]
 #[test]
 fn test_basic_config() -> Result<()> {
     let mut message = ::capnp::message::Builder::new_default();
@@ -260,9 +271,29 @@ defaultLog = "debug"
 [[modules]]
 name = "test"
 path = "/test/"
-transient = false
 
 "#;
+
+    to_capnp::<keystone_config::Owned>(&source.parse::<toml::Table>()?, msg.reborrow())?;
+    println!("{:#?}", msg.reborrow_as_reader());
+
+    Ok(())
+}
+
+#[test]
+fn test_hello_world_config() -> Result<()> {
+    let mut message = ::capnp::message::Builder::new_default();
+    let mut msg = message.init_root::<keystone_config::Builder>();
+    let source = r#"
+database = "test.sqlite"
+defaultLog = "debug"
+
+[[modules]]
+name = "Hello World"
+path = "../target/debug/hello-world-module.exe"
+config = { greeting = "Bonjour" }
+schema = "../../modules/hello-world/keystone.schema"
+"#; // TODO: adjust hello-world build script to output keystone.schema to output folder
 
     to_capnp::<keystone_config::Owned>(&source.parse::<toml::Table>()?, msg.reborrow())?;
     println!("{:#?}", msg.reborrow_as_reader());

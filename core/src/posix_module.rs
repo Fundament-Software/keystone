@@ -333,7 +333,8 @@ mod tests {
             .run_until(async_backtrace::location!().frame(async {
                 let mut spawn_request = wrapped_client.spawn_request();
                 let mut builder = spawn_request.get();
-                let mut args = builder.init_args();
+                let mut posix_args = builder.init_args();
+                let mut args = posix_args.init_config();
                 let mut config: crate::hello_world_capnp::config::Builder = args.init_as();
                 config.set_greeting("Hello".into());
 

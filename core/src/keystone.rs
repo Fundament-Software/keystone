@@ -152,6 +152,21 @@ impl Keystone {
         ))
     }
 
+    fn process_spawn_request(
+        x: Result<
+            capnp::capability::Response<
+                crate::spawn_capnp::program::spawn_results::Owned<
+                    posix_module_args::Owned<any_pointer>,
+                    any_pointer,
+                    module_error::Owned<any_pointer>,
+                >,
+            >,
+            capnp::Error,
+        >,
+    ) -> Result<SpawnProcess> {
+        Ok(x?.get()?.get_result()?)
+    }
+
     async fn init_module(
         &mut self,
         id: u64,
@@ -205,15 +220,14 @@ impl Keystone {
                 return Err(e.into());
             }
 
-            let response = match spawn_request.send().promise.await {
-                Ok(x) => x,
+            let response = spawn_request.send().promise.await;
+            module.process = match Self::process_spawn_request(response) {
+                Ok(x) => Some(x),
                 Err(e) => {
                     module.state = ModuleState::StartFailure;
                     return Err(e.into());
                 }
             };
-
-            module.process = Some(response.get()?.get_result()?);
 
             if let Some(process) = module.process.as_ref() {
                 module.api = Some(process.get_api_request().send());

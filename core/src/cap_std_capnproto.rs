@@ -1623,11 +1623,12 @@ pub mod tests {
     };
     use cap_directories::{self, ProjectDirs, UserDirs};
     use std::cell::RefCell;
+    use std::rc::Rc;
 
     #[tokio::test]
     async fn create_dir_all_canonicalize_test() -> eyre::Result<()> {
         let ambient_authority: ambient_authority::Client =
-            capnp_rpc::new_client(RefCell::new(AmbientAuthorityImpl::new()));
+            capnp_rpc::new_client(Rc::new(RefCell::new(AmbientAuthorityImpl::new())));
 
         let mut open_ambient_request = ambient_authority.dir_open_ambient_request();
         let path = std::env::temp_dir();
@@ -1661,7 +1662,7 @@ pub mod tests {
     async fn test_create_write_getmetadata() -> eyre::Result<()> {
         //use ambient authority to open a dir, create a file(Or open it in write mode if it already exists), open a bytestream, use the bytestream to write some bytes, get file metadata
         let ambient_authority: ambient_authority::Client =
-            capnp_rpc::new_client(RefCell::new(AmbientAuthorityImpl::new()));
+            capnp_rpc::new_client(Rc::new(RefCell::new(AmbientAuthorityImpl::new())));
 
         let mut open_ambient_request = ambient_authority.dir_open_ambient_request();
         let path = std::env::temp_dir();
@@ -1720,7 +1721,7 @@ pub mod tests {
     #[tokio::test]
     async fn test_home_dir() -> eyre::Result<()> {
         let ambient_authority: ambient_authority::Client =
-            capnp_rpc::new_client(RefCell::new(AmbientAuthorityImpl::new()));
+            capnp_rpc::new_client(Rc::new(RefCell::new(AmbientAuthorityImpl::new())));
 
         let home_dir_request = ambient_authority.user_dirs_home_dir_request();
         let _home_dir = home_dir_request.send().promise.await?.get()?.get_dir()?;
@@ -1730,7 +1731,7 @@ pub mod tests {
     #[tokio::test]
     async fn test_user_dirs() -> eyre::Result<()> {
         let ambient_authority: ambient_authority::Client =
-            capnp_rpc::new_client(RefCell::new(AmbientAuthorityImpl::new()));
+            capnp_rpc::new_client(Rc::new(RefCell::new(AmbientAuthorityImpl::new())));
 
         let audio_dir_request = ambient_authority.user_dirs_audio_dir_request();
         let _audio_dir = audio_dir_request.send().promise.await?.get()?.get_dir()?;
@@ -1783,7 +1784,7 @@ pub mod tests {
     async fn test_project_dirs() -> eyre::Result<()> {
         //TODO maybe create some form of generic "dir" test
         let ambient_authority: ambient_authority::Client =
-            capnp_rpc::new_client(RefCell::new(AmbientAuthorityImpl::new()));
+            capnp_rpc::new_client(Rc::new(RefCell::new(AmbientAuthorityImpl::new())));
 
         let mut project_dirs_from_request = ambient_authority.project_dirs_from_request();
         let mut project_dirs_builder = project_dirs_from_request.get();
@@ -1826,7 +1827,7 @@ pub mod tests {
     #[tokio::test]
     async fn test_system_clock() -> eyre::Result<()> {
         let ambient_authority: ambient_authority::Client =
-            capnp_rpc::new_client(RefCell::new(AmbientAuthorityImpl::new()));
+            capnp_rpc::new_client(Rc::new(RefCell::new(AmbientAuthorityImpl::new())));
 
         let system_clock_request = ambient_authority.system_clock_new_request();
         let system_clock = system_clock_request
@@ -1877,7 +1878,7 @@ pub mod tests {
         std::fs::create_dir_all(path)?;
 
         let ambient_authority: ambient_authority::Client =
-            capnp_rpc::new_client(RefCell::new(AmbientAuthorityImpl::new()));
+            capnp_rpc::new_client(Rc::new(RefCell::new(AmbientAuthorityImpl::new())));
 
         let mut open_ambient_request = ambient_authority.dir_open_ambient_request();
         let mut path = std::env::temp_dir();
@@ -2043,7 +2044,7 @@ pub mod tests {
         writer.flush()?;
 
         let ambient_authority: ambient_authority::Client =
-            capnp_rpc::new_client(RefCell::new(AmbientAuthorityImpl::new()));
+            capnp_rpc::new_client(Rc::new(RefCell::new(AmbientAuthorityImpl::new())));
 
         let mut open_ambient_request = ambient_authority.dir_open_ambient_request();
         let path = std::env::temp_dir();

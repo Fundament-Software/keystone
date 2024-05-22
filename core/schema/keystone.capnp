@@ -42,6 +42,7 @@ struct KeystoneConfig {
   socketName @5 :Text; # This is optional, if empty, keystone will put a socket in /run for installed daemons, or the user's home folder for a local session.
   password @6 :Text; # This is optional, an empty string correlates to no password.
   keys @7 :List(Text); # also optional, but will warn if no password or key is used.
+  msTimeout @8 :UInt64 = 30000; # Maximum amount of time a module has to obey a stop command, in milliseconds.
 }
 
 interface Host(State) {

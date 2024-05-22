@@ -16,6 +16,7 @@ use capnp::any_pointer::Owned as cap_pointer;
 use capnp::capability::RemotePromise;
 use capnp_macros::capnproto_rpc;
 use capnp_rpc::twoparty::VatNetwork;
+use capnp_rpc::CapabilityServerSet;
 use capnp_rpc::Disconnector;
 use capnp_rpc::{rpc_twoparty_capnp, RpcSystem};
 use std::cell::RefCell;
@@ -24,13 +25,23 @@ use std::rc::Rc;
 pub struct PosixModuleProcessImpl {
     posix_process: process::Client<ByteStream, PosixError>,
     handle: tokio::task::JoinHandle<Result<(), capnp::Error>>,
-    disconnector: Disconnector<rpc_twoparty_capnp::Side>,
-    bootstrap: module_start::Client<any_pointer, cap_pointer>,
+    pub(crate) disconnector: Disconnector<rpc_twoparty_capnp::Side>,
+    pub(crate) bootstrap: module_start::Client<any_pointer, cap_pointer>,
     api: RemotePromise<module_start::start_results::Owned<any_pointer, cap_pointer>>,
 }
 
+// TODO: For now we have to use a global threadlocal process set until we figure out how to pass in keystone state
+thread_local!(
+    pub static PROCESS_SET: RefCell<
+        CapabilityServerSet<
+            RefCell<PosixModuleProcessImpl>,
+            process::Client<cap_pointer, module_error::Owned<any_pointer>>,
+        >,
+    > = RefCell::new(CapabilityServerSet::new());
+);
+
 impl process::Server<cap_pointer, module_error::Owned<any_pointer>>
-    for Rc<RefCell<PosixModuleProcessImpl>>
+    for RefCell<PosixModuleProcessImpl>
 {
     #[async_backtrace::framed]
     /// In this implementation of `spawn`, the functions returns the exit code of the child
@@ -163,7 +174,8 @@ impl
                         let module_process_client: process::Client<
                             cap_pointer,
                             module_error::Owned<any_pointer>,
-                        > = capnp_rpc::new_client(Rc::new(RefCell::new(module_process)));
+                        > = PROCESS_SET
+                            .with_borrow_mut(|x| x.new_client(RefCell::new(module_process)));
                         results.get().set_result(module_process_client);
                         Ok(())
                     }
@@ -201,7 +213,6 @@ mod tests {
     use crate::byte_stream::ByteStreamImpl;
     use crate::spawn::posix_process::PosixProgramImpl;
     use cap_std::io_lifetimes::{FromFilelike, IntoFilelike};
-    use capnp::capability::FromClientHook;
     use std::cell::RefCell;
     use std::fs::File;
     use std::rc::Rc;
@@ -270,7 +281,7 @@ mod tests {
         let mut rpc_system =
             super::RpcSystem::new(Box::new(network), Some(keystone_client.clone().client));
 
-        let disconnector = rpc_system.get_disconnector();
+        let _ = rpc_system.get_disconnector();
 
         task::LocalSet::new()
             .run_until(async_backtrace::location!().frame(async {
@@ -288,7 +299,7 @@ mod tests {
 
                 tokio::task::spawn_local(rpc_system);
 
-                let mut start_request = bootstrap.start_request();
+                let start_request = bootstrap.start_request();
                 //start_request.get().set_config()
                 let root_response = start_request.send().promise.await?;
                 let hello_world = root_response.get()?.get_api()?;
@@ -332,9 +343,9 @@ mod tests {
         let e = task::LocalSet::new()
             .run_until(async_backtrace::location!().frame(async {
                 let mut spawn_request = wrapped_client.spawn_request();
-                let mut builder = spawn_request.get();
-                let mut posix_args = builder.init_args();
-                let mut args = posix_args.init_config();
+                let builder = spawn_request.get();
+                let posix_args = builder.init_args();
+                let args = posix_args.init_config();
                 let mut config: crate::hello_world_capnp::config::Builder = args.init_as();
                 config.set_greeting("Hello".into());
 

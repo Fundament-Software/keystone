@@ -65,3 +65,4 @@ features = ["Win32_Foundation"]
 predicates = "2.1"
 assert_fs = "1.0"
 console-subscriber = "0.2.0"
+tempfile = "3"

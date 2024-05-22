@@ -146,13 +146,13 @@ impl RootDatabase {
         self.drop_generic::<ROOT_OBJECTS>(id)
     }
     pub fn get_string_index(&mut self, s: &str) -> Result<i64> {
-        Self::expect_change(
-            self.conn
-                .prepare_cached("INSERT OR IGNORE INTO stringmap (string) VALUES (?1)")?
-                .execute(params![s]),
-            1,
-        )?;
-        Ok(self.conn.last_insert_rowid())
+        self.conn
+            .prepare_cached("INSERT OR IGNORE INTO stringmap (string) VALUES (?1)")?
+            .execute(params![s])?;
+        Ok(self
+            .conn
+            .prepare_cached("SELECT id FROM stringmap WHERE string = ?1")?
+            .query_row(params![s], |x| x.get(0))?)
     }
 }
 
@@ -185,7 +185,7 @@ impl DatabaseInterface for RootDatabase {
         self.conn.execute(
             "CREATE TABLE stringmap (
             id    INTEGER PRIMARY KEY,
-            string  TEXT UNIQUE NOT NULL,
+            string  TEXT UNIQUE NOT NULL
         )",
             (),
         )?;
@@ -216,17 +216,29 @@ impl Manager {
     ) -> Result<DB> {
         match options {
             OpenOptions::Create => {
-                if let Ok(r) = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE)
-                {
-                    Ok(r.into())
+                let create = if let Ok(file) = std::fs::File::open(path) {
+                    file.metadata()?.len() == 0
                 } else {
-                    let mut r: DB = Self::create(path)?.into();
+                    true
+                };
+
+                let flags = if create {
+                    OpenFlags::SQLITE_OPEN_CREATE | OpenFlags::SQLITE_OPEN_READ_WRITE
+                } else {
+                    OpenFlags::SQLITE_OPEN_READ_WRITE
+                };
+
+                let mut r: DB = Connection::open_with_flags(path, flags)?.into();
+                if create {
                     r.init()?;
-                    Ok(r)
                 }
+                Ok(r)
             }
             OpenOptions::Truncate => {
-                std::fs::remove_file(path)?;
+                // If the file already exists, we truncate it instead of deleting it to support temp file situations.
+                if let Ok(file) = std::fs::File::open(path) {
+                    file.set_len(0)?;
+                }
                 let mut r: DB = Self::create(path)?.into();
                 r.init()?;
                 Ok(r)

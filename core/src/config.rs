@@ -154,7 +154,6 @@ fn toml_to_config(
 
     if let Some(c) = v.get("config") {
         let binding = std::env::current_dir()?;
-        let inspect = binding.as_os_str().to_string_lossy();
 
         let f = File::open(schemafile)?;
         let bufread = BufReader::new(f);
@@ -175,8 +174,7 @@ fn toml_to_config(
             .ok_or(eyre::eyre!("Can't find 'Config' type in schema!"))?;
 
         if let TypeVariant::Struct(st) = configtype {
-            let mut dynobj: capnp::dynamic_struct::Builder =
-                anyconfig.init_dynamic((*st).into())?;
+            let dynobj: capnp::dynamic_struct::Builder = anyconfig.init_dynamic((*st).into())?;
             if let Value::Table(t) = c {
                 value_to_struct(t, dynobj)
             } else {

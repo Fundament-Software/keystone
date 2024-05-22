@@ -364,7 +364,14 @@ caplog = { trieFile = ""#,
 
 [[modules]]
 name = "Hello World"
-path = "../target/debug/hello-world-module.exe"
+path = "../target/debug/hello-world-module"#,
+    );
+
+    #[cfg(windows)]
+    source.push_str(".exe");
+
+    source.push_str(
+        r#""
 config = { greeting = "Bonjour" }
 schema = "../../modules/hello-world/keystone.schema"
 "#,

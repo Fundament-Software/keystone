@@ -37,13 +37,3 @@ capstone-rpc = { git = "https://github.com/Fundament-Software/capstone-rs" }
 capstone-macros = { git = "https://github.com/Fundament-Software/capstone-rs" }
 uuid = "1.*"
 rusqlite = { version = "0.31", features = ["bundled"] }
-
-[patch."https://github.com/Fundament-Software/capstone-rs"]
-capstone = { path = "../capstone-rs/capnp" }
-capstone-futures = { path = "../capstone-rs/capnp-futures" }
-capstone-import = { path = "../capstone-rs/capnp-import" }
-capstone-rpc = { path = "../capstone-rs/capnp-rpc" }
-capstone-macros = { path = "../capstone-rs/capnp-macros" }
-
-[patch."https://github.com/Fundament-Software/caplog"]
-caplog = { path = "../caplog" }

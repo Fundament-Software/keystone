@@ -409,7 +409,6 @@ schema = "../../modules/hello-world/keystone.schema"
                 .get_message()
                 .unwrap();
 
-            println!("GOT RESPONSE: {:?}", msg);
             assert_eq!(msg, "Bonjour, Keystone!");
         }
 

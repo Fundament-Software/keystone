@@ -52,6 +52,7 @@ time = "0.3.34"
 toml = "0.8.12"
 async-backtrace.workspace = true
 futures-util.workspace = true
+rusqlite.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2.139"
@@ -64,3 +65,4 @@ features = ["Win32_Foundation"]
 predicates = "2.1"
 assert_fs = "1.0"
 console-subscriber = "0.2.0"
+tempfile = "3"

@@ -35,3 +35,5 @@ capstone-futures = { git = "https://github.com/Fundament-Software/capstone-rs" }
 capstone-import = { git = "https://github.com/Fundament-Software/capstone-rs" }
 capstone-rpc = { git = "https://github.com/Fundament-Software/capstone-rs" }
 capstone-macros = { git = "https://github.com/Fundament-Software/capstone-rs" }
+uuid = "1.*"
+rusqlite = { version = "0.31", features = ["bundled"] }

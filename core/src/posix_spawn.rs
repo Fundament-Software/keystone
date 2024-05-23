@@ -1,4 +1,3 @@
-use crate::cap_std_capnp::file;
 use crate::cap_std_capnproto::AmbientAuthorityImpl;
 use crate::posix_spawn_capnp::local_native_program;
 use crate::spawn::posix_process::PosixProgramImpl;

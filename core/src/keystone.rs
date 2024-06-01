@@ -1,13 +1,12 @@
 use caplog::{CapLog, MAX_BUFFER_SIZE};
 use capnp::any_pointer::Owned as any_pointer;
 use capnp::capability::RemotePromise;
-use capnp_rpc::CapabilityServerSet;
 use eyre::Result;
 use std::time::Duration;
 use std::{cell::RefCell, collections::HashMap, marker::PhantomData, path::Path, rc::Rc};
 
 use crate::{
-    cap_std_capnproto::{self, AmbientAuthorityImpl},
+    cap_std_capnproto::AmbientAuthorityImpl,
     database::RootDatabase,
     keystone_capnp::{host, keystone_config},
     module_capnp::module_error,
@@ -22,7 +21,6 @@ type SpawnProgram = crate::spawn_capnp::program::Client<
 >;
 type SpawnProcess =
     crate::spawn_capnp::process::Client<any_pointer, module_error::Owned<any_pointer>>;
-use capnp_macros::capnproto_rpc;
 use serde::{Deserialize, Serialize};
 
 pub struct HostImpl<State> {
@@ -338,6 +336,28 @@ impl Keystone {
 
 #[cfg(test)]
 use tempfile::NamedTempFile;
+#[cfg(test)]
+use tempfile::TempPath;
+
+#[cfg(test)]
+fn build_temp_config(temp_db: &TempPath, temp_log: &TempPath) -> String {
+    let escaped = temp_db.as_os_str().to_str().unwrap().replace("\\", "\\\\");
+
+    let mut source = r#"
+    database = ""#
+        .to_string();
+    source.push_str(escaped.as_str());
+    source.push_str(
+        r#""
+    defaultLog = "debug"
+    caplog = { trieFile = ""#,
+    );
+
+    let escaped = temp_log.as_os_str().to_str().unwrap().replace("\\", "\\\\");
+    source.push_str(escaped.as_str());
+    source.push_str("\" }");
+    source
+}
 
 #[test]
 fn test_hello_world_init() -> Result<()> {
@@ -345,22 +365,11 @@ fn test_hello_world_init() -> Result<()> {
     let mut msg = message.init_root::<keystone_config::Builder>();
 
     let temp_db = NamedTempFile::new().unwrap().into_temp_path();
-    let escaped = temp_db.as_os_str().to_str().unwrap().replace("\\", "\\\\");
-    let mut source = r#"
-database = ""#
-        .to_string();
-    source.push_str(escaped.as_str());
-    source.push_str(
-        r#""
-defaultLog = "debug"
-caplog = { trieFile = ""#,
-    );
-
     let temp_log = NamedTempFile::new().unwrap().into_temp_path();
-    let escaped = temp_log.as_os_str().to_str().unwrap().replace("\\", "\\\\");
-    source.push_str(escaped.as_str());
+    let mut source = build_temp_config(&temp_db, &temp_log);
+
     source.push_str(
-        r#"" }
+        r#"
 
 [[modules]]
 name = "Hello World"
@@ -377,10 +386,7 @@ schema = "../../modules/hello-world/keystone.schema"
 "#,
     ); // TODO: adjust hello-world build script to output keystone.schema to output folder
 
-    crate::config::to_capnp::<keystone_config::Owned>(
-        &source.parse::<toml::Table>()?,
-        msg.reborrow(),
-    )?;
+    crate::config::to_capnp(&source.parse::<toml::Table>()?, msg.reborrow())?;
 
     let mut instance = Keystone::new(
         message.get_root_as_reader::<keystone_config::Reader>()?,
@@ -424,5 +430,53 @@ schema = "../../modules/hello-world/keystone.schema"
 
     tokio::runtime::Runtime::new()?.block_on(fut);
 
+    Ok(())
+}
+
+#[ignore]
+#[test]
+fn test_indirect_init() -> Result<()> {
+    let mut message = ::capnp::message::Builder::new_default();
+    let mut msg = message.init_root::<keystone_config::Builder>();
+
+    let temp_db = NamedTempFile::new().unwrap().into_temp_path();
+    let temp_log = NamedTempFile::new().unwrap().into_temp_path();
+    let mut source = build_temp_config(&temp_db, &temp_log);
+
+    source.push_str(
+        r#"
+
+[[modules]]
+name = "Hello World"
+path = "../target/debug/hello-world-module"#,
+    );
+
+    #[cfg(windows)]
+    source.push_str(".exe");
+
+    source.push_str(
+        r#""
+config = { greeting = "Bonjour" }
+schema = "../../modules/hello-world/keystone.schema"
+"#,
+    );
+
+    let source = r#"
+    database = "test.sqlite"
+defaultLog = "debug"
+
+[[modules]]
+name = "Hello World"
+path = "../target/debug/hello-world-module.exe"
+config = { greeting = "Bonjour" }
+schema = "../../modules/hello-world/keystone.schema"
+
+[[modules]]
+name = "Indirect World"
+path = "../target/debug/indirect-world-module.exe"
+config = { hello_world = { module_ref = "Hello World" } }
+schema = "../../modules/indirect-world/keystone.schema"
+    
+    "#;
     Ok(())
 }

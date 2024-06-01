@@ -23,18 +23,18 @@ use capnp_rpc::CapabilityServerSet;
 
 pub struct AmbientAuthorityImpl {
     pub authority: AmbientAuthority,
-    pub file_set: capnp_rpc::CapabilityServerSet<FileImpl, file::Client>,
-    pub dir_set: capnp_rpc::CapabilityServerSet<DirImpl, dir::Client>,
-    pub instant_set: capnp_rpc::CapabilityServerSet<InstantImpl, instant::Client>,
+    pub file_set: CapabilityServerSet<FileImpl, file::Client>,
+    pub dir_set: CapabilityServerSet<DirImpl, dir::Client>,
+    pub instant_set: CapabilityServerSet<InstantImpl, instant::Client>,
 }
 
 impl AmbientAuthorityImpl {
     pub fn new() -> Self {
         Self {
             authority: cap_std::ambient_authority(),
-            file_set: capnp_rpc::CapabilityServerSet::new(),
-            dir_set: capnp_rpc::CapabilityServerSet::new(),
-            instant_set: capnp_rpc::CapabilityServerSet::new(),
+            file_set: CapabilityServerSet::new(),
+            dir_set: CapabilityServerSet::new(),
+            instant_set: CapabilityServerSet::new(),
         }
     }
 

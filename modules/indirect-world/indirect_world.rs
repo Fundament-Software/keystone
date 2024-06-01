@@ -1,10 +1,10 @@
-use crate::hello_world_capnp::root;
+use crate::indirect_world_capnp::root;
 
-pub struct HelloWorldImpl {
-    pub greeting: String,
+pub struct IndirectWorldImpl {
+    pub hello_world: String,
 }
 
-impl root::Server for HelloWorldImpl {
+impl root::Server for IndirectWorldImpl {
     async fn say_hello(
         &self,
         params: root::SayHelloParams,

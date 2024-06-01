@@ -23,7 +23,7 @@ pub struct ModuleImpl {
 #[capnproto_rpc(module_start)]
 impl module_start::Server<config::Owned, root::Owned> for ModuleImpl {
     async fn start(&self, config: Reader) -> Result<(), ::capnp::Error> {
-        let client: root::Client = capnp_rpc::new_client(HelloWorldImpl {
+        let client: root::Client = capnp_rpc::new_client(IndirectWorldImpl {
             greeting: config.get_greeting()?.to_string()?,
         });
         results.get().set_api(client)?;
@@ -44,12 +44,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = ::std::env::args().collect();
     tracing::info!("server started");
 
-    /*let log_file = File::create("my_cool_trace.log")?;
+    let log_file = File::create("my_cool_trace.log")?;
     tracing_subscriber::fmt()
         .with_max_level(Level::DEBUG)
         .with_writer(log_file)
         .with_ansi(false)
-        .init();*/
+        .init();
 
     tokio::task::LocalSet::new()
         .run_until(async move {
@@ -89,7 +89,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
         .await;
 
-    tracing::info!("RPC gracefully terminated");
+        tracing::info!("RPC gracefully terminated");
 
     Ok(())
 }

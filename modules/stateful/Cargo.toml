@@ -1,18 +1,16 @@
 [package]
-name = "hello-world-module"
+name = "stateful-module"
 edition.workspace = true
 rust-version.workspace = true
 version = "0.1.0"
 authors = [
-  "Sonata",
   "Erik McClure <erikm@fundament.software>",
-  "Original code: Mostafa Sedaghat Joo <mostafa.sedaghat@gmail.com>",
 ]
 homepage.workspace = true
 license.workspace = true
 
 [[bin]]
-name = "hello-world-module"
+name = "stateful-module"
 path = "main.rs"
 
 [dependencies]
@@ -25,9 +23,3 @@ tokio.workspace = true
 tokio-util.workspace = true
 tracing-subscriber.workspace = true
 tracing.workspace = true
-
-[build-dependencies]
-capstone-gen.workspace = true
-capstone-import.workspace = true
-tempfile = "3"
-eyre.workspace = true

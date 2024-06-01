@@ -1,6 +1,8 @@
 #![allow(dead_code)]
+mod buffer_allocator;
 mod byte_stream;
 mod cap_std_capnproto;
+mod cell;
 mod config;
 mod database;
 mod keystone;
@@ -193,10 +195,7 @@ async fn main() -> Result<()> {
             let mut msg = message.init_root::<keystone_config::Builder>();
             let source = std::fs::read_to_string(config)?;
 
-            config::to_capnp::<keystone_config::Owned>(
-                &source.parse::<toml::Table>()?,
-                msg.reborrow(),
-            )?;
+            config::to_capnp(&source.parse::<toml::Table>()?, msg.reborrow())?;
             println!("{:#?}", msg.reborrow_as_reader());
         }
         Commands::Dump { database, out } => {

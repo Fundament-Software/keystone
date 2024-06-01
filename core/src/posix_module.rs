@@ -20,7 +20,6 @@ use capnp_rpc::CapabilityServerSet;
 use capnp_rpc::Disconnector;
 use capnp_rpc::{rpc_twoparty_capnp, RpcSystem};
 use std::cell::RefCell;
-use std::rc::Rc;
 
 pub struct PosixModuleProcessImpl {
     posix_process: process::Client<ByteStream, PosixError>,

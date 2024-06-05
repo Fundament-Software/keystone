@@ -49,7 +49,7 @@ struct KeystoneConfig {
     name @0 :Text;
     config @1 :T;
     path @2 :Text; # todo: replace with hash value once we have a store
-    schema @3 :Text = "keystone.schema"; # relative to path
+    schema @3 :Text; # if this is left empty, keystone will try to extract it from the EXE
   }
 
   modules @2 :List(ModuleConfig);

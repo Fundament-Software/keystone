@@ -12,11 +12,8 @@ use crate::module_capnp::module_start;
 use capnp::any_pointer::Owned as any_pointer;
 use capnp_macros::capnproto_rpc;
 use capnp_rpc::{rpc_twoparty_capnp, twoparty, RpcSystem};
-use std::borrow::BorrowMut;
 use std::cell::RefCell;
 use std::fs::File;
-use tokio::sync::Mutex;
-use tokio::time::{sleep, Duration};
 use tracing::Level;
 
 pub struct ModuleImpl {
@@ -28,7 +25,7 @@ pub struct ModuleImpl {
 impl module_start::Server<config::Owned, root::Owned> for ModuleImpl {
     async fn start(&self, config: Reader) -> Result<(), ::capnp::Error> {
         let client: root::Client = capnp_rpc::new_client(IndirectWorldImpl {
-            hello_world: config.get_hello_world()?,
+            hello_client: config.get_hello_world()?,
         });
         results.get().set_api(client)?;
         Ok(())
@@ -45,7 +42,7 @@ impl module_start::Server<config::Owned, root::Owned> for ModuleImpl {
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let args: Vec<String> = ::std::env::args().collect();
+    // let args: Vec<String> = ::std::env::args().collect();
     tracing::info!("server started");
 
     let log_file = File::create("indirect-world.log")?;

@@ -23,6 +23,16 @@ type SpawnProcess =
     crate::spawn_capnp::process::Client<any_pointer, module_error::Owned<any_pointer>>;
 use serde::{Deserialize, Serialize};
 
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    #[error("Unexpected end of file while trying to read section[{0},{1}]")]
+    UnexpectedEof(usize, usize),
+    #[error("Couldn't find any embedded schema data")]
+    NoSchemaData,
+    #[error("File is not a valid compiled schema.")]
+    NotValidSchema,
+}
+
 pub struct HostImpl<State> {
     instance_id: u64,
     phantom: PhantomData<State>,
@@ -334,6 +344,37 @@ impl Keystone {
     }
 }
 
+pub fn create_binary_file(
+    contents: &[u8],
+    symbol_name: &str,
+) -> Option<(Vec<u8>, Option<&'static str>)> {
+    crate::object_file::create_metadata_file(
+        current_platform::CURRENT_PLATFORM,
+        contents,
+        symbol_name,
+    )
+}
+
+#[cfg(test)]
+pub(crate) fn get_binary_path(name: &str) -> std::path::PathBuf {
+    let exe = std::env::current_exe().expect("couldn't get current EXE path");
+    let mut target_dir = exe.parent().unwrap();
+
+    if target_dir.ends_with("deps") {
+        target_dir = target_dir.parent().unwrap();
+    }
+
+    #[cfg(windows)]
+    {
+        return target_dir.join(format!("{}.exe", name).as_str());
+    }
+
+    #[cfg(not(windows))]
+    {
+        return target_dir.join(name);
+    }
+}
+
 #[cfg(test)]
 use tempfile::NamedTempFile;
 #[cfg(test)]
@@ -342,21 +383,14 @@ use tempfile::TempPath;
 #[cfg(test)]
 fn build_temp_config(temp_db: &TempPath, temp_log: &TempPath) -> String {
     let escaped = temp_db.as_os_str().to_str().unwrap().replace("\\", "\\\\");
+    let trie_escaped = temp_log.as_os_str().to_str().unwrap().replace("\\", "\\\\");
 
-    let mut source = r#"
-    database = ""#
-        .to_string();
-    source.push_str(escaped.as_str());
-    source.push_str(
-        r#""
+    format!(
+        r#"
+    database = "{escaped}"
     defaultLog = "debug"
-    caplog = { trieFile = ""#,
-    );
-
-    let escaped = temp_log.as_os_str().to_str().unwrap().replace("\\", "\\\\");
-    source.push_str(escaped.as_str());
-    source.push_str("\" }");
-    source
+    caplog = {{ trieFile = "{trie_escaped}" }}"#
+    )
 }
 
 #[test]
@@ -369,22 +403,23 @@ fn test_hello_world_init() -> Result<()> {
     let mut source = build_temp_config(&temp_db, &temp_log);
 
     source.push_str(
-        r#"
+        format!(
+            r#"
 
 [[modules]]
 name = "Hello World"
-path = "../target/debug/hello-world-module"#,
-    );
+path = "{}"
+config = {{ greeting = "Bonjour" }}
 
-    #[cfg(windows)]
-    source.push_str(".exe");
-
-    source.push_str(
-        r#""
-config = { greeting = "Bonjour" }
-schema = "../../modules/hello-world/keystone.schema"
 "#,
-    ); // TODO: adjust hello-world build script to output keystone.schema to output folder
+            get_binary_path("hello-world-module")
+                .as_os_str()
+                .to_str()
+                .unwrap()
+                .replace('\\', "/")
+        )
+        .as_str(),
+    );
 
     crate::config::to_capnp(&source.parse::<toml::Table>()?, msg.reborrow())?;
 
@@ -444,39 +479,32 @@ fn test_indirect_init() -> Result<()> {
     let mut source = build_temp_config(&temp_db, &temp_log);
 
     source.push_str(
-        r#"
+        format!(
+            r#"
 
 [[modules]]
 name = "Hello World"
-path = "../target/debug/hello-world-module"#,
-    );
-
-    #[cfg(windows)]
-    source.push_str(".exe");
-
-    source.push_str(
-        r#""
-config = { greeting = "Bonjour" }
-schema = "../../modules/hello-world/keystone.schema"
-"#,
-    );
-
-    let source = r#"
-    database = "test.sqlite"
-defaultLog = "debug"
-
-[[modules]]
-name = "Hello World"
-path = "../target/debug/hello-world-module.exe"
-config = { greeting = "Bonjour" }
-schema = "../../modules/hello-world/keystone.schema"
+path = "{}"
+config = {{ greeting = "Bonjour" }}
 
 [[modules]]
 name = "Indirect World"
-path = "../target/debug/indirect-world-module.exe"
-config = { hello_world = { module_ref = "Hello World" } }
-schema = "../../modules/indirect-world/keystone.schema"
+path = "{}"
+config = {{ hello_world = {{ module_ref = "Hello World" }} }}
     
-    "#;
+    "#,
+            get_binary_path("hello-world-module")
+                .as_os_str()
+                .to_str()
+                .unwrap()
+                .replace('\\', "/"),
+            get_binary_path("indirect-world-module")
+                .as_os_str()
+                .to_str()
+                .unwrap()
+                .replace('\\', "/")
+        )
+        .as_str(),
+    );
     Ok(())
 }

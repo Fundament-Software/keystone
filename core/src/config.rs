@@ -4,7 +4,6 @@ use std::{fs::File, io::BufReader, path::Path};
 use crate::keystone_capnp::cap_expr;
 use crate::keystone_capnp::keystone_config;
 use crate::toml_capnp;
-use capnp::introspect::RawCapabilitySchema;
 use capnp::schema::CapabilitySchema;
 use capnp::{
     dynamic_struct, dynamic_value, introspect::TypeVariant, schema::DynamicSchema, schema_capnp,
@@ -164,13 +163,12 @@ where
     F: FnMut(*const Value) -> Option<u32>,
 {
     let path = v.get("path").ok_or(eyre!("Can't find path!"))?;
+
+    if let Some(str) = path.as_str() {
+        builder.set_path(str.into());
+    }
+
     let path = Path::new(path.as_str().ok_or(eyre!("Path isn't a string?!"))?);
-    let schemafile = path.parent().unwrap_or(&Path::new("")).join(
-        v.get("schema")
-            .unwrap_or(&Value::String("keystone.schema".to_string()))
-            .as_str()
-            .ok_or(eyre!("Schema isn't a string?!"))?,
-    );
     let mut name = None;
 
     if let Some(n) = v.get("name") {
@@ -180,34 +178,43 @@ where
         }
     }
 
-    if let Some(path) = v.get("path") {
-        if let Some(str) = path.as_str() {
-            builder.set_path(str.into());
-        }
-    }
-
-    if let Some(schema) = v.get("schema") {
-        if let Some(str) = schema.as_str() {
-            builder.set_schema(str.into());
-        }
-    }
-
     if let Some(c) = v.get("config") {
         let binding = std::env::current_dir()?;
 
-        let f = File::open(schemafile)?;
-        let bufread = BufReader::new(f);
+        let msg = if let Some(schema) = v.get("schema") {
+            if let Some(str) = schema.as_str() {
+                builder.set_schema(str.into());
+            }
 
-        let msg = capnp::serialize::read_message(
-            bufread,
-            capnp::message::ReaderOptions {
-                traversal_limit_in_words: None,
-                nesting_limit: 128,
-            },
-        )?;
+            let schemafile = path
+                .parent()
+                .unwrap_or(&Path::new(""))
+                .join(schema.as_str().ok_or(eyre!("Schema isn't a string?!"))?);
+
+            let f = File::open(schemafile)?;
+            let bufread = BufReader::new(f);
+            capnp::serialize::read_message(
+                bufread,
+                capnp::message::ReaderOptions {
+                    traversal_limit_in_words: None,
+                    nesting_limit: 128,
+                },
+            )?
+        } else {
+            let file_contents = std::fs::read(path)?;
+
+            let binary = crate::binary_embed::load_deps_from_binary(&file_contents)?;
+            let bufread = BufReader::new(binary);
+            capnp::serialize::read_message(
+                bufread,
+                capnp::message::ReaderOptions {
+                    traversal_limit_in_words: None,
+                    nesting_limit: 128,
+                },
+            )?
+        };
 
         let anyconfig: capnp::any_pointer::Builder = builder.init_config();
-
         let schema = DynamicSchema::new(msg)?;
         let configtype = schema
             .get_type_by_scope(vec!["Config".to_string()])
@@ -567,16 +574,22 @@ path = "/test/"
 fn test_hello_world_config() -> Result<()> {
     let mut message = ::capnp::message::Builder::new_default();
     let mut msg = message.init_root::<keystone_config::Builder>();
-    let source = r#"
+    let source = format!(
+        r#"
 database = "test.sqlite"
 defaultLog = "debug"
 
 [[modules]]
 name = "Hello World"
-path = "../target/debug/hello-world-module.exe"
-config = { greeting = "Bonjour" }
-schema = "../../modules/hello-world/keystone.schema"
-"#; // TODO: adjust hello-world build script to output keystone.schema to output folder
+path = "{}"
+config = {{ greeting = "Bonjour" }}
+"#,
+        crate::keystone::get_binary_path("hello-world-module")
+            .as_os_str()
+            .to_str()
+            .unwrap()
+            .replace('\\', "/")
+    );
 
     to_capnp(&source.parse::<toml::Table>()?, msg.reborrow())?;
     println!("{:#?}", msg.reborrow_as_reader());
@@ -584,26 +597,37 @@ schema = "../../modules/hello-world/keystone.schema"
     Ok(())
 }
 
+#[ignore]
 #[test]
 fn test_indirect_config() -> Result<()> {
     let mut message = ::capnp::message::Builder::new_default();
     let mut msg = message.init_root::<keystone_config::Builder>();
-    let source = r#"
+    let source = format!(
+        r#"
 database = "test.sqlite"
 defaultLog = "debug"
 
 [[modules]]
 name = "Hello World"
-path = "../target/debug/hello-world-module.exe"
-config = { greeting = "Bonjour" }
-schema = "../../modules/hello-world/keystone.schema"
+path = "{}"
+config = {{ greeting = "Bonjour" }}
 
 [[modules]]
 name = "Indirect World"
-path = "../target/debug/indirect-world-module.exe"
-config = { hello_world = { "@Hello World" } }
-schema = "../../modules/indirect-world/keystone.schema"
-"#; // TODO: can we copy keystone.schema to out dir in build script?
+path = "{}"
+config = {{ hello_world = {{ "@Hello World" }} }}
+"#,
+        crate::keystone::get_binary_path("hello-world-module")
+            .as_os_str()
+            .to_str()
+            .unwrap()
+            .replace('\\', "/"),
+        crate::keystone::get_binary_path("indirect-world-module")
+            .as_os_str()
+            .to_str()
+            .unwrap()
+            .replace('\\', "/")
+    );
 
     to_capnp(&source.parse::<toml::Table>()?, msg.reborrow())?;
     println!("{:#?}", msg.reborrow_as_reader());

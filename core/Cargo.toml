@@ -18,6 +18,7 @@ keywords = [
   "distributed",
 ]
 license.workspace = true
+links = "keystone"
 
 [lib]
 doctest = false
@@ -38,6 +39,7 @@ capstone-futures.workspace = true
 capstone-import.workspace = true
 capstone-rpc.workspace = true
 capstone-macros.workspace = true
+capstone-gen.workspace = true
 chrono = "0.4"
 color-eyre.workspace = true
 dlopen = "0.1.8"
@@ -57,6 +59,13 @@ toml = "0.8.12"
 async-backtrace.workspace = true
 futures-util.workspace = true
 rusqlite.workspace = true
+binfarce = "0.2.1"
+object = { version = "0.30", default-features = false, features = ["write"] }
+current_platform = "0.2.0"
+platforms = "3.4.0"
+wasm-gen = "0.1.4"
+thiserror = "1.0.61"
+wasmparser = { version = "0.207.0", default-features = false, optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2.139"
@@ -70,3 +79,7 @@ predicates = "2.1"
 assert_fs = "1.0"
 console-subscriber = "0.2.0"
 tempfile = "3"
+
+[features]
+default = ["wasm"]
+wasm = ["wasmparser"]

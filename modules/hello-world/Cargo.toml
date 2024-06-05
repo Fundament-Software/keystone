@@ -10,6 +10,10 @@ authors = [
 ]
 homepage.workspace = true
 license.workspace = true
+links = "hello_world"
+
+[features]
+tracing = []
 
 [[bin]]
 name = "hello-world-module"
@@ -25,9 +29,11 @@ tokio.workspace = true
 tokio-util.workspace = true
 tracing-subscriber.workspace = true
 tracing.workspace = true
+keystone = { path = "../../core" }
 
 [build-dependencies]
 capstone-gen.workspace = true
 capstone-import.workspace = true
 tempfile = "3"
 eyre.workspace = true
+keystone = { path = "../../core" }

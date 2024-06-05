@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+mod binary_embed;
 mod buffer_allocator;
 mod byte_stream;
 mod cap_std_capnproto;
@@ -6,6 +7,7 @@ mod cell;
 mod config;
 mod database;
 mod keystone;
+mod object_file;
 mod posix_module;
 mod posix_spawn;
 mod spawn;
@@ -18,7 +20,8 @@ capnp_import::capnp_import!("../modules/hello-world/*.capnp");
 use crate::keystone_capnp::keystone_config;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use eyre::Result;
-use std::convert::Into;
+use std::{convert::Into, str::FromStr};
+use windows_sys::Win32::Security::Authentication::Identity::SCH_CRED_MAX_STORE_NAME_SIZE;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -78,6 +81,11 @@ enum Commands {
         config: String,
         #[arg(short = 'o')]
         out: Option<String>,
+    },
+    /// Given either a copmiled schema file or a binary with an embedded schema file, displays the textual output of that file.
+    Inspect {
+        #[arg(short = 's')]
+        schema: String,
     },
     /// Given a keystone database, dumps the config to a TOML file. If no database is provided, tries to find a running keystone server.
     Dump {
@@ -160,10 +168,6 @@ enum CapNPCommands {
     Eval { schema_file: String, name: String },
 }
 
-//async fn hello_world(_req: Request<Body>) -> Result<Response<Body>, Infallible> {
-//    Ok(Response::new("Hello, World".into()))
-//}
-
 #[async_backtrace::framed]
 async fn shutdown_signal() {
     // Wait for the CTRL+C signal
@@ -208,6 +212,13 @@ async fn main() -> Result<()> {
         Commands::Module(ModuleCommandArgs { _args }) => {
             //
             println!("TODO!!!: {:?}", _args);
+        }
+        Commands::Inspect { schema } => {
+            let file_contents =
+                std::fs::read(std::path::PathBuf::from_str(schema.as_str())?.as_path())?;
+
+            let binary = crate::binary_embed::load_deps_from_binary(&file_contents)?;
+            println!("success???");
         }
         _ => todo!(),
     }

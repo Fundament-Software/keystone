@@ -1,4 +1,4 @@
-capnp_import::capnp_import!("hello_world.capnp", "../../core/schema/**/*.capnp");
+capnp_import::capnp_import!("hello_world.capnp", "/schema/**/*.capnp");
 
 pub mod hello_world;
 use crate::hello_world::HelloWorldImpl;
@@ -8,11 +8,10 @@ use crate::module_capnp::module_start;
 use capnp::any_pointer::Owned as any_pointer;
 use capnp_macros::capnproto_rpc;
 use capnp_rpc::{rpc_twoparty_capnp, twoparty, RpcSystem};
-use std::borrow::BorrowMut;
 use std::cell::RefCell;
+#[cfg(feature = "tracing")]
 use std::fs::File;
-use tokio::sync::Mutex;
-use tokio::time::{sleep, Duration};
+#[cfg(feature = "tracing")]
 use tracing::Level;
 
 pub struct ModuleImpl {
@@ -41,15 +40,17 @@ impl module_start::Server<config::Owned, root::Owned> for ModuleImpl {
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let args: Vec<String> = ::std::env::args().collect();
+    let _: Vec<String> = ::std::env::args().collect();
     tracing::info!("server started");
 
-    /*let log_file = File::create("my_cool_trace.log")?;
+    #[cfg(feature = "tracing")]
+    let log_file = File::create("my_cool_trace.log")?;
+    #[cfg(feature = "tracing")]
     tracing_subscriber::fmt()
         .with_max_level(Level::DEBUG)
         .with_writer(log_file)
         .with_ansi(false)
-        .init();*/
+        .init();
 
     tokio::task::LocalSet::new()
         .run_until(async move {

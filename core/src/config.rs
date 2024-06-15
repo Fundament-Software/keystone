@@ -43,7 +43,7 @@ fn value_to_list(l: &Vec<Value>, mut builder: ::capnp::dynamic_list::Builder) ->
 
 fn toml_to_capnp(v: &Value, mut builder: toml_capnp::value::Builder) -> Result<()> {
     match v {
-        Value::String(s) => builder.set_string(s.as_str().into()),
+        Value::String(s) => builder.set_toml_string(s.as_str().into()),
         Value::Integer(i) => builder.set_int((*i).into()),
         Value::Float(f) => builder.set_float((*f).into()),
         Value::Boolean(b) => builder.set_boolean((*b).into()),

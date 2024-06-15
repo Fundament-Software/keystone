@@ -161,7 +161,7 @@ dependencies = [
  "async-backtrace-attributes",
  "dashmap",
  "futures",
- "loom",
+ "loom 0.5.6",
  "once_cell",
  "pin-project-lite",
  "rustc-hash",
@@ -174,9 +174,9 @@ version = "0.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "affbba0d438add06462a0371997575927bc05052f7ec486e7a4ca405c956c3d7"
 dependencies = [
- "proc-macro2 1.0.82",
+ "proc-macro2 1.0.84",
  "quote 1.0.36",
- "syn 2.0.64",
+ "syn 2.0.66",
 ]
 
 [[package]]
@@ -196,9 +196,9 @@ version = "0.3.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "16e62a023e7c117e27523144c5d2459f4397fcc3cab0085af8e2224f643a0193"
 dependencies = [
- "proc-macro2 1.0.82",
+ "proc-macro2 1.0.84",
  "quote 1.0.36",
- "syn 2.0.64",
+ "syn 2.0.66",
 ]
 
 [[package]]
@@ -207,9 +207,9 @@ version = "0.1.80"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c6fa2087f2753a7da8cc1c0dbfcf89579dd57458e36769de5ac750b4671737ca"
 dependencies = [
- "proc-macro2 1.0.82",
+ "proc-macro2 1.0.84",
  "quote 1.0.36",
- "syn 2.0.64",
+ "syn 2.0.66",
 ]
 
 [[package]]
@@ -302,9 +302,9 @@ version = "0.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a26b8cea8bb6a81b75a84603b9e096f05fa86db057904ef29be1deee900532bd"
 dependencies = [
- "proc-macro2 1.0.82",
+ "proc-macro2 1.0.84",
  "quote 1.0.36",
- "syn 2.0.64",
+ "syn 2.0.66",
 ]
 
 [[package]]
@@ -484,14 +484,14 @@ dependencies = [
 [[package]]
 name = "caplog"
 version = "0.1.0"
-source = "git+https://github.com/Fundament-Software/caplog#8f0fdcc3256067c45c88a38fe0128c2d5597cb79"
+source = "git+https://github.com/Fundament-Software/caplog#205246ad8b1a205c65fb6e0f1914535422200f61"
 dependencies = [
  "bitfield-struct",
- "capstone",
- "capstone-futures",
- "capstone-import",
- "capstone-macros",
- "capstone-rpc",
+ "capstone 0.18.0 (git+https://github.com/Fundament-Software/capstone-rs)",
+ "capstone-futures 0.18.0 (git+https://github.com/Fundament-Software/capstone-rs)",
+ "capstone-import 0.18.0 (git+https://github.com/Fundament-Software/capstone-rs)",
+ "capstone-macros 0.18.0 (git+https://github.com/Fundament-Software/capstone-rs)",
+ "capstone-rpc 0.18.0 (git+https://github.com/Fundament-Software/capstone-rs)",
  "color-eyre",
  "eyre",
  "fastmurmur3",
@@ -508,7 +508,16 @@ dependencies = [
 [[package]]
 name = "capstone"
 version = "0.18.0"
-source = "git+https://github.com/Fundament-Software/capstone-rs#ba6d9e35d97c07a64a10a77d8350a147510c53df"
+dependencies = [
+ "embedded-io",
+ "rusqlite",
+ "smallvec",
+]
+
+[[package]]
+name = "capstone"
+version = "0.18.0"
+source = "git+https://github.com/Fundament-Software/capstone-rs#91bea8c3ce633aa519cd7ab6df4c24a7a861b262"
 dependencies = [
  "embedded-io",
  "smallvec",
@@ -517,9 +526,19 @@ dependencies = [
 [[package]]
 name = "capstone-futures"
 version = "0.18.0"
-source = "git+https://github.com/Fundament-Software/capstone-rs#ba6d9e35d97c07a64a10a77d8350a147510c53df"
 dependencies = [
- "capstone",
+ "capstone 0.18.0",
+ "futures-util",
+ "tokio",
+ "tokio-stream",
+]
+
+[[package]]
+name = "capstone-futures"
+version = "0.18.0"
+source = "git+https://github.com/Fundament-Software/capstone-rs#91bea8c3ce633aa519cd7ab6df4c24a7a861b262"
+dependencies = [
+ "capstone 0.18.0 (git+https://github.com/Fundament-Software/capstone-rs)",
  "futures-util",
  "tokio",
  "tokio-stream",
@@ -528,26 +547,54 @@ dependencies = [
 [[package]]
 name = "capstone-gen"
 version = "0.18.0"
-source = "git+https://github.com/Fundament-Software/capstone-rs#ba6d9e35d97c07a64a10a77d8350a147510c53df"
 dependencies = [
- "capstone",
+ "capstone 0.18.0",
+]
+
+[[package]]
+name = "capstone-gen"
+version = "0.18.0"
+source = "git+https://github.com/Fundament-Software/capstone-rs#91bea8c3ce633aa519cd7ab6df4c24a7a861b262"
+dependencies = [
+ "capstone 0.18.0 (git+https://github.com/Fundament-Software/capstone-rs)",
 ]
 
 [[package]]
 name = "capstone-import"
 version = "0.18.0"
-source = "git+https://github.com/Fundament-Software/capstone-rs#ba6d9e35d97c07a64a10a77d8350a147510c53df"
 dependencies = [
  "anyhow",
- "capstone",
- "capstone-gen",
+ "capstone 0.18.0",
+ "capstone-gen 0.18.0",
  "cmake",
  "convert_case",
- "proc-macro2 1.0.82",
+ "proc-macro2 1.0.84",
  "quote 1.0.36",
  "relative-path",
  "reqwest",
- "syn 2.0.64",
+ "syn 2.0.66",
+ "tempfile",
+ "walkdir",
+ "wax",
+ "which",
+ "zip-extract",
+]
+
+[[package]]
+name = "capstone-import"
+version = "0.18.0"
+source = "git+https://github.com/Fundament-Software/capstone-rs#91bea8c3ce633aa519cd7ab6df4c24a7a861b262"
+dependencies = [
+ "anyhow",
+ "capstone 0.18.0 (git+https://github.com/Fundament-Software/capstone-rs)",
+ "capstone-gen 0.18.0 (git+https://github.com/Fundament-Software/capstone-rs)",
+ "cmake",
+ "convert_case",
+ "proc-macro2 1.0.84",
+ "quote 1.0.36",
+ "relative-path",
+ "reqwest",
+ "syn 2.0.66",
  "tempfile",
  "walkdir",
  "wax",
@@ -558,23 +605,46 @@ dependencies = [
 [[package]]
 name = "capstone-macros"
 version = "0.18.0"
-source = "git+https://github.com/Fundament-Software/capstone-rs#ba6d9e35d97c07a64a10a77d8350a147510c53df"
 dependencies = [
- "capstone",
- "capstone-rpc",
+ "capstone 0.18.0",
+ "capstone-rpc 0.18.0",
  "convert_case",
- "proc-macro2 1.0.82",
+ "proc-macro2 1.0.84",
  "quote 1.0.36",
- "syn 2.0.64",
+ "syn 2.0.66",
+]
+
+[[package]]
+name = "capstone-macros"
+version = "0.18.0"
+source = "git+https://github.com/Fundament-Software/capstone-rs#91bea8c3ce633aa519cd7ab6df4c24a7a861b262"
+dependencies = [
+ "capstone 0.18.0 (git+https://github.com/Fundament-Software/capstone-rs)",
+ "capstone-rpc 0.18.0 (git+https://github.com/Fundament-Software/capstone-rs)",
+ "convert_case",
+ "proc-macro2 1.0.84",
+ "quote 1.0.36",
+ "syn 2.0.66",
 ]
 
 [[package]]
 name = "capstone-rpc"
 version = "0.18.0"
-source = "git+https://github.com/Fundament-Software/capstone-rs#ba6d9e35d97c07a64a10a77d8350a147510c53df"
 dependencies = [
- "capstone",
- "capstone-futures",
+ "capstone 0.18.0",
+ "capstone-futures 0.18.0",
+ "futures-util",
+ "tokio",
+ "tokio-stream",
+]
+
+[[package]]
+name = "capstone-rpc"
+version = "0.18.0"
+source = "git+https://github.com/Fundament-Software/capstone-rs#91bea8c3ce633aa519cd7ab6df4c24a7a861b262"
+dependencies = [
+ "capstone 0.18.0 (git+https://github.com/Fundament-Software/capstone-rs)",
+ "capstone-futures 0.18.0 (git+https://github.com/Fundament-Software/capstone-rs)",
  "futures-util",
  "tokio",
  "tokio-stream",
@@ -582,9 +652,9 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.0.97"
+version = "1.0.98"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "099a5357d84c4c61eb35fc8eafa9a79a902c2f76911e5747ced4e032edd8d9b4"
+checksum = "41c270e7540d725e65ac7f1b212ac8ce349719624d7bcff99f8e2e488e8cf03f"
 dependencies = [
  "jobserver",
  "libc",
@@ -650,9 +720,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "528131438037fd55894f62d6e9f068b8f45ac57ffa77517819645d10aed04f64"
 dependencies = [
  "heck",
- "proc-macro2 1.0.82",
+ "proc-macro2 1.0.84",
  "quote 1.0.36",
- "syn 2.0.64",
+ "syn 2.0.66",
 ]
 
 [[package]]
@@ -755,7 +825,7 @@ version = "0.2.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c7f6ff08fd20f4f299298a28e2dfa8a8ba1036e6cd2460ac1de7b425d76f2500"
 dependencies = [
- "proc-macro2 1.0.82",
+ "proc-macro2 1.0.84",
  "quote 1.0.36",
  "unicode-xid 0.2.4",
 ]
@@ -802,18 +872,18 @@ dependencies = [
 
 [[package]]
 name = "crc32fast"
-version = "1.4.0"
+version = "1.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b3855a8a784b474f333699ef2bbca9db2c4a1f6d9088a90a2d25b1eb53111eaa"
+checksum = "a97769d94ddab943e4510d138150169a2758b5ef3eb191a9ee688de3e23ef7b3"
 dependencies = [
  "cfg-if",
 ]
 
 [[package]]
 name = "crossbeam-channel"
-version = "0.5.12"
+version = "0.5.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab3db02a9c5b5121e1e42fbdb1aeb65f5e02624cc58c43f2884c6ccac0b82f95"
+checksum = "33480d6946193aa8033910124896ca395333cae7e2d1113d1fef6c3272217df2"
 dependencies = [
  "crossbeam-utils",
 ]
@@ -839,9 +909,9 @@ dependencies = [
 
 [[package]]
 name = "crossbeam-utils"
-version = "0.8.19"
+version = "0.8.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "248e3bacc7dc6baa3b21e405ee045c3047101a49145e7e9eca583ab4c2ca5345"
+checksum = "22ec99545bb0ed0ea7bb9b8e1e9122ea386ff8a48c0922e43f36d45ab09e0e80"
 
 [[package]]
 name = "crypto-common"
@@ -1159,9 +1229,9 @@ version = "0.3.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "87750cf4b7a4c0625b1529e4c543c2182106e4dedc60a2a6455e00d212c489ac"
 dependencies = [
- "proc-macro2 1.0.82",
+ "proc-macro2 1.0.84",
  "quote 1.0.36",
- "syn 2.0.64",
+ "syn 2.0.66",
 ]
 
 [[package]]
@@ -1204,7 +1274,21 @@ dependencies = [
  "libc",
  "log",
  "rustversion",
- "windows",
+ "windows 0.48.0",
+]
+
+[[package]]
+name = "generator"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "186014d53bc231d0090ef8d6f03e0920c54d85a5ed22f4f2f74315ec56cf83fb"
+dependencies = [
+ "cc",
+ "cfg-if",
+ "libc",
+ "log",
+ "rustversion",
+ "windows 0.54.0",
 ]
 
 [[package]]
@@ -1324,11 +1408,11 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 name = "hello-world-module"
 version = "0.1.0"
 dependencies = [
- "capstone",
- "capstone-futures",
- "capstone-import",
- "capstone-macros",
- "capstone-rpc",
+ "capstone 0.18.0",
+ "capstone-futures 0.18.0",
+ "capstone-import 0.18.0",
+ "capstone-macros 0.18.0",
+ "capstone-rpc 0.18.0",
  "tokio",
  "tokio-util",
  "tracing",
@@ -1459,7 +1543,7 @@ dependencies = [
  "iana-time-zone-haiku",
  "js-sys",
  "wasm-bindgen",
- "windows-core",
+ "windows-core 0.52.0",
 ]
 
 [[package]]
@@ -1642,11 +1726,11 @@ dependencies = [
  "cap-std 2.0.1",
  "cap-tempfile",
  "caplog",
- "capstone",
- "capstone-futures",
- "capstone-import",
- "capstone-macros",
- "capstone-rpc",
+ "capstone 0.18.0",
+ "capstone-futures 0.18.0",
+ "capstone-import 0.18.0",
+ "capstone-macros 0.18.0",
+ "capstone-rpc 0.18.0",
  "chrono",
  "clap",
  "color-eyre",
@@ -1754,7 +1838,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ff50ecb28bb86013e935fb6683ab1f6d3a20016f123c76fd4c27470076ac30f5"
 dependencies = [
  "cfg-if",
- "generator",
+ "generator 0.7.5",
+ "scoped-tls",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "loom"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "419e0dc8046cb947daa77eb95ae174acfbddb7673b4151f56d1eed8e93fbfaca"
+dependencies = [
+ "cfg-if",
+ "generator 0.8.1",
  "pin-utils",
  "scoped-tls",
  "tracing",
@@ -1831,11 +1928,10 @@ dependencies = [
 
 [[package]]
 name = "native-tls"
-version = "0.2.11"
+version = "0.2.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "07226173c32f2926027b63cce4bcd8076c3552846cbe7925f3aaffeac0a3b92e"
+checksum = "a8614eb2c83d59d1c8cc974dd3f920198647674a0a035e1af1fa58707e317466"
 dependencies = [
- "lazy_static",
  "libc",
  "log",
  "openssl",
@@ -1992,11 +2088,11 @@ checksum = "3fdb12b2476b595f9358c5161aa467c2438859caa136dec86c26fdd2efe17b92"
 
 [[package]]
 name = "oneshot"
-version = "0.1.6"
+version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6f6640c6bda7731b1fdbab747981a0f896dd1fedaf9f4a53fa237a04a84431f4"
+checksum = "071d1cf3298ad8e543dca18217d198cb6a3884443d204757b9624b935ef09fa0"
 dependencies = [
- "loom",
+ "loom 0.7.2",
 ]
 
 [[package]]
@@ -2020,9 +2116,9 @@ version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a948666b637a0f465e8564c73e89d4dde00d72d4d473cc972f390fc3dcee7d9c"
 dependencies = [
- "proc-macro2 1.0.82",
+ "proc-macro2 1.0.84",
  "quote 1.0.36",
- "syn 2.0.64",
+ "syn 2.0.66",
 ]
 
 [[package]]
@@ -2057,9 +2153,9 @@ checksum = "c1b04fb49957986fdce4d6ee7a65027d55d4b6d2265e5848bbb507b58ccfdb6f"
 
 [[package]]
 name = "parking_lot"
-version = "0.12.2"
+version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7e4af0ca4f6caed20e900d564c242b8e5d4903fdacf31d3daf527b66fe6f42fb"
+checksum = "f1bf18183cf54e8d6059647fc3063646a1801cf30896933ec2311622cc4b9a27"
 dependencies = [
  "lock_api",
  "parking_lot_core",
@@ -2122,9 +2218,9 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2f38a4412a78282e09a2cf38d195ea5420d15ba0602cb375210efbc877243965"
 dependencies = [
- "proc-macro2 1.0.82",
+ "proc-macro2 1.0.84",
  "quote 1.0.36",
- "syn 2.0.64",
+ "syn 2.0.66",
 ]
 
 [[package]]
@@ -2218,9 +2314,9 @@ dependencies = [
 
 [[package]]
 name = "proc-macro2"
-version = "1.0.82"
+version = "1.0.84"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8ad3d49ab951a01fbaafe34f2ec74122942fe18a3f9814c3268f1bb72042131b"
+checksum = "ec96c6a92621310b51366f1e28d05ef11489516e93be030060e5fc12024a49d6"
 dependencies = [
  "unicode-ident",
 ]
@@ -2243,9 +2339,9 @@ checksum = "81bddcdb20abf9501610992b6759a4c888aef7d1a7247ef75e2404275ac24af1"
 dependencies = [
  "anyhow",
  "itertools 0.12.1",
- "proc-macro2 1.0.82",
+ "proc-macro2 1.0.84",
  "quote 1.0.36",
- "syn 2.0.64",
+ "syn 2.0.66",
 ]
 
 [[package]]
@@ -2272,7 +2368,7 @@ version = "1.0.36"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0fa76aaf39101c457836aec0ce2316dbdc3ab723cdda1c6bd4e6ad4208acaca7"
 dependencies = [
- "proc-macro2 1.0.82",
+ "proc-macro2 1.0.84",
 ]
 
 [[package]]
@@ -2548,22 +2644,22 @@ dependencies = [
 
 [[package]]
 name = "serde"
-version = "1.0.202"
+version = "1.0.203"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "226b61a0d411b2ba5ff6d7f73a476ac4f8bb900373459cd00fab8512828ba395"
+checksum = "7253ab4de971e72fb7be983802300c30b5a7f0c2e56fab8abfc6a214307c0094"
 dependencies = [
  "serde_derive",
 ]
 
 [[package]]
 name = "serde_derive"
-version = "1.0.202"
+version = "1.0.203"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6048858004bcff69094cd972ed40a32500f153bd3be9f716b2eed2e8217c4838"
+checksum = "500cbc0ebeb6f46627f50f3f5811ccf6bf00643be300b4c3eabc0ef55dc5b5ba"
 dependencies = [
- "proc-macro2 1.0.82",
+ "proc-macro2 1.0.84",
  "quote 1.0.36",
- "syn 2.0.64",
+ "syn 2.0.66",
 ]
 
 [[package]]
@@ -2669,10 +2765,10 @@ version = "0.1.0"
 dependencies = [
  "async-backtrace",
  "cap-std 2.0.1",
- "capstone",
- "capstone-import",
- "capstone-macros",
- "capstone-rpc",
+ "capstone 0.18.0",
+ "capstone-import 0.18.0",
+ "capstone-macros 0.18.0",
+ "capstone-rpc 0.18.0",
  "color-eyre",
  "eyre",
  "rand",
@@ -2711,11 +2807,11 @@ dependencies = [
 
 [[package]]
 name = "syn"
-version = "2.0.64"
+version = "2.0.66"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7ad3dee41f36859875573074334c200d1add8e4a87bb37113ebd31d926b7b11f"
+checksum = "c42f3f41a2de00b01c0aaad383c5a45241efc8b2d1eda5661812fda5f3cdcff5"
 dependencies = [
- "proc-macro2 1.0.82",
+ "proc-macro2 1.0.84",
  "quote 1.0.36",
  "unicode-ident",
 ]
@@ -2780,9 +2876,9 @@ version = "1.0.61"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "46c3384250002a6d5af4d114f2845d37b57521033f30d5c3f46c4d70e1197533"
 dependencies = [
- "proc-macro2 1.0.82",
+ "proc-macro2 1.0.84",
  "quote 1.0.36",
- "syn 2.0.64",
+ "syn 2.0.66",
 ]
 
 [[package]]
@@ -2877,9 +2973,9 @@ version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5b8a1e28f2deaa14e508979454cb3a223b10b938b45af148bc0986de36f1923b"
 dependencies = [
- "proc-macro2 1.0.82",
+ "proc-macro2 1.0.84",
  "quote 1.0.36",
- "syn 2.0.64",
+ "syn 2.0.66",
 ]
 
 [[package]]
@@ -3027,9 +3123,9 @@ version = "0.1.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "34704c8d6ebcbc939824180af020566b01a7c01f80641264eba0999f6c2b6be7"
 dependencies = [
- "proc-macro2 1.0.82",
+ "proc-macro2 1.0.84",
  "quote 1.0.36",
- "syn 2.0.64",
+ "syn 2.0.66",
 ]
 
 [[package]]
@@ -3227,9 +3323,9 @@ dependencies = [
  "bumpalo",
  "log",
  "once_cell",
- "proc-macro2 1.0.82",
+ "proc-macro2 1.0.84",
  "quote 1.0.36",
- "syn 2.0.64",
+ "syn 2.0.66",
  "wasm-bindgen-shared",
 ]
 
@@ -3261,9 +3357,9 @@ version = "0.2.92"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e94f17b526d0a461a191c78ea52bbce64071ed5c04c9ffe424dcb38f74171bb7"
 dependencies = [
- "proc-macro2 1.0.82",
+ "proc-macro2 1.0.84",
  "quote 1.0.36",
- "syn 2.0.64",
+ "syn 2.0.66",
  "wasm-bindgen-backend",
  "wasm-bindgen-shared",
 ]
@@ -3355,10 +3451,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "windows"
+version = "0.54.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9252e5725dbed82865af151df558e754e4a3c2c30818359eb17465f1346a1b49"
+dependencies = [
+ "windows-core 0.54.0",
+ "windows-targets 0.52.5",
+]
+
+[[package]]
 name = "windows-core"
 version = "0.52.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "33ab640c8d7e35bf8ba19b884ba838ceb4fba93a4e8c65a9059d08afcfc683d9"
+dependencies = [
+ "windows-targets 0.52.5",
+]
+
+[[package]]
+name = "windows-core"
+version = "0.54.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "12661b9c89351d684a50a8a643ce5f608e20243b9fb84687800163429f161d65"
+dependencies = [
+ "windows-result",
+ "windows-targets 0.52.5",
+]
+
+[[package]]
+name = "windows-result"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "749f0da9cc72d82e600d8d2e44cadd0b9eedb9038f71a1c58556ac1c5791813b"
 dependencies = [
  "windows-targets 0.52.5",
 ]
@@ -3604,9 +3729,9 @@ checksum = "bec47e5bfd1bff0eeaf6d8b485cc1074891a197ab4225d504cb7a1ab88b02bf0"
 
 [[package]]
 name = "winnow"
-version = "0.6.8"
+version = "0.6.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3c52e9c97a68071b23e836c9380edae937f17b9c4667bd021973efc689f618d"
+checksum = "86c949fede1d13936a99f14fafd3e76fd642b556dd2ce96287fbe2e0151bfac6"
 dependencies = [
  "memchr",
 ]
@@ -3657,9 +3782,9 @@ version = "0.7.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "15e934569e47891f7d9411f1a451d947a60e000ab3bd24fbb970f000387d1b3b"
 dependencies = [
- "proc-macro2 1.0.82",
+ "proc-macro2 1.0.84",
  "quote 1.0.36",
- "syn 2.0.64",
+ "syn 2.0.66",
 ]
 
 [[package]]

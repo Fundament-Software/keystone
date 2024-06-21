@@ -77,7 +77,7 @@ thread_local! {
         RefCell::new(CapabilityServerSet::new());
 }
 struct SqliteDatabase {
-    connection: Rc<Connection>,
+    connection: Connection,
     prepared_insert_set: RefCell<CapabilityServerSet<StatementAndParams, prepared_statement::Client<insert::Owned>>>,
     prepared_select_set: RefCell<CapabilityServerSet<StatementAndParams, prepared_statement::Client<select::Owned>>>,
     prepared_delete_set: RefCell<CapabilityServerSet<StatementAndParams, prepared_statement::Client<delete::Owned>>>,
@@ -90,7 +90,7 @@ impl SqliteDatabase {
     pub fn new<P: AsRef<Path> + Clone>(path: P, flags: OpenFlags) -> eyre::Result<(add_d_b::Client, Connection)> {
         let connection = Connection::open_with_flags(path.clone(), flags.clone())?;
         let server = SqliteDatabase {
-            connection: Rc::new(connection),
+            connection: connection,
             prepared_insert_set: RefCell::new(CapabilityServerSet::new()),
             prepared_select_set: RefCell::new(CapabilityServerSet::new()),
             prepared_delete_set: RefCell::new(CapabilityServerSet::new()),
@@ -104,11 +104,10 @@ impl SqliteDatabase {
         return Ok((client, conn));
     }
 }
-
 #[capnproto_rpc(r_o_database)]
 impl r_o_database::Server for SqliteDatabase {
     async fn select(&self, q: Select) {
-        let statement_and_params = build_select_statement(self, q, StatementAndParams::new())?;
+        let statement_and_params = build_select_statement(self, q, StatementAndParams::new(80))?;
 
         let mut stmt = self.connection.prepare(statement_and_params.statement.as_str())?;
         println!("{}", statement_and_params.statement); //Debugging
@@ -124,7 +123,7 @@ impl r_o_database::Server for SqliteDatabase {
     }
 
     async fn prepare_select(&self, q: Select) {
-        let statement_and_params = build_select_statement(self, q, StatementAndParams::new())?;
+        let statement_and_params = build_select_statement(self, q, StatementAndParams::new(80))?;
         let client = self.prepared_select_set.borrow_mut().new_client(statement_and_params);
         results.get().set_stmt(client);
         Ok(())
@@ -134,31 +133,10 @@ impl r_o_database::Server for SqliteDatabase {
         let Some(statement_and_params) = self.prepared_select_set.borrow_mut().get_local_server_of_resolved(&resolved) else {
             return Err(capnp::Error::failed("Prepared statement doesn't exist, or was created on a different machine".to_string()));
         };
-        //Not sure if prepare_cached is good enough, alternatively could store an actual prepared statement(As well as avoid some cloning) but requires more lifetime stuff
+
         let mut prepared = self.connection.prepare_cached(statement_and_params.statement.as_str())?;
-        let mut bindings_iter = bindings.iter();
         let mut params = statement_and_params.sql_params.clone();
-        for index in &statement_and_params.bindparam_indexes {
-            if let Some(param) = bindings_iter.next() {
-                params[*index] = match param.which()? {
-                    d_b_any::Which::Null(_) => rusqlite::types::Value::Null,
-                    d_b_any::Which::Integer(i) => rusqlite::types::Value::Integer(i),
-                    d_b_any::Which::Real(r) => rusqlite::types::Value::Real(r),
-                    d_b_any::Which::Text(text) => rusqlite::types::Value::Text(text?.to_string()?),
-                    d_b_any::Which::Blob(blob) => rusqlite::types::Value::Blob(blob?.to_vec()),
-                    d_b_any::Which::Pointer(pointer) => {
-                        let response = tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(pointer.get_as_capability::<saveable::Client>()?.save_request().send().promise))?;
-                        let restore_key = response.get()?.get_value().get_as::<&[u8]>()?;
-                        rusqlite::types::Value::Blob(restore_key.to_vec())
-                    }
-                }
-            } else {
-                return Err(capnp::Error::failed("Not enough params provided for binding slots specified in prepare statement".to_string()));
-            }
-        }
-        if let Some(_) = bindings_iter.next() {
-            return Err(capnp::Error::failed("Too many params provided for binding slots specified in prepare statement".to_string()));
-        }
+        fill_in_bindparams(&statement_and_params.bindparam_indexes, &mut params, bindings).await?;
         let mut rows = prepared.query(params_from_iter(params.iter()))?;
         let row_vec = build_results_stream_buffer(rows)?;
         results.get().set_res(capnp_rpc::new_client(PlaceholderResults {
@@ -172,7 +150,7 @@ impl r_o_database::Server for SqliteDatabase {
 #[capnproto_rpc(database)]
 impl database::Server for SqliteDatabase {
     async fn insert(&self, ins: Insert) {
-        let statement_and_params = build_insert_statement(self, ins, StatementAndParams::new())?;
+        let statement_and_params = build_insert_statement(self, ins, StatementAndParams::new(100)).await?;
         println!("{}", statement_and_params.statement);
         println!("{:?}", statement_and_params.sql_params);
 
@@ -186,40 +164,20 @@ impl database::Server for SqliteDatabase {
         Ok(())
     }
     async fn prepare_insert(&self, ins: Insert) {
-        let statement_and_params = build_insert_statement(self, ins, StatementAndParams::new())?;
+        let statement_and_params = build_insert_statement(self, ins, StatementAndParams::new(100)).await?;
         let client = self.prepared_insert_set.borrow_mut().new_client(statement_and_params);
         results.get().set_stmt(client);
         Ok(())
     }
+
     async fn run_prepared_insert(&self, stmt: PreparedStatement<Insert>, bindings: List<DBAny>) {
         let resolved = capnp::capability::get_resolved_cap(stmt).await;
         let Some(statement_and_params) = self.prepared_insert_set.borrow_mut().get_local_server_of_resolved(&resolved) else {
             return Err(capnp::Error::failed("Prepared statement doesn't exist, or was created on a different machine".to_string()));
         };
         let mut prepared = self.connection.prepare_cached(statement_and_params.statement.as_str())?;
-        let mut bindings_iter = bindings.iter();
         let mut params = statement_and_params.sql_params.clone();
-        for index in &statement_and_params.bindparam_indexes {
-            if let Some(param) = bindings_iter.next() {
-                params[*index] = match param.which()? {
-                    d_b_any::Which::Null(_) => rusqlite::types::Value::Null,
-                    d_b_any::Which::Integer(i) => rusqlite::types::Value::Integer(i),
-                    d_b_any::Which::Real(r) => rusqlite::types::Value::Real(r),
-                    d_b_any::Which::Text(text) => rusqlite::types::Value::Text(text?.to_string()?),
-                    d_b_any::Which::Blob(blob) => rusqlite::types::Value::Blob(blob?.to_vec()),
-                    d_b_any::Which::Pointer(pointer) => {
-                        let response = tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(pointer.get_as_capability::<saveable::Client>()?.save_request().send().promise))?;
-                        let restore_key = response.get()?.get_value().get_as::<&[u8]>()?;
-                        rusqlite::types::Value::Blob(restore_key.to_vec())
-                    }
-                }
-            } else {
-                return Err(capnp::Error::failed("Not enough params provided for binding slots specified in prepare statement".to_string()));
-            }
-        }
-        if let Some(_) = bindings_iter.next() {
-            return Err(capnp::Error::failed("Too many params provided for binding slots specified in prepare statement".to_string()));
-        }
+        fill_in_bindparams(&statement_and_params.bindparam_indexes, &mut params, bindings).await?;
         println!("{}", statement_and_params.statement);
         println!("{:?}", params);
         let mut rows = prepared.query(params_from_iter(params.iter()))?;
@@ -231,7 +189,7 @@ impl database::Server for SqliteDatabase {
         Ok(())
     }
     async fn update(&self, upd: Update) {
-        let statement_and_params = build_update_statement(self, upd, StatementAndParams::new())?;
+        let statement_and_params = build_update_statement(self, upd, StatementAndParams::new(120)).await?;
         println!("{}", statement_and_params.statement);
         println!("{:?}", statement_and_params.sql_params);
         let mut stmt = self.connection.prepare(statement_and_params.statement.as_str())?;
@@ -244,7 +202,7 @@ impl database::Server for SqliteDatabase {
         Ok(())
     }
     async fn prepare_update(&self, upd: Update) {
-        let statement_and_params = build_update_statement(self, upd, StatementAndParams::new())?;
+        let statement_and_params = build_update_statement(self, upd, StatementAndParams::new(120)).await?;
         let client = self.prepared_update_set.borrow_mut().new_client(statement_and_params);
         results.get().set_stmt(client);
         Ok(())
@@ -255,29 +213,8 @@ impl database::Server for SqliteDatabase {
             return Err(capnp::Error::failed("Prepared statement doesn't exist, or was created on a different machine".to_string()));
         };
         let mut prepared = self.connection.prepare_cached(statement_and_params.statement.as_str())?;
-        let mut bindings_iter = bindings.iter();
         let mut params = statement_and_params.sql_params.clone();
-        for index in &statement_and_params.bindparam_indexes {
-            if let Some(param) = bindings_iter.next() {
-                params[*index] = match param.which()? {
-                    d_b_any::Which::Null(_) => rusqlite::types::Value::Null,
-                    d_b_any::Which::Integer(i) => rusqlite::types::Value::Integer(i),
-                    d_b_any::Which::Real(r) => rusqlite::types::Value::Real(r),
-                    d_b_any::Which::Text(text) => rusqlite::types::Value::Text(text?.to_string()?),
-                    d_b_any::Which::Blob(blob) => rusqlite::types::Value::Blob(blob?.to_vec()),
-                    d_b_any::Which::Pointer(pointer) => {
-                        let response = tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(pointer.get_as_capability::<saveable::Client>()?.save_request().send().promise))?;
-                        let restore_key = response.get()?.get_value().get_as::<&[u8]>()?;
-                        rusqlite::types::Value::Blob(restore_key.to_vec())
-                    }
-                }
-            } else {
-                return Err(capnp::Error::failed("Not enough params provided for binding slots specified in prepare statement".to_string()));
-            }
-        }
-        if let Some(_) = bindings_iter.next() {
-            return Err(capnp::Error::failed("Too many params provided for binding slots specified in prepare statement".to_string()));
-        }
+        fill_in_bindparams(&statement_and_params.bindparam_indexes, &mut params, bindings).await?;
         let mut rows = prepared.query(params_from_iter(params.iter()))?;
         let row_vec = build_results_stream_buffer(rows)?;
         results.get().set_res(capnp_rpc::new_client(PlaceholderResults {
@@ -287,7 +224,7 @@ impl database::Server for SqliteDatabase {
         Ok(())
     }
     async fn delete(&self, del: Delete) {
-        let statement_and_params = build_delete_statement(self, del, StatementAndParams::new())?;
+        let statement_and_params = build_delete_statement(self, del, StatementAndParams::new(80)).await?;
 
         let mut stmt = self.connection.prepare(statement_and_params.statement.as_str())?;
         let mut rows = stmt.query(params_from_iter(statement_and_params.sql_params.iter()))?;
@@ -299,7 +236,7 @@ impl database::Server for SqliteDatabase {
         Ok(())
     }
     async fn prepare_delete(&self, del: Delete) {
-        let statement_and_params = build_delete_statement(self, del, StatementAndParams::new())?;
+        let statement_and_params = build_delete_statement(self, del, StatementAndParams::new(80)).await?;
         let client = self.prepared_delete_set.borrow_mut().new_client(statement_and_params);
         results.get().set_stmt(client);
         Ok(())
@@ -310,30 +247,8 @@ impl database::Server for SqliteDatabase {
             return Err(capnp::Error::failed("Prepared statement doesn't exist, or was created on a different machine".to_string()));
         };
         let mut prepared = self.connection.prepare_cached(statement_and_params.statement.as_str())?;
-        let mut bindings_iter = bindings.iter();
         let mut params = statement_and_params.sql_params.clone();
-        for index in &statement_and_params.bindparam_indexes {
-            if let Some(param) = bindings_iter.next() {
-                params[*index] = match param.which()? {
-                    d_b_any::Which::Null(_) => rusqlite::types::Value::Null,
-                    d_b_any::Which::Integer(i) => rusqlite::types::Value::Integer(i),
-                    d_b_any::Which::Real(r) => rusqlite::types::Value::Real(r),
-                    d_b_any::Which::Text(text) => rusqlite::types::Value::Text(text?.to_string()?),
-                    d_b_any::Which::Blob(blob) => rusqlite::types::Value::Blob(blob?.to_vec()),
-                    d_b_any::Which::Pointer(pointer) => {
-                        let response = tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(pointer.get_as_capability::<saveable::Client>()?.save_request().send().promise))?;
-                        let restore_key = response.get()?.get_value().get_as::<&[u8]>()?;
-                        rusqlite::types::Value::Blob(restore_key.to_vec())
-                    }
-                }
-            } else {
-                return Err(capnp::Error::failed("Not enough params provided for binding slots specified in prepare statement".to_string()));
-            }
-        }
-        if let Some(_) = bindings_iter.next() {
-            return Err(capnp::Error::failed("Too many params provided for binding slots specified in prepare statement".to_string()));
-        }
-
+        fill_in_bindparams(&statement_and_params.bindparam_indexes, &mut params, bindings).await?;
         let mut rows = prepared.query(params_from_iter(params.iter()))?;
         let row_vec = build_results_stream_buffer(rows)?;
         results.get().set_res(capnp_rpc::new_client(PlaceholderResults {
@@ -433,7 +348,7 @@ impl add_d_b::Server for SqliteDatabase {
             statement.push_str(") ");
         }
         statement.push_str("AS ");
-        let statement_and_params = build_select_statement(self, def, StatementAndParams::new())?;
+        let statement_and_params = build_select_statement(self, def, StatementAndParams::new(80))?;
         statement.push_str(statement_and_params.statement.as_str());
         self.connection.execute(statement.as_str(), params_from_iter(statement_and_params.sql_params.iter()))?;
         let client = ROTABLE_REF_SET.with_borrow_mut(|set| set.borrow_mut().new_client(view_name));
@@ -444,168 +359,44 @@ impl add_d_b::Server for SqliteDatabase {
         results.get();
         todo!()
     }
-    async fn create_index(&self, base: TableRef, cols: List<IndexedColumn>, sql_where: Expr) {
-        let mut statement = String::new();
-        statement.push_str("CREATE INDEX ");
+    async fn create_index(&self, base: TableRef, cols: List<IndexedColumn>) {
+        let mut statement_and_params = StatementAndParams::new(80);
+        statement_and_params.statement.push_str("CREATE INDEX ");
         let index_name = create_index_name();
-        statement.push_str(index_name.name.as_str());
-        statement.push_str(" ON ");
+        statement_and_params.statement.push_str(index_name.name.as_str());
+        statement_and_params.statement.push_str(" ON ");
         TABLE_REF_SET.with_borrow_mut(|set| {
             let Some(server) = set.get_local_server_of_resolved(&base) else {
                 return Err(capnp::Error::failed("Table ref invalid for this database or insufficient permissions".to_string()));
             };
-            statement.push_str(server.table_name.as_str());
-            statement.push(' ');
+            statement_and_params.statement.push_str(server.table_name.as_str());
+            statement_and_params.statement.push_str(format!(" AS tableref{} ", statement_and_params.tableref_number).as_str());
+            statement_and_params.tableref_number += 1;
             Ok(())
         })?;
-        let mut sql_params: Vec<rusqlite::types::Value> = Vec::new();
-        let mut bindparam_indexes: Vec<usize> = Vec::new();
-        statement.push_str("(");
+        statement_and_params.statement.push_str("(");
         for index_column in cols.iter() {
             match index_column.which()? {
                 indexed_column::Which::Name(name) => {
-                    statement.push_str(name?.to_str()?);
-                    statement.push_str(", ");
+                    statement_and_params.statement.push_str(name?.to_str()?);
                 }
-                indexed_column::Which::Expr(expr) => match expr?.which()? {
-                    expr::Which::Literal(dbany) => match dbany?.which()? {
-                        d_b_any::Which::Null(_) => {
-                            sql_params.push(rusqlite::types::Value::Null);
-                            statement.push_str(format!("?{}, ", sql_params.len()).as_str());
-                        }
-                        d_b_any::Which::Integer(int) => {
-                            sql_params.push(rusqlite::types::Value::Integer(int));
-                            statement.push_str(format!("?{}, ", sql_params.len()).as_str());
-                        }
-                        d_b_any::Which::Real(real) => {
-                            sql_params.push(rusqlite::types::Value::Real(real));
-                            statement.push_str(format!("?{}, ", sql_params.len()).as_str());
-                        }
-                        d_b_any::Which::Text(text) => {
-                            sql_params.push(rusqlite::types::Value::Text(text?.to_string()?));
-                            statement.push_str(format!("?{}, ", sql_params.len()).as_str());
-                        }
-                        d_b_any::Which::Blob(blob) => {
-                            sql_params.push(rusqlite::types::Value::Blob(blob?.to_vec()));
-                            statement.push_str(format!("?{}, ", sql_params.len()).as_str());
-                        }
-                        d_b_any::Which::Pointer(pointer) => {
-                            let response = tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(pointer.get_as_capability::<saveable::Client>()?.save_request().send().promise))?;
-                            let restore_key = response.get()?.get_value().get_as::<&[u8]>()?;
-                            sql_params.push(rusqlite::types::Value::Blob(restore_key.to_vec()));
-                            statement.push_str(format!("?{}, ", sql_params.len()).as_str());
-                        }
-                    },
-                    expr::Which::Bindparam(_) => {
-                        sql_params.push(rusqlite::types::Value::Null);
-                        bindparam_indexes.push(sql_params.len() - 1);
-                        statement.push_str(format!("?{}, ", sql_params.len()).as_str());
-                    }
-                    expr::Which::Tablereference(table_column) => {
-                        /*let table_column = table_column?;
-                        let index = table_column.get_reference() as usize;
-                        if index >= statement_and_params.join_tree_tablerefs.len() {
-                            return Err(capnp::Error::failed("Referenced table not in the join tree".to_string()));
-                        }
-                        statement_and_params.statement.push_str(
-                            format!(
-                                "{}.{}, ",
-                                statement_and_params.join_tree_tablerefs[table_column.get_reference() as usize].table_name.as_str(),
-                                table_column.get_col_name()?.to_str()?
-                            )
-                            .as_str(),
-                        );*/
-                    }
-                    expr::Which::Functioninvocation(func) => {
-                        let statement_and_params = build_function_invocation(
-                            self,
-                            func?,
-                            StatementAndParams {
-                                statement,
-                                sql_params,
-                                bindparam_indexes,
-                                join_tree_tablerefs: Vec::new(),
-                            },
-                        )?;
-                        statement = statement_and_params.statement;
-                        sql_params = statement_and_params.sql_params;
-                        bindparam_indexes = statement_and_params.bindparam_indexes;
-                        statement.push_str(", ");
-                    }
-                },
+                indexed_column::Which::Expr(expr) => {
+                    match_expr(self, expr?, &mut statement_and_params)?;
+                }
             }
-            statement.push_str(", ");
+            statement_and_params.statement.push_str(", ");
         }
-        if statement.as_bytes()[statement.len() - 2] == b',' {
-            statement.truncate(statement.len() - 2);
+        if statement_and_params.statement.as_bytes()[statement_and_params.statement.len() - 2] == b',' {
+            statement_and_params.statement.truncate(statement_and_params.statement.len() - 2);
         }
-        statement.push_str(")");
+        statement_and_params.statement.push_str(")");
 
-        match sql_where.which()? {
-            expr::Which::Literal(dbany) => match dbany?.which()? {
-                d_b_any::Which::Null(_) => {}
-                d_b_any::Which::Integer(int) => {
-                    sql_params.push(rusqlite::types::Value::Integer(int));
-                    statement.push_str(format!("WHERE ?{}", sql_params.len()).as_str());
-                }
-                d_b_any::Which::Real(real) => {
-                    sql_params.push(rusqlite::types::Value::Real(real));
-                    statement.push_str(format!("WHERE ?{}", sql_params.len()).as_str());
-                }
-                d_b_any::Which::Text(text) => {
-                    sql_params.push(rusqlite::types::Value::Text(text?.to_string()?));
-                    statement.push_str(format!("WHERE ?{}", sql_params.len()).as_str());
-                }
-                d_b_any::Which::Blob(blob) => {
-                    sql_params.push(rusqlite::types::Value::Blob(blob?.to_vec()));
-                    statement.push_str(format!("WHERE ?{}", sql_params.len()).as_str());
-                }
-                d_b_any::Which::Pointer(pointer) => {
-                    let response = tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(pointer.get_as_capability::<saveable::Client>()?.save_request().send().promise))?;
-                    let restore_key = response.get()?.get_value().get_as::<&[u8]>()?;
-                    sql_params.push(rusqlite::types::Value::Blob(restore_key.to_vec()));
-                    statement.push_str(format!("WHERE ?{}", sql_params.len()).as_str());
-                }
-            },
-            expr::Which::Bindparam(_) => {
-                sql_params.push(rusqlite::types::Value::Null);
-                bindparam_indexes.push(sql_params.len() - 1);
-                statement.push_str(format!("WHERE ?{}", sql_params.len()).as_str());
-            }
-            expr::Which::Tablereference(table_column) => {
-                /*let table_column = table_column?;
-                let index = table_column.get_reference() as usize;
-                if index >= statement_and_params.join_tree_tablerefs.len() {
-                    return Err(capnp::Error::failed("Referenced table not in the join tree".to_string()));
-                }
-                statement_and_params.statement.push_str(
-                    format!(
-                        "{}.{}, ",
-                        statement_and_params.join_tree_tablerefs[table_column.get_reference() as usize].table_name.as_str(),
-                        table_column.get_col_name()?.to_str()?
-                    )
-                    .as_str(),
-                );*/
-            }
-            expr::Which::Functioninvocation(func) => {
-                statement.push_str("WHERE ");
-                let statement_and_params = build_function_invocation(
-                    self,
-                    func?,
-                    StatementAndParams {
-                        statement: statement,
-                        sql_params: sql_params,
-                        bindparam_indexes: bindparam_indexes,
-                        join_tree_tablerefs: Vec::new(),
-                    },
-                )?;
-                statement = statement_and_params.statement;
-                sql_params = statement_and_params.sql_params;
-                bindparam_indexes = statement_and_params.bindparam_indexes;
-            }
+        if params.get()?.has_sql_where() {
+            statement_and_params.statement.push_str("WHERE ");
+            match_where(self, params.get()?.get_sql_where()?, &mut statement_and_params)?;
         }
-        let mut stmt = self.connection.prepare(statement.as_str())?;
-        let mut rows = stmt.query(params_from_iter(sql_params.iter()))?;
+        let mut stmt = self.connection.prepare(statement_and_params.statement.as_str())?;
+        let mut rows = stmt.query(params_from_iter(statement_and_params.sql_params.iter()))?;
         results.get().set_res(self.index_set.borrow_mut().new_client(index_name));
         Ok(())
     }
@@ -639,26 +430,20 @@ struct StatementAndParams {
     statement: String,
     sql_params: Vec<rusqlite::types::Value>,
     bindparam_indexes: Vec<usize>,
-    join_tree_tablerefs: Vec<TableRefImpl>,
+    tableref_number: u16,
 }
 impl StatementAndParams {
-    fn new() -> Self {
+    fn new(min_statement_size: usize) -> Self {
         Self {
-            statement: String::new(),
+            statement: String::with_capacity(min_statement_size),
             sql_params: Vec::new(),
             bindparam_indexes: Vec::new(),
-            join_tree_tablerefs: Vec::new(),
+            tableref_number: 0,
         }
     }
 }
-//Maybe a way to get by without clonning or cached statements, but potential lifetime questions
-struct PreparedStatementAndParams<'a> {
-    statement: rusqlite::Statement<'a>,
-    params: Vec<rusqlite::types::ValueRef<'a>>,
-    bindparam_indexes: Vec<usize>,
-}
 
-fn build_insert_statement<'a>(db: &SqliteDatabase, ins: insert::Reader<'a>, mut statement_and_params: StatementAndParams) -> capnp::Result<StatementAndParams> {
+async fn build_insert_statement<'a>(db: &SqliteDatabase, ins: insert::Reader<'a>, mut statement_and_params: StatementAndParams) -> capnp::Result<StatementAndParams> {
     let fallback_reader = ins.get_fallback()?;
     capnp_let!({target, cols, returning} = ins);
     let source = ins.get_source();
@@ -670,15 +455,14 @@ fn build_insert_statement<'a>(db: &SqliteDatabase, ins: insert::Reader<'a>, mut 
         insert::ConflictStrategy::Ignore => statement_and_params.statement.push_str("IGNORE INTO "),
         insert::ConflictStrategy::Rollback => statement_and_params.statement.push_str("ROLLBACK INTO "),
     };
-    //let target = capnp::capability::get_resolved_cap(target).await;
+    let target = capnp::capability::get_resolved_cap(target).await;
     RATABLE_REF_SET.with_borrow(|set| {
         let Some(server) = set.get_local_server_of_resolved(&target) else {
             return Err(capnp::Error::failed("Table ref invalid for this database or insufficient permissions".to_string()));
         };
-        //TODO not sure if applicable to insert
-        //tablerefs.push(server.server.clone());
         statement_and_params.statement.push_str(server.table_name.as_str());
-        statement_and_params.statement.push(' ');
+        statement_and_params.statement.push_str(format!(" AS tableref{} ", statement_and_params.tableref_number).as_str());
+        statement_and_params.tableref_number += 1;
         Ok(())
     })?;
 
@@ -695,42 +479,13 @@ fn build_insert_statement<'a>(db: &SqliteDatabase, ins: insert::Reader<'a>, mut 
     match source.which()? {
         insert::source::Which::Values(values) => {
             statement_and_params.statement.push_str("VALUES ");
-
             for value in values?.iter() {
                 statement_and_params.statement.push_str("(");
                 for dbany in value?.iter() {
-                    match dbany.which()? {
-                        d_b_any::Which::Null(_) => {
-                            statement_and_params.sql_params.push(rusqlite::types::Value::Null);
-                            statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                        }
-                        d_b_any::Which::Integer(int) => {
-                            statement_and_params.sql_params.push(rusqlite::types::Value::Integer(int));
-                            statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                        }
-                        d_b_any::Which::Real(real) => {
-                            statement_and_params.sql_params.push(rusqlite::types::Value::Real(real));
-                            statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                        }
-                        d_b_any::Which::Text(text) => {
-                            statement_and_params.sql_params.push(rusqlite::types::Value::Text(text?.to_string()?));
-                            statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                        }
-                        d_b_any::Which::Blob(blob) => {
-                            statement_and_params.sql_params.push(rusqlite::types::Value::Blob(blob?.to_vec()));
-                            statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                        }
-                        d_b_any::Which::Pointer(pointer) => {
-                            let response = tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(pointer.get_as_capability::<saveable::Client>()?.save_request().send().promise))?;
-                            let restore_key = response.get()?.get_value().get_as::<&[u8]>()?;
-                            statement_and_params.sql_params.push(rusqlite::types::Value::Blob(restore_key.to_vec()));
-                            statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                        }
-                    }
+                    match_dbany(dbany, &mut statement_and_params)?;
+                    statement_and_params.statement.push_str(", ");
                 }
-                if statement_and_params.statement.as_bytes()[statement_and_params.statement.len() - 2] == b',' {
-                    statement_and_params.statement.truncate(statement_and_params.statement.len() - 2);
-                }
+                statement_and_params.statement.truncate(statement_and_params.statement.len() - 2);
                 statement_and_params.statement.push_str("), ");
             }
         }
@@ -746,208 +501,50 @@ fn build_insert_statement<'a>(db: &SqliteDatabase, ins: insert::Reader<'a>, mut 
     }
 
     if !returning.is_empty() {
-        statement_and_params.statement.push_str(" RETURNING ")
-    }
-    for expr in returning.iter() {
-        match expr.which()? {
-            expr::Which::Literal(dbany) => match dbany?.which()? {
-                d_b_any::Which::Null(_) => {
-                    statement_and_params.sql_params.push(rusqlite::types::Value::Null);
-                    statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                }
-                d_b_any::Which::Integer(int) => {
-                    statement_and_params.sql_params.push(rusqlite::types::Value::Integer(int));
-                    statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                }
-                d_b_any::Which::Real(real) => {
-                    statement_and_params.sql_params.push(rusqlite::types::Value::Real(real));
-                    statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                }
-                d_b_any::Which::Text(text) => {
-                    statement_and_params.sql_params.push(rusqlite::types::Value::Text(text?.to_string()?));
-                    statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                }
-                d_b_any::Which::Blob(blob) => {
-                    statement_and_params.sql_params.push(rusqlite::types::Value::Blob(blob?.to_vec()));
-                    statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                }
-                d_b_any::Which::Pointer(pointer) => {
-                    let response = tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(pointer.get_as_capability::<saveable::Client>()?.save_request().send().promise))?;
-                    let restore_key = response.get()?.get_value().get_as::<&[u8]>()?;
-                    statement_and_params.sql_params.push(rusqlite::types::Value::Blob(restore_key.to_vec()));
-                    statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                }
-            },
-            expr::Which::Bindparam(_) => {
-                statement_and_params.sql_params.push(rusqlite::types::Value::Null);
-                statement_and_params.bindparam_indexes.push(statement_and_params.sql_params.len() - 1);
-                statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-            }
-            expr::Which::Tablereference(table_column) => {
-                let table_column = table_column?;
-                let index = table_column.get_reference() as usize;
-                if index >= statement_and_params.join_tree_tablerefs.len() {
-                    return Err(capnp::Error::failed("Referenced table not in the join tree".to_string()));
-                }
-                statement_and_params.statement.push_str(
-                    format!(
-                        "{}.{}, ",
-                        statement_and_params.join_tree_tablerefs[table_column.get_reference() as usize].table_name.as_str(),
-                        table_column.get_col_name()?.to_str()?
-                    )
-                    .as_str(),
-                );
-            }
-            expr::Which::Functioninvocation(func) => {
-                statement_and_params = build_function_invocation(db, func?, statement_and_params)?;
-                statement_and_params.statement.push_str(", ")
-            }
+        statement_and_params.statement.push_str(" RETURNING ");
+        for expr in returning.iter() {
+            match_expr(db, expr, &mut statement_and_params)?;
+            statement_and_params.statement.push_str(", ");
         }
-    }
-
-    if statement_and_params.statement.as_bytes()[statement_and_params.statement.len() - 2] == b',' {
         statement_and_params.statement.truncate(statement_and_params.statement.len() - 2);
     }
     return Ok(statement_and_params);
 }
 
-fn build_delete_statement<'a>(db: &SqliteDatabase, del: delete::Reader<'a>, mut statement_and_params: StatementAndParams) -> capnp::Result<StatementAndParams> {
-    capnp_let!({from, returning, sql_where} = del);
+async fn build_delete_statement<'a>(db: &SqliteDatabase, del: delete::Reader<'a>, mut statement_and_params: StatementAndParams) -> capnp::Result<StatementAndParams> {
+    capnp_let!({from, returning} = del);
     statement_and_params.statement.push_str("DELETE FROM ");
 
-    //let tableref = capnp::capability::get_resolved_cap(from).await;
-    let tableref = from;
+    let tableref = capnp::capability::get_resolved_cap(from).await;
     TABLE_REF_SET.with_borrow_mut(|set| {
         let Some(server) = set.get_local_server_of_resolved(&tableref) else {
             return Err(capnp::Error::failed("Table ref invalid for this database or insufficient permissions".to_string()));
         };
         statement_and_params.statement.push_str(server.table_name.as_str());
-        statement_and_params.statement.push(' ');
+        statement_and_params.statement.push_str(format!(" AS tableref{} ", statement_and_params.tableref_number).as_str());
+        statement_and_params.tableref_number += 1;
         Ok(())
     })?;
 
-    match sql_where.which()? {
-        expr::Which::Literal(dbany) => match dbany?.which()? {
-            d_b_any::Which::Null(_) => {}
-            d_b_any::Which::Integer(int) => {
-                statement_and_params.sql_params.push(rusqlite::types::Value::Integer(int));
-                statement_and_params.statement.push_str(format!("WHERE ?{}", statement_and_params.sql_params.len()).as_str());
-            }
-            d_b_any::Which::Real(real) => {
-                statement_and_params.sql_params.push(rusqlite::types::Value::Real(real));
-                statement_and_params.statement.push_str(format!("WHERE ?{}", statement_and_params.sql_params.len()).as_str());
-            }
-            d_b_any::Which::Text(text) => {
-                statement_and_params.sql_params.push(rusqlite::types::Value::Text(text?.to_string()?));
-                statement_and_params.statement.push_str(format!("WHERE ?{}", statement_and_params.sql_params.len()).as_str());
-            }
-            d_b_any::Which::Blob(blob) => {
-                statement_and_params.sql_params.push(rusqlite::types::Value::Blob(blob?.to_vec()));
-                statement_and_params.statement.push_str(format!("WHERE ?{}", statement_and_params.sql_params.len()).as_str());
-            }
-            d_b_any::Which::Pointer(pointer) => {
-                let response = tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(pointer.get_as_capability::<saveable::Client>()?.save_request().send().promise))?;
-                let restore_key = response.get()?.get_value().get_as::<&[u8]>()?;
-                statement_and_params.sql_params.push(rusqlite::types::Value::Blob(restore_key.to_vec()));
-                statement_and_params.statement.push_str(format!("WHERE ?{}", statement_and_params.sql_params.len()).as_str());
-            }
-        },
-        expr::Which::Bindparam(_) => {
-            statement_and_params.sql_params.push(rusqlite::types::Value::Null);
-            statement_and_params.bindparam_indexes.push(statement_and_params.sql_params.len() - 1);
-            statement_and_params.statement.push_str(format!("WHERE ?{}", statement_and_params.sql_params.len()).as_str());
-        }
-        expr::Which::Tablereference(table_column) => {
-            let table_column = table_column?;
-            let index = table_column.get_reference() as usize;
-            if index >= statement_and_params.join_tree_tablerefs.len() {
-                return Err(capnp::Error::failed("Referenced table not in the join tree".to_string()));
-            }
-            statement_and_params.statement.push_str(
-                format!(
-                    "{}.{}, ",
-                    statement_and_params.join_tree_tablerefs[table_column.get_reference() as usize].table_name.as_str(),
-                    table_column.get_col_name()?.to_str()?
-                )
-                .as_str(),
-            );
-        }
-        expr::Which::Functioninvocation(func) => {
-            statement_and_params.statement.push_str("WHERE ");
-            statement_and_params = build_function_invocation(db, func?, statement_and_params)?;
-        }
-    }
-
-    if statement_and_params.statement.as_bytes()[statement_and_params.statement.len() - 2] == b',' {
-        statement_and_params.statement.truncate(statement_and_params.statement.len() - 2);
+    if del.has_sql_where() {
+        statement_and_params.statement.push_str("WHERE ");
+        //match_expr(db, del.get_sql_where()?, &mut statement_and_params)?;
+        match_where(db, del.get_sql_where()?, &mut statement_and_params)?;
     }
 
     if !returning.is_empty() {
-        statement_and_params.statement.push_str(" RETURNING ")
-    }
-    for returning_expr in returning.iter() {
-        match returning_expr.which()? {
-            expr::Which::Literal(dbany) => match dbany?.which()? {
-                d_b_any::Which::Null(_) => {
-                    statement_and_params.sql_params.push(rusqlite::types::Value::Null);
-                    statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                }
-                d_b_any::Which::Integer(int) => {
-                    statement_and_params.sql_params.push(rusqlite::types::Value::Integer(int));
-                    statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                }
-                d_b_any::Which::Real(real) => {
-                    statement_and_params.sql_params.push(rusqlite::types::Value::Real(real));
-                    statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                }
-                d_b_any::Which::Text(text) => {
-                    statement_and_params.sql_params.push(rusqlite::types::Value::Text(text?.to_string()?));
-                    statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                }
-                d_b_any::Which::Blob(blob) => {
-                    statement_and_params.sql_params.push(rusqlite::types::Value::Blob(blob?.to_vec()));
-                    statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                }
-                d_b_any::Which::Pointer(pointer) => {
-                    let response = tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(pointer.get_as_capability::<saveable::Client>()?.save_request().send().promise))?;
-                    let restore_key = response.get()?.get_value().get_as::<&[u8]>()?;
-                    statement_and_params.sql_params.push(rusqlite::types::Value::Blob(restore_key.to_vec()));
-                    statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                }
-            },
-            expr::Which::Bindparam(_) => {
-                statement_and_params.sql_params.push(rusqlite::types::Value::Null);
-                statement_and_params.bindparam_indexes.push(statement_and_params.sql_params.len() - 1);
-                statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-            }
-            expr::Which::Tablereference(table_column) => {
-                let table_column = table_column?;
-                let index = table_column.get_reference() as usize;
-                if index >= statement_and_params.join_tree_tablerefs.len() {
-                    return Err(capnp::Error::failed("Referenced table not in the join tree".to_string()));
-                }
-                statement_and_params.statement.push_str(
-                    format!(
-                        "{}.{}, ",
-                        statement_and_params.join_tree_tablerefs[table_column.get_reference() as usize].table_name.as_str(),
-                        table_column.get_col_name()?.to_str()?
-                    )
-                    .as_str(),
-                );
-            }
-            expr::Which::Functioninvocation(func) => {
-                statement_and_params = build_function_invocation(db, func?, statement_and_params)?;
-                statement_and_params.statement.push_str(", ");
-            }
+        statement_and_params.statement.push_str(" RETURNING ");
+
+        for returning_expr in returning.iter() {
+            match_expr(db, returning_expr, &mut statement_and_params)?;
+            statement_and_params.statement.push_str(", ");
         }
-    }
-    if statement_and_params.statement.as_bytes()[statement_and_params.statement.len() - 2] == b',' {
         statement_and_params.statement.truncate(statement_and_params.statement.len() - 2);
     }
     return Ok(statement_and_params);
 }
-fn build_update_statement<'a>(db: &SqliteDatabase, upd: update::Reader<'a>, mut statement_and_params: StatementAndParams) -> Result<StatementAndParams, capnp::Error> {
-    capnp_let!({assignments, from, sql_where, returning} = upd);
+async fn build_update_statement<'a>(db: &SqliteDatabase, upd: update::Reader<'a>, mut statement_and_params: StatementAndParams) -> Result<StatementAndParams, capnp::Error> {
+    capnp_let!({assignments, from, returning} = upd);
 
     statement_and_params.statement.push_str("UPDATE OR ");
     match upd.get_fallback()? {
@@ -960,12 +557,14 @@ fn build_update_statement<'a>(db: &SqliteDatabase, upd: update::Reader<'a>, mut 
 
     match from.reborrow().get_tableorsubquery()?.which()? {
         table_or_subquery::Which::Tableref(tableref) => {
-            //let tableref = capnp::capability::get_resolved_cap(tableref?).await;
+            let tableref = capnp::capability::get_resolved_cap(tableref?).await;
             ROTABLE_REF_SET.with_borrow_mut(|set| {
-                let Some(server) = set.get_local_server_of_resolved(&tableref?) else {
+                let Some(server) = set.get_local_server_of_resolved(&tableref) else {
                     return Err(capnp::Error::failed("Table ref invalid for this database or insufficient permissions".to_string()));
                 };
                 statement_and_params.statement.push_str(server.table_name.as_str());
+                statement_and_params.statement.push_str(format!(" AS tableref{} ", statement_and_params.tableref_number).as_str());
+                statement_and_params.tableref_number += 1;
                 Ok(())
             })?;
         }
@@ -977,60 +576,8 @@ fn build_update_statement<'a>(db: &SqliteDatabase, upd: update::Reader<'a>, mut 
             statement_and_params.statement.push_str(server.function.as_str());
             statement_and_params.statement.push_str(" (");
             for expr in func.get_exprs()? {
-                match expr.which()? {
-                    expr::Which::Literal(dbany) => match dbany?.which()? {
-                        d_b_any::Which::Null(_) => {
-                            statement_and_params.sql_params.push(rusqlite::types::Value::Null);
-                            statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                        }
-                        d_b_any::Which::Integer(int) => {
-                            statement_and_params.sql_params.push(rusqlite::types::Value::Integer(int));
-                            statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                        }
-                        d_b_any::Which::Real(real) => {
-                            statement_and_params.sql_params.push(rusqlite::types::Value::Real(real));
-                            statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                        }
-                        d_b_any::Which::Text(text) => {
-                            statement_and_params.sql_params.push(rusqlite::types::Value::Text(text?.to_string()?));
-                            statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                        }
-                        d_b_any::Which::Blob(blob) => {
-                            statement_and_params.sql_params.push(rusqlite::types::Value::Blob(blob?.to_vec()));
-                            statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                        }
-                        d_b_any::Which::Pointer(pointer) => {
-                            let response = tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(pointer.get_as_capability::<saveable::Client>()?.save_request().send().promise))?;
-                            let restore_key = response.get()?.get_value().get_as::<&[u8]>()?;
-                            statement_and_params.sql_params.push(rusqlite::types::Value::Blob(restore_key.to_vec()));
-                            statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                        }
-                    },
-                    expr::Which::Bindparam(_) => {
-                        statement_and_params.sql_params.push(rusqlite::types::Value::Null);
-                        statement_and_params.bindparam_indexes.push(statement_and_params.sql_params.len() - 1);
-                        statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                    }
-                    expr::Which::Tablereference(table_column) => {
-                        let table_column = table_column?;
-                        let index = table_column.get_reference() as usize;
-                        if index >= statement_and_params.join_tree_tablerefs.len() {
-                            return Err(capnp::Error::failed("Referenced table not in the join tree".to_string()));
-                        }
-                        statement_and_params.statement.push_str(
-                            format!(
-                                "{}.{}, ",
-                                statement_and_params.join_tree_tablerefs[table_column.get_reference() as usize].table_name.as_str(),
-                                table_column.get_col_name()?.to_str()?
-                            )
-                            .as_str(),
-                        );
-                    }
-                    expr::Which::Functioninvocation(func) => {
-                        statement_and_params = build_function_invocation(db, func?, statement_and_params)?;
-                        statement_and_params.statement.push_str(", ")
-                    }
-                }
+                match_expr(db, expr, &mut statement_and_params)?;
+                statement_and_params.statement.push_str(", ");
             }
             statement_and_params.statement.truncate(statement_and_params.statement.len() - 2);
             statement_and_params.statement.push_str(") ");
@@ -1044,70 +591,16 @@ fn build_update_statement<'a>(db: &SqliteDatabase, upd: update::Reader<'a>, mut 
         table_or_subquery::Which::Null(()) => (),
     }
 
-    if !assignments.is_empty() {
-        statement_and_params.statement.push_str(" SET ");
-    } else {
+    if assignments.is_empty() {
         return Err(capnp::Error::failed("Must provide at least one assignment".to_string()));
-    }
-    for assignment in assignments.iter() {
-        statement_and_params.statement.push_str(assignment.get_name()?.to_str()?);
-        statement_and_params.statement.push_str(" = ");
-        match assignment.get_expr()?.which()? {
-            expr::Which::Literal(dbany) => match dbany?.which()? {
-                d_b_any::Which::Null(_) => {
-                    statement_and_params.sql_params.push(rusqlite::types::Value::Null);
-                    statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                }
-                d_b_any::Which::Integer(int) => {
-                    statement_and_params.sql_params.push(rusqlite::types::Value::Integer(int));
-                    statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                }
-                d_b_any::Which::Real(real) => {
-                    statement_and_params.sql_params.push(rusqlite::types::Value::Real(real));
-                    statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                }
-                d_b_any::Which::Text(text) => {
-                    statement_and_params.sql_params.push(rusqlite::types::Value::Text(text?.to_string()?));
-                    statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                }
-                d_b_any::Which::Blob(blob) => {
-                    statement_and_params.sql_params.push(rusqlite::types::Value::Blob(blob?.to_vec()));
-                    statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                }
-                d_b_any::Which::Pointer(pointer) => {
-                    let response = tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(pointer.get_as_capability::<saveable::Client>()?.save_request().send().promise))?;
-                    let restore_key = response.get()?.get_value().get_as::<&[u8]>()?;
-                    statement_and_params.sql_params.push(rusqlite::types::Value::Blob(restore_key.to_vec()));
-                    statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                }
-            },
-            expr::Which::Bindparam(_) => {
-                statement_and_params.sql_params.push(rusqlite::types::Value::Null);
-                statement_and_params.bindparam_indexes.push(statement_and_params.sql_params.len() - 1);
-                statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-            }
-            expr::Which::Tablereference(table_column) => {
-                let table_column = table_column?;
-                let index = table_column.get_reference() as usize;
-                if index >= statement_and_params.join_tree_tablerefs.len() {
-                    return Err(capnp::Error::failed("Referenced table not in the join tree".to_string()));
-                }
-                statement_and_params.statement.push_str(
-                    format!(
-                        "{}.{}, ",
-                        statement_and_params.join_tree_tablerefs[table_column.get_reference() as usize].table_name.as_str(),
-                        table_column.get_col_name()?.to_str()?
-                    )
-                    .as_str(),
-                );
-            }
-            expr::Which::Functioninvocation(func) => {
-                statement_and_params = build_function_invocation(db, func?, statement_and_params)?;
-                statement_and_params.statement.push_str(", ")
-            }
+    } else {
+        statement_and_params.statement.push_str(" SET ");
+        for assignment in assignments.iter() {
+            statement_and_params.statement.push_str(assignment.get_name()?.to_str()?);
+            statement_and_params.statement.push_str(" = ");
+            match_expr(db, assignment.get_expr()?, &mut statement_and_params)?;
+            statement_and_params.statement.push_str(", ");
         }
-    }
-    if statement_and_params.statement.as_bytes()[statement_and_params.statement.len() - 2] == b',' {
         statement_and_params.statement.truncate(statement_and_params.statement.len() - 2);
     }
 
@@ -1116,179 +609,65 @@ fn build_update_statement<'a>(db: &SqliteDatabase, upd: update::Reader<'a>, mut 
         statement_and_params = build_join_clause(db, from, statement_and_params)?;
     }
 
-    match sql_where.which()? {
-        expr::Which::Literal(dbany) => match dbany?.which()? {
-            d_b_any::Which::Null(_) => {}
-            d_b_any::Which::Integer(int) => {
-                statement_and_params.sql_params.push(rusqlite::types::Value::Integer(int));
-                statement_and_params.statement.push_str(format!(" WHERE ?{}", statement_and_params.sql_params.len()).as_str());
-            }
-            d_b_any::Which::Real(real) => {
-                statement_and_params.sql_params.push(rusqlite::types::Value::Real(real));
-                statement_and_params.statement.push_str(format!(" WHERE ?{}", statement_and_params.sql_params.len()).as_str());
-            }
-            d_b_any::Which::Text(text) => {
-                //sql_params.push(rusqlite::types::Value::Text(text?.to_string()?));
-                //statement.push_str(format!(" WHERE ?{}", sql_params.len()).as_str());
-                statement_and_params.statement.push_str(format!(" WHERE {}", text?.to_str()?).as_str());
-            }
-            d_b_any::Which::Blob(blob) => {
-                statement_and_params.sql_params.push(rusqlite::types::Value::Blob(blob?.to_vec()));
-                statement_and_params.statement.push_str(format!(" WHERE ?{}", statement_and_params.sql_params.len()).as_str());
-            }
-            d_b_any::Which::Pointer(pointer) => {
-                let response = tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(pointer.get_as_capability::<saveable::Client>()?.save_request().send().promise))?;
-                let restore_key = response.get()?.get_value().get_as::<&[u8]>()?;
-                statement_and_params.sql_params.push(rusqlite::types::Value::Blob(restore_key.to_vec()));
-                statement_and_params.statement.push_str(format!(" WHERE ?{}", statement_and_params.sql_params.len()).as_str());
-            }
-        },
-        expr::Which::Bindparam(_) => {
-            statement_and_params.sql_params.push(rusqlite::types::Value::Null);
-            statement_and_params.bindparam_indexes.push(statement_and_params.sql_params.len() - 1);
-            statement_and_params.statement.push_str(format!(" WHERE ?{}", statement_and_params.sql_params.len()).as_str());
-        }
-        expr::Which::Tablereference(table_column) => {
-            let table_column = table_column?;
-            let index = table_column.get_reference() as usize;
-            if index >= statement_and_params.join_tree_tablerefs.len() {
-                return Err(capnp::Error::failed("Referenced table not in the join tree".to_string()));
-            }
-            statement_and_params.statement.push_str(
-                format!(
-                    "{}.{}, ",
-                    statement_and_params.join_tree_tablerefs[table_column.get_reference() as usize].table_name.as_str(),
-                    table_column.get_col_name()?.to_str()?
-                )
-                .as_str(),
-            );
-        }
-        expr::Which::Functioninvocation(func) => {
-            statement_and_params.statement.push_str(" WHERE ");
-            statement_and_params = build_function_invocation(db, func?, statement_and_params)?;
-        }
+    if upd.has_sql_where() {
+        statement_and_params.statement.push_str(" WHERE ");
+        //match_expr(db, upd.get_sql_where()?, &mut statement_and_params)?;
+        match_where(db, upd.get_sql_where()?, &mut statement_and_params)?;
     }
 
     if !returning.is_empty() {
-        statement_and_params.statement.push_str(" RETURNING ")
-    }
-    for returning_expr in returning.iter() {
-        match returning_expr.which()? {
-            expr::Which::Literal(dbany) => match dbany?.which()? {
-                d_b_any::Which::Null(_) => {
-                    statement_and_params.sql_params.push(rusqlite::types::Value::Null);
-                    statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                }
-                d_b_any::Which::Integer(int) => {
-                    statement_and_params.sql_params.push(rusqlite::types::Value::Integer(int));
-                    statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                }
-                d_b_any::Which::Real(real) => {
-                    statement_and_params.sql_params.push(rusqlite::types::Value::Real(real));
-                    statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                }
-                d_b_any::Which::Text(text) => {
-                    statement_and_params.sql_params.push(rusqlite::types::Value::Text(text?.to_string()?));
-                    statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                }
-                d_b_any::Which::Blob(blob) => {
-                    statement_and_params.sql_params.push(rusqlite::types::Value::Blob(blob?.to_vec()));
-                    statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                }
-                d_b_any::Which::Pointer(pointer) => {
-                    let response = tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(pointer.get_as_capability::<saveable::Client>()?.save_request().send().promise))?;
-                    let restore_key = response.get()?.get_value().get_as::<&[u8]>()?;
-                    statement_and_params.sql_params.push(rusqlite::types::Value::Blob(restore_key.to_vec()));
-                    statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                }
-            },
-            expr::Which::Bindparam(_) => {
-                statement_and_params.sql_params.push(rusqlite::types::Value::Null);
-                statement_and_params.bindparam_indexes.push(statement_and_params.sql_params.len() - 1);
-                statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-            }
-            expr::Which::Tablereference(table_column) => {
-                let table_column = table_column?;
-                statement_and_params.statement.push_str(
-                    format!(
-                        "{}.{}, ",
-                        statement_and_params.join_tree_tablerefs[table_column.get_reference() as usize].table_name.as_str(),
-                        table_column.get_col_name()?.to_str()?
-                    )
-                    .as_str(),
-                );
-            }
-            expr::Which::Functioninvocation(func) => {
-                statement_and_params = build_function_invocation(db, func?, statement_and_params)?;
-                statement_and_params.statement.push_str(", ")
-            }
+        statement_and_params.statement.push_str(" RETURNING ");
+        for returning_expr in returning.iter() {
+            match_expr(db, returning_expr, &mut statement_and_params)?;
+            statement_and_params.statement.push_str(", ");
         }
-    }
-    if statement_and_params.statement.as_bytes()[statement_and_params.statement.len() - 2] == b',' {
         statement_and_params.statement.truncate(statement_and_params.statement.len() - 2);
     }
     return Ok(statement_and_params);
 }
 fn build_select_statement<'a>(db: &SqliteDatabase, select: select::Reader<'a>, mut statement_and_params: StatementAndParams) -> Result<StatementAndParams, capnp::Error> {
-    capnp_let!({names, selectcore : {from, result, sql_where}, mergeoperations, orderby, limit} = select);
+    capnp_let!({names, selectcore : {from, result}, mergeoperations, orderby, limit} = select);
     statement_and_params.statement.push_str("SELECT ");
     let mut names_iter = names.iter();
     for expr in result.iter() {
         match expr.which()? {
             expr::Which::Literal(dbany) => {
-                //TODO apparently ?n params not supported in this part of select, so if these are even legal probably need some checks against injection
+                //TODO Probably need some checks against injection
                 match dbany?.which()? {
                     d_b_any::Which::Null(_) => {
-                        //sql_params.push(rusqlite::types::Value::Null);
-                        //statement.push_str(format!("?{param_number}, ").as_str());
                         statement_and_params.statement.push_str(format!("{}, ", "NULL").as_str());
                     }
                     d_b_any::Which::Integer(int) => {
-                        //sql_params.push(rusqlite::types::Value::Integer(int));
-                        //statement.push_str(format!("?{param_number}, ").as_str());
                         statement_and_params.statement.push_str(format!("{}, ", int).as_str());
                     }
                     d_b_any::Which::Real(real) => {
-                        //sql_params.push(rusqlite::types::Value::Real(real));
-                        //statement.push_str(format!("?{param_number}, ").as_str());
                         statement_and_params.statement.push_str(format!("{}, ", real).as_str());
                     }
                     d_b_any::Which::Text(text) => {
-                        //sql_params.push(rusqlite::types::Value::Text(text?.to_string()?));
-                        //statement.push_str(format!("?{param_number}, ").as_str());
                         statement_and_params.statement.push_str(format!("{}, ", text?.to_str()?).as_str());
                     }
                     d_b_any::Which::Blob(blob) => {
-                        //sql_params.push(rusqlite::types::Value::Blob(blob?.to_vec()));
-                        //statement.push_str(format!("?{param_number}, ").as_str());
                         statement_and_params.statement.push_str(format!("{}, ", std::str::from_utf8(blob?)?).as_str());
                     }
                     d_b_any::Which::Pointer(pointer) => {
-                        todo!()
+                        let response = tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(pointer.get_as_capability::<saveable::Client>()?.save_request().send().promise))?;
+                        let restore_key = response.get()?.get_value().get_as::<&[u8]>()?;
+                        statement_and_params.statement.push_str(format!("{}, ", std::str::from_utf8(restore_key)?).as_str());
                     }
                 }
             }
             expr::Which::Bindparam(_) => {
-                //Can't be a bindparam
+                return Err(capnp::Error::failed("Select result can't be a bindparam".into()));
             }
             expr::Which::Tablereference(table_column) => {
                 let table_column = table_column?;
-                let index = table_column.get_reference() as usize;
-                if index >= statement_and_params.join_tree_tablerefs.len() {
-                    return Err(capnp::Error::failed("Referenced table not in the join tree".to_string()));
-                }
-                statement_and_params.statement.push_str(
-                    format!(
-                        "{}.{}, ",
-                        statement_and_params.join_tree_tablerefs[table_column.get_reference() as usize].table_name.as_str(),
-                        table_column.get_col_name()?.to_str()?
-                    )
-                    .as_str(),
-                );
+                statement_and_params
+                    .statement
+                    .push_str(format!("tableref{}.{}, ", table_column.get_reference(), table_column.get_col_name()?.to_str()?).as_str());
             }
             expr::Which::Functioninvocation(func) => {
-                statement_and_params = build_function_invocation(db, func?, statement_and_params)?;
-                statement_and_params.statement.push_str(", ")
+                build_function_invocation(db, func?, &mut statement_and_params)?;
+                statement_and_params.statement.push_str(", ");
             }
         }
         if let Some(name) = names_iter.next() {
@@ -1308,57 +687,11 @@ fn build_select_statement<'a>(db: &SqliteDatabase, select: select::Reader<'a>, m
         statement_and_params.statement.push_str(" FROM ");
         statement_and_params = build_join_clause(db, from, statement_and_params)?;
     }
-
-    match sql_where.which()? {
-        expr::Which::Literal(dbany) => match dbany?.which()? {
-            d_b_any::Which::Null(_) => {}
-            d_b_any::Which::Integer(int) => {
-                statement_and_params.sql_params.push(rusqlite::types::Value::Integer(int));
-                statement_and_params.statement.push_str(format!("WHERE ?{}", statement_and_params.sql_params.len()).as_str());
-            }
-            d_b_any::Which::Real(real) => {
-                statement_and_params.sql_params.push(rusqlite::types::Value::Real(real));
-                statement_and_params.statement.push_str(format!("WHERE ?{}", statement_and_params.sql_params.len()).as_str());
-            }
-            d_b_any::Which::Text(text) => {
-                statement_and_params.sql_params.push(rusqlite::types::Value::Text(text?.to_string()?));
-                statement_and_params.statement.push_str(format!("WHERE ?{}", statement_and_params.sql_params.len()).as_str());
-            }
-            d_b_any::Which::Blob(blob) => {
-                statement_and_params.sql_params.push(rusqlite::types::Value::Blob(blob?.to_vec()));
-                statement_and_params.statement.push_str(format!("WHERE ?{}", statement_and_params.sql_params.len()).as_str());
-            }
-            d_b_any::Which::Pointer(pointer) => {
-                let response = tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(pointer.get_as_capability::<saveable::Client>()?.save_request().send().promise))?;
-                let restore_key = response.get()?.get_value().get_as::<&[u8]>()?;
-                statement_and_params.sql_params.push(rusqlite::types::Value::Blob(restore_key.to_vec()));
-                statement_and_params.statement.push_str(format!("WHERE ?{}", statement_and_params.sql_params.len()).as_str());
-            }
-        },
-        expr::Which::Bindparam(_) => {
-            statement_and_params.sql_params.push(rusqlite::types::Value::Null);
-            statement_and_params.bindparam_indexes.push(statement_and_params.sql_params.len() - 1);
-            statement_and_params.statement.push_str(format!("WHERE ?{}", statement_and_params.sql_params.len()).as_str());
-        }
-        expr::Which::Tablereference(table_column) => {
-            let table_column = table_column?;
-            let index = table_column.get_reference() as usize;
-            if index >= statement_and_params.join_tree_tablerefs.len() {
-                return Err(capnp::Error::failed("Referenced table not in the join tree".to_string()));
-            }
-            statement_and_params.statement.push_str(
-                format!(
-                    "{}.{}, ",
-                    statement_and_params.join_tree_tablerefs[table_column.get_reference() as usize].table_name.as_str(),
-                    table_column.get_col_name()?.to_str()?
-                )
-                .as_str(),
-            );
-        }
-        expr::Which::Functioninvocation(func) => {
-            statement_and_params.statement.push_str("WHERE ");
-            statement_and_params = build_function_invocation(db, func?, statement_and_params)?;
-        }
+    if selectcore.has_sql_where() {
+        statement_and_params.statement.push_str("WHERE ");
+        //match_expr(db, selectcore.get_sql_where()?, &mut statement_and_params)?;
+        match_where(db, selectcore.get_sql_where()?, &mut statement_and_params)?;
+        statement_and_params.statement.push_str(" ");
     }
 
     for merge_operation in mergeoperations.iter() {
@@ -1372,247 +705,44 @@ fn build_select_statement<'a>(db: &SqliteDatabase, select: select::Reader<'a>, m
     }
     if !orderby.is_empty() {
         statement_and_params.statement.push_str(" ORDER BY ");
-    }
-    for term in orderby.iter() {
-        match term.get_expr()?.which()? {
-            expr::Which::Literal(dbany) => match dbany?.which()? {
-                d_b_any::Which::Null(_) => {
-                    statement_and_params.sql_params.push(rusqlite::types::Value::Null);
-                    statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                }
-                d_b_any::Which::Integer(int) => {
-                    statement_and_params.sql_params.push(rusqlite::types::Value::Integer(int));
-                    statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                }
-                d_b_any::Which::Real(real) => {
-                    statement_and_params.sql_params.push(rusqlite::types::Value::Real(real));
-                    statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                }
-                d_b_any::Which::Text(text) => {
-                    statement_and_params.sql_params.push(rusqlite::types::Value::Text(text?.to_string()?));
-                    statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                }
-                d_b_any::Which::Blob(blob) => {
-                    statement_and_params.sql_params.push(rusqlite::types::Value::Blob(blob?.to_vec()));
-                    statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                }
-                d_b_any::Which::Pointer(pointer) => {
-                    let response = tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(pointer.get_as_capability::<saveable::Client>()?.save_request().send().promise))?;
-                    let restore_key = response.get()?.get_value().get_as::<&[u8]>()?;
-                    statement_and_params.sql_params.push(rusqlite::types::Value::Blob(restore_key.to_vec()));
-                    statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                }
-            },
-            expr::Which::Bindparam(_) => {
-                statement_and_params.sql_params.push(rusqlite::types::Value::Null);
-                statement_and_params.bindparam_indexes.push(statement_and_params.sql_params.len() - 1);
-                statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
+        for term in orderby.iter() {
+            match_expr(db, term.get_expr()?, &mut statement_and_params)?;
+            match term.get_direction()? {
+                select::ordering_term::AscDesc::Asc => statement_and_params.statement.push_str(" ASC"),
+                select::ordering_term::AscDesc::Desc => statement_and_params.statement.push_str(" DSC"),
             }
-            expr::Which::Tablereference(table_column) => {
-                let table_column = table_column?;
-                let index = table_column.get_reference() as usize;
-                if index >= statement_and_params.join_tree_tablerefs.len() {
-                    return Err(capnp::Error::failed("Referenced table not in the join tree".to_string()));
-                }
-                statement_and_params.statement.push_str(
-                    format!(
-                        "{}.{}, ",
-                        statement_and_params.join_tree_tablerefs[table_column.get_reference() as usize].table_name.as_str(),
-                        table_column.get_col_name()?.to_str()?
-                    )
-                    .as_str(),
-                );
-            }
-            expr::Which::Functioninvocation(func) => {
-                statement_and_params = build_function_invocation(db, func?, statement_and_params)?;
-                statement_and_params.statement.push_str(", ");
-            }
+            statement_and_params.statement.push_str(", ");
         }
-        match term.get_direction()? {
-            select::ordering_term::AscDesc::Asc => statement_and_params.statement.push_str(" ASC, "),
-            select::ordering_term::AscDesc::Desc => statement_and_params.statement.push_str(" DSC, "),
-        }
-    }
-    if statement_and_params.statement.as_bytes()[statement_and_params.statement.len() - 2] == b',' {
         statement_and_params.statement.truncate(statement_and_params.statement.len() - 2);
     }
-    match limit.get_limit()?.which()? {
-        expr::Which::Literal(dbany) => match dbany?.which()? {
-            d_b_any::Which::Null(_) => {}
-            d_b_any::Which::Integer(int) => {
-                statement_and_params.sql_params.push(rusqlite::types::Value::Integer(int));
-                statement_and_params.statement.push_str(format!("LIMIT ?{}", statement_and_params.sql_params.len()).as_str());
-            }
-            d_b_any::Which::Real(real) => {
-                statement_and_params.sql_params.push(rusqlite::types::Value::Real(real));
-                statement_and_params.statement.push_str(format!("LIMIT ?{}", statement_and_params.sql_params.len()).as_str());
-            }
-            d_b_any::Which::Text(text) => {
-                statement_and_params.sql_params.push(rusqlite::types::Value::Text(text?.to_string()?));
-                statement_and_params.statement.push_str(format!("LIMIT ?{}", statement_and_params.sql_params.len()).as_str());
-            }
-            d_b_any::Which::Blob(blob) => {
-                statement_and_params.sql_params.push(rusqlite::types::Value::Blob(blob?.to_vec()));
-                statement_and_params.statement.push_str(format!("LIMIT ?{}", statement_and_params.sql_params.len()).as_str());
-            }
-            d_b_any::Which::Pointer(pointer) => {
-                let response = tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(pointer.get_as_capability::<saveable::Client>()?.save_request().send().promise))?;
-                let restore_key = response.get()?.get_value().get_as::<&[u8]>()?;
-                statement_and_params.sql_params.push(rusqlite::types::Value::Blob(restore_key.to_vec()));
-                statement_and_params.statement.push_str(format!("LIMIT ?{}", statement_and_params.sql_params.len()).as_str());
-            }
-        },
-        expr::Which::Bindparam(_) => {
-            statement_and_params.sql_params.push(rusqlite::types::Value::Null);
-            statement_and_params.bindparam_indexes.push(statement_and_params.sql_params.len() - 1);
-            statement_and_params.statement.push_str(format!("LIMIT ?{}", statement_and_params.sql_params.len()).as_str());
-        }
-        expr::Which::Tablereference(table_column) => {
-            let table_column = table_column?;
-            let index = table_column.get_reference() as usize;
-            if index >= statement_and_params.join_tree_tablerefs.len() {
-                return Err(capnp::Error::failed("Referenced table not in the join tree".to_string()));
-            }
-            statement_and_params.statement.push_str(
-                format!(
-                    "{}.{}, ",
-                    statement_and_params.join_tree_tablerefs[table_column.get_reference() as usize].table_name.as_str(),
-                    table_column.get_col_name()?.to_str()?
-                )
-                .as_str(),
-            );
-        }
-        expr::Which::Functioninvocation(func) => {
-            statement_and_params.statement.push_str("LIMIT ");
-            statement_and_params = build_function_invocation(db, func?, statement_and_params)?;
-        }
+    if limit.has_limit() {
+        statement_and_params.statement.push_str("LIMIT ");
+        match_expr(db, limit.get_limit()?, &mut statement_and_params)?;
+        statement_and_params.statement.push_str(" ");
     }
-    match limit.get_offset()?.which()? {
-        expr::Which::Literal(dbany) => match dbany?.which()? {
-            d_b_any::Which::Null(_) => {}
-            d_b_any::Which::Integer(int) => {
-                statement_and_params.sql_params.push(rusqlite::types::Value::Integer(int));
-                statement_and_params.statement.push_str(format!("OFFSET ?{}", statement_and_params.sql_params.len()).as_str());
-            }
-            d_b_any::Which::Real(real) => {
-                statement_and_params.sql_params.push(rusqlite::types::Value::Real(real));
-                statement_and_params.statement.push_str(format!("OFFSET ?{}", statement_and_params.sql_params.len()).as_str());
-            }
-            d_b_any::Which::Text(text) => {
-                statement_and_params.sql_params.push(rusqlite::types::Value::Text(text?.to_string()?));
-                statement_and_params.statement.push_str(format!("OFFSET ?{}", statement_and_params.sql_params.len()).as_str());
-            }
-            d_b_any::Which::Blob(blob) => {
-                statement_and_params.sql_params.push(rusqlite::types::Value::Blob(blob?.to_vec()));
-                statement_and_params.statement.push_str(format!("OFFSET ?{}", statement_and_params.sql_params.len()).as_str());
-            }
-            d_b_any::Which::Pointer(pointer) => {
-                let response = tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(pointer.get_as_capability::<saveable::Client>()?.save_request().send().promise))?;
-                let restore_key = response.get()?.get_value().get_as::<&[u8]>()?;
-                statement_and_params.sql_params.push(rusqlite::types::Value::Blob(restore_key.to_vec()));
-                statement_and_params.statement.push_str(format!("OFFSET ?{}", statement_and_params.sql_params.len()).as_str());
-            }
-        },
-        expr::Which::Bindparam(_) => {
-            statement_and_params.sql_params.push(rusqlite::types::Value::Null);
-            statement_and_params.bindparam_indexes.push(statement_and_params.sql_params.len() - 1);
-            statement_and_params.statement.push_str(format!("OFFSET ?{}", statement_and_params.sql_params.len()).as_str());
-        }
-        expr::Which::Tablereference(table_column) => {
-            let table_column = table_column?;
-            let index = table_column.get_reference() as usize;
-            if index >= statement_and_params.join_tree_tablerefs.len() {
-                return Err(capnp::Error::failed("Referenced table not in the join tree".to_string()));
-            }
-            statement_and_params.statement.push_str(
-                format!(
-                    "{}.{}, ",
-                    statement_and_params.join_tree_tablerefs[table_column.get_reference() as usize].table_name.as_str(),
-                    table_column.get_col_name()?.to_str()?
-                )
-                .as_str(),
-            );
-        }
-        expr::Which::Functioninvocation(func) => {
-            statement_and_params.statement.push_str("OFFSET ");
-            statement_and_params = build_function_invocation(db, func?, statement_and_params)?;
-        }
+    if limit.has_offset() {
+        statement_and_params.statement.push_str("OFFSET ");
+        match_expr(db, limit.get_offset()?, &mut statement_and_params)?;
+        statement_and_params.statement.push_str(" ");
     }
 
     return Ok(statement_and_params);
 }
-fn build_function_invocation<'a>(db: &SqliteDatabase, function_reader: function_invocation::Reader<'a>, mut statement_and_params: StatementAndParams) -> Result<StatementAndParams, capnp::Error> {
+fn build_function_invocation<'a>(db: &SqliteDatabase, function_reader: function_invocation::Reader<'a>, statement_and_params: &mut StatementAndParams) -> Result<(), capnp::Error> {
     let Some(server) = db.sql_function_set.borrow().get_local_server_of_resolved(&function_reader.reborrow().get_function()?) else {
         return Err(capnp::Error::failed("Sql function cap invalid".to_string()));
     };
     statement_and_params.statement.push_str(server.function.as_str());
-    if !function_reader.reborrow().get_params()?.is_empty() {
+    if function_reader.has_params() {
         statement_and_params.statement.push_str(" (");
+        for param in function_reader.get_params()?.iter() {
+            match_expr(db, param, statement_and_params)?;
+            statement_and_params.statement.push_str(", ");
+        }
+        statement_and_params.statement.truncate(statement_and_params.statement.len() - 2);
+        statement_and_params.statement.push_str(")");
     }
-    let mut params_iter = function_reader.reborrow().get_params()?.iter();
-    while let Some(param) = params_iter.next() {
-        match param.which()? {
-            expr::Which::Literal(dbany) => match dbany?.which()? {
-                d_b_any::Which::Null(_) => {
-                    statement_and_params.sql_params.push(rusqlite::types::Value::Null);
-                    statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                }
-                d_b_any::Which::Integer(int) => {
-                    statement_and_params.sql_params.push(rusqlite::types::Value::Integer(int));
-                    statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                }
-                d_b_any::Which::Real(real) => {
-                    statement_and_params.sql_params.push(rusqlite::types::Value::Real(real));
-                    statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                }
-                d_b_any::Which::Text(text) => {
-                    statement_and_params.sql_params.push(rusqlite::types::Value::Text(text?.to_string()?));
-                    statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                }
-                d_b_any::Which::Blob(blob) => {
-                    statement_and_params.sql_params.push(rusqlite::types::Value::Blob(blob?.to_vec()));
-                    statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                }
-                d_b_any::Which::Pointer(pointer) => {
-                    let response = tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(pointer.get_as_capability::<saveable::Client>()?.save_request().send().promise))?;
-                    let restore_key = response.get()?.get_value().get_as::<&[u8]>()?;
-                    statement_and_params.sql_params.push(rusqlite::types::Value::Blob(restore_key.to_vec()));
-                    statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                }
-            },
-            expr::Which::Bindparam(_) => {
-                statement_and_params.sql_params.push(rusqlite::types::Value::Null);
-                statement_and_params.bindparam_indexes.push(statement_and_params.sql_params.len() - 1);
-                statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-            }
-            expr::Which::Tablereference(table_column) => {
-                let table_column = table_column?;
-                let index = table_column.get_reference() as usize;
-                if index >= statement_and_params.join_tree_tablerefs.len() {
-                    return Err(capnp::Error::failed("Referenced table not in the join tree".to_string()));
-                }
-                statement_and_params.statement.push_str(
-                    format!(
-                        "{}.{}, ",
-                        statement_and_params.join_tree_tablerefs[table_column.get_reference() as usize].table_name.as_str(),
-                        table_column.get_col_name()?.to_str()?
-                    )
-                    .as_str(),
-                );
-            }
-            expr::Which::Functioninvocation(func) => {
-                statement_and_params = build_function_invocation(db, func?, statement_and_params)?;
-                statement_and_params.statement.push_str(", ");
-            }
-        }
-        if statement_and_params.statement.as_bytes()[statement_and_params.statement.len() - 2] == b',' {
-            statement_and_params.statement.truncate(statement_and_params.statement.len() - 2);
-        }
-        if !function_reader.reborrow().get_params()?.is_empty() {
-            statement_and_params.statement.push_str(")");
-        }
-    }
-    return Ok(statement_and_params);
+    return Ok(());
 }
 fn build_join_clause<'a>(db: &SqliteDatabase, join_clause: join_clause::Reader<'a>, mut statement_and_params: StatementAndParams) -> Result<StatementAndParams, capnp::Error> {
     match join_clause.get_tableorsubquery()?.which()? {
@@ -1622,9 +752,9 @@ fn build_join_clause<'a>(db: &SqliteDatabase, join_clause: join_clause::Reader<'
                 let Some(server) = set.get_local_server_of_resolved(&tableref?) else {
                     return Err(capnp::Error::failed("Table ref invalid for this database or insufficient permissions".to_string()));
                 };
-                statement_and_params.join_tree_tablerefs.push(server.server.clone());
                 statement_and_params.statement.push_str(server.table_name.as_str());
-                statement_and_params.statement.push(' ');
+                statement_and_params.statement.push_str(format!(" AS tableref{} ", statement_and_params.tableref_number).as_str());
+                statement_and_params.tableref_number += 1;
                 Ok(())
             })?;
         }
@@ -1636,60 +766,8 @@ fn build_join_clause<'a>(db: &SqliteDatabase, join_clause: join_clause::Reader<'
             statement_and_params.statement.push_str(server.function.as_str());
             statement_and_params.statement.push_str(" (");
             for expr in func.get_exprs()? {
-                match expr.which()? {
-                    expr::Which::Literal(dbany) => match dbany?.which()? {
-                        d_b_any::Which::Null(_) => {
-                            statement_and_params.sql_params.push(rusqlite::types::Value::Null);
-                            statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                        }
-                        d_b_any::Which::Integer(int) => {
-                            statement_and_params.sql_params.push(rusqlite::types::Value::Integer(int));
-                            statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                        }
-                        d_b_any::Which::Real(real) => {
-                            statement_and_params.sql_params.push(rusqlite::types::Value::Real(real));
-                            statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                        }
-                        d_b_any::Which::Text(text) => {
-                            statement_and_params.sql_params.push(rusqlite::types::Value::Text(text?.to_string()?));
-                            statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                        }
-                        d_b_any::Which::Blob(blob) => {
-                            statement_and_params.sql_params.push(rusqlite::types::Value::Blob(blob?.to_vec()));
-                            statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                        }
-                        d_b_any::Which::Pointer(pointer) => {
-                            let response = tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(pointer.get_as_capability::<saveable::Client>()?.save_request().send().promise))?;
-                            let restore_key = response.get()?.get_value().get_as::<&[u8]>()?;
-                            statement_and_params.sql_params.push(rusqlite::types::Value::Blob(restore_key.to_vec()));
-                            statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                        }
-                    },
-                    expr::Which::Bindparam(_) => {
-                        statement_and_params.sql_params.push(rusqlite::types::Value::Null);
-                        statement_and_params.bindparam_indexes.push(statement_and_params.sql_params.len() - 1);
-                        statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                    }
-                    expr::Which::Tablereference(table_column) => {
-                        let table_column = table_column?;
-                        let index = table_column.get_reference() as usize;
-                        if index >= statement_and_params.join_tree_tablerefs.len() {
-                            return Err(capnp::Error::failed("Referenced table not in the join tree".to_string()));
-                        }
-                        statement_and_params.statement.push_str(
-                            format!(
-                                "{}.{}, ",
-                                statement_and_params.join_tree_tablerefs[table_column.get_reference() as usize].table_name.as_str(),
-                                table_column.get_col_name()?.to_str()?
-                            )
-                            .as_str(),
-                        );
-                    }
-                    expr::Which::Functioninvocation(func) => {
-                        statement_and_params = build_function_invocation(db, func?, statement_and_params)?;
-                        statement_and_params.statement.push_str(", ")
-                    }
-                }
+                match_expr(db, expr, &mut statement_and_params)?;
+                statement_and_params.statement.push_str(", ");
             }
             statement_and_params.statement.truncate(statement_and_params.statement.len() - 2);
             statement_and_params.statement.push_str(") ");
@@ -1733,9 +811,9 @@ fn build_join_clause<'a>(db: &SqliteDatabase, join_clause: join_clause::Reader<'
                     let Some(server) = set.get_local_server_of_resolved(&tableref?) else {
                         return Err(capnp::Error::failed("Table ref invalid for this database or insufficient permissions".to_string()));
                     };
-                    statement_and_params.join_tree_tablerefs.push(server.server.clone());
                     statement_and_params.statement.push_str(server.table_name.as_str());
-                    statement_and_params.statement.push(' ');
+                    statement_and_params.statement.push_str(format!(" AS tableref{} ", statement_and_params.tableref_number).as_str());
+                    statement_and_params.tableref_number += 1;
                     Ok(())
                 })?;
             }
@@ -1747,61 +825,8 @@ fn build_join_clause<'a>(db: &SqliteDatabase, join_clause: join_clause::Reader<'
                 statement_and_params.statement.push_str(server.function.as_str());
                 statement_and_params.statement.push_str(" (");
                 for expr in func.get_exprs()? {
-                    match expr.which()? {
-                        expr::Which::Literal(dbany) => match dbany?.which()? {
-                            d_b_any::Which::Null(_) => {
-                                statement_and_params.sql_params.push(rusqlite::types::Value::Null);
-                                statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                            }
-                            d_b_any::Which::Integer(int) => {
-                                statement_and_params.sql_params.push(rusqlite::types::Value::Integer(int));
-                                statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                            }
-                            d_b_any::Which::Real(real) => {
-                                statement_and_params.sql_params.push(rusqlite::types::Value::Real(real));
-                                statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                            }
-                            d_b_any::Which::Text(text) => {
-                                statement_and_params.sql_params.push(rusqlite::types::Value::Text(text?.to_string()?));
-                                statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                            }
-                            d_b_any::Which::Blob(blob) => {
-                                statement_and_params.sql_params.push(rusqlite::types::Value::Blob(blob?.to_vec()));
-                                statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                            }
-                            d_b_any::Which::Pointer(pointer) => {
-                                let response =
-                                    tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(pointer.get_as_capability::<saveable::Client>()?.save_request().send().promise))?;
-                                let restore_key = response.get()?.get_value().get_as::<&[u8]>()?;
-                                statement_and_params.sql_params.push(rusqlite::types::Value::Blob(restore_key.to_vec()));
-                                statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                            }
-                        },
-                        expr::Which::Bindparam(_) => {
-                            statement_and_params.sql_params.push(rusqlite::types::Value::Null);
-                            statement_and_params.bindparam_indexes.push(statement_and_params.sql_params.len() - 1);
-                            statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                        }
-                        expr::Which::Tablereference(table_column) => {
-                            let table_column = table_column?;
-                            let index = table_column.get_reference() as usize;
-                            if index >= statement_and_params.join_tree_tablerefs.len() {
-                                return Err(capnp::Error::failed("Referenced table not in the join tree".to_string()));
-                            }
-                            statement_and_params.statement.push_str(
-                                format!(
-                                    "{}.{}, ",
-                                    statement_and_params.join_tree_tablerefs[table_column.get_reference() as usize].table_name.as_str(),
-                                    table_column.get_col_name()?.to_str()?
-                                )
-                                .as_str(),
-                            );
-                        }
-                        expr::Which::Functioninvocation(func) => {
-                            statement_and_params = build_function_invocation(db, func?, statement_and_params)?;
-                            statement_and_params.statement.push_str(", ");
-                        }
-                    }
+                    match_expr(db, expr, &mut statement_and_params)?;
+                    statement_and_params.statement.push_str(", ");
                 }
                 statement_and_params.statement.truncate(statement_and_params.statement.len() - 2);
                 statement_and_params.statement.push_str(") ");
@@ -1817,60 +842,7 @@ fn build_join_clause<'a>(db: &SqliteDatabase, join_clause: join_clause::Reader<'
         match op.get_joinconstraint()?.which()? {
             join_clause::join_operation::join_constraint::Which::Expr(expr) => {
                 statement_and_params.statement.push_str("ON ");
-                match expr?.which()? {
-                    expr::Which::Literal(dbany) => match dbany?.which()? {
-                        d_b_any::Which::Null(_) => {
-                            statement_and_params.sql_params.push(rusqlite::types::Value::Null);
-                            statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                        }
-                        d_b_any::Which::Integer(int) => {
-                            statement_and_params.sql_params.push(rusqlite::types::Value::Integer(int));
-                            statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                        }
-                        d_b_any::Which::Real(real) => {
-                            statement_and_params.sql_params.push(rusqlite::types::Value::Real(real));
-                            statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                        }
-                        d_b_any::Which::Text(text) => {
-                            statement_and_params.sql_params.push(rusqlite::types::Value::Text(text?.to_string()?));
-                            statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                        }
-                        d_b_any::Which::Blob(blob) => {
-                            statement_and_params.sql_params.push(rusqlite::types::Value::Blob(blob?.to_vec()));
-                            statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                        }
-                        d_b_any::Which::Pointer(pointer) => {
-                            let response = tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(pointer.get_as_capability::<saveable::Client>()?.save_request().send().promise))?;
-                            let restore_key = response.get()?.get_value().get_as::<&[u8]>()?;
-                            statement_and_params.sql_params.push(rusqlite::types::Value::Blob(restore_key.to_vec()));
-                            statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                        }
-                    },
-                    expr::Which::Bindparam(_) => {
-                        statement_and_params.sql_params.push(rusqlite::types::Value::Null);
-                        statement_and_params.bindparam_indexes.push(statement_and_params.sql_params.len() - 1);
-                        statement_and_params.statement.push_str(format!("?{}, ", statement_and_params.sql_params.len()).as_str());
-                    }
-                    expr::Which::Tablereference(table_column) => {
-                        let table_column = table_column?;
-                        let index = table_column.get_reference() as usize;
-                        if index >= statement_and_params.join_tree_tablerefs.len() {
-                            return Err(capnp::Error::failed("Referenced table not in the join tree".to_string()));
-                        }
-                        statement_and_params.statement.push_str(
-                            format!(
-                                "{}.{}, ",
-                                statement_and_params.join_tree_tablerefs[table_column.get_reference() as usize].table_name.as_str(),
-                                table_column.get_col_name()?.to_str()?
-                            )
-                            .as_str(),
-                        );
-                    }
-                    expr::Which::Functioninvocation(func) => {
-                        statement_and_params = build_function_invocation(db, func?, statement_and_params)?;
-                        statement_and_params.statement.push_str(", ");
-                    }
-                }
+                match_expr(db, expr?, &mut statement_and_params)?;
             }
             join_clause::join_operation::join_constraint::Which::Cols(cols) => {
                 statement_and_params.statement.push_str("USING ");
@@ -1904,6 +876,99 @@ fn build_results_stream_buffer<'a>(mut rows: rusqlite::Rows<'a>) -> capnp::Resul
         row_vec.push(value_vec)
     }
     return Ok(row_vec);
+}
+fn match_expr<'a>(db: &SqliteDatabase, expr: expr::Reader<'a>, statement_and_params: &mut StatementAndParams) -> capnp::Result<()> {
+    match expr.which()? {
+        expr::Which::Literal(dbany) => {
+            match_dbany(dbany?, statement_and_params)?;
+        }
+        expr::Which::Bindparam(_) => {
+            statement_and_params.sql_params.push(rusqlite::types::Value::Null);
+            statement_and_params.bindparam_indexes.push(statement_and_params.sql_params.len() - 1);
+            statement_and_params.statement.push_str(format!("?{}", statement_and_params.sql_params.len()).as_str());
+        }
+        expr::Which::Tablereference(table_column) => {
+            let table_column = table_column?;
+            statement_and_params
+                .statement
+                .push_str(format!("tableref{}.{}", table_column.get_reference(), table_column.get_col_name()?.to_str()?).as_str());
+        }
+        expr::Which::Functioninvocation(func) => {
+            build_function_invocation(db, func?, statement_and_params)?;
+        }
+    }
+    Ok(())
+}
+fn match_dbany<'a>(dbany: d_b_any::Reader<'a>, statement_and_params: &mut StatementAndParams) -> capnp::Result<()> {
+    match dbany.which()? {
+        d_b_any::Which::Null(_) => {
+            statement_and_params.sql_params.push(rusqlite::types::Value::Null);
+            statement_and_params.statement.push_str(format!("?{}", statement_and_params.sql_params.len()).as_str());
+        }
+        d_b_any::Which::Integer(int) => {
+            statement_and_params.sql_params.push(rusqlite::types::Value::Integer(int));
+            statement_and_params.statement.push_str(format!("?{}", statement_and_params.sql_params.len()).as_str());
+        }
+        d_b_any::Which::Real(real) => {
+            statement_and_params.sql_params.push(rusqlite::types::Value::Real(real));
+            statement_and_params.statement.push_str(format!("?{}", statement_and_params.sql_params.len()).as_str());
+        }
+        d_b_any::Which::Text(text) => {
+            statement_and_params.sql_params.push(rusqlite::types::Value::Text(text?.to_string()?));
+            statement_and_params.statement.push_str(format!("?{}", statement_and_params.sql_params.len()).as_str());
+        }
+        d_b_any::Which::Blob(blob) => {
+            statement_and_params.sql_params.push(rusqlite::types::Value::Blob(blob?.to_vec()));
+            statement_and_params.statement.push_str(format!("?{}", statement_and_params.sql_params.len()).as_str());
+        }
+        d_b_any::Which::Pointer(pointer) => {
+            let response = tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(pointer.get_as_capability::<saveable::Client>()?.save_request().send().promise))?;
+            let restore_key = response.get()?.get_value().get_as::<&[u8]>()?;
+            statement_and_params.sql_params.push(rusqlite::types::Value::Blob(restore_key.to_vec()));
+            statement_and_params.statement.push_str(format!("?{}", statement_and_params.sql_params.len()).as_str());
+        }
+    }
+    Ok(())
+}
+fn match_where<'a>(db: &SqliteDatabase, expr: expr::Reader<'a>, statement_and_params: &mut StatementAndParams) -> capnp::Result<()> {
+    //TODO validate or add a better way to specify a boolean evaluated expression in schema
+    match expr.which()? {
+        expr::Which::Literal(dbany) => match dbany?.which()? {
+            d_b_any::Which::Text(text) => {
+                statement_and_params.statement.push_str(format!("{}", text?.to_str()?).as_str());
+            }
+            _ => (),
+        },
+        expr::Which::Bindparam(_) => (),
+        expr::Which::Tablereference(_) => (),
+        expr::Which::Functioninvocation(_) => (),
+    }
+    Ok(())
+}
+async fn fill_in_bindparams<'a>(bindparam_indexes: &Vec<usize>, params: &mut Vec<rusqlite::types::Value>, bindings_reader: capnp::struct_list::Reader<'a, d_b_any::Owned>) -> capnp::Result<()> {
+    let mut bindings_iter = bindings_reader.iter();
+    for index in bindparam_indexes {
+        if let Some(param) = bindings_iter.next() {
+            params[*index] = match param.which()? {
+                d_b_any::Which::Null(_) => rusqlite::types::Value::Null,
+                d_b_any::Which::Integer(i) => rusqlite::types::Value::Integer(i),
+                d_b_any::Which::Real(r) => rusqlite::types::Value::Real(r),
+                d_b_any::Which::Text(text) => rusqlite::types::Value::Text(text?.to_string()?),
+                d_b_any::Which::Blob(blob) => rusqlite::types::Value::Blob(blob?.to_vec()),
+                d_b_any::Which::Pointer(pointer) => {
+                    let response = pointer.get_as_capability::<saveable::Client>()?.save_request().send().promise.await?;
+                    let restore_key = response.get()?.get_value().get_as::<&[u8]>()?;
+                    rusqlite::types::Value::Blob(restore_key.to_vec())
+                }
+            }
+        } else {
+            return Err(capnp::Error::failed("Not enough params provided for binding slots specified in prepare statement".to_string()));
+        }
+    }
+    if let Some(_) = bindings_iter.next() {
+        return Err(capnp::Error::failed("Too many params provided for binding slots specified in prepare statement".to_string()));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1951,7 +1016,7 @@ mod tests {
         let ro_tableref_cap = ra_table_ref_cap.readonly_request().send().promise.await?.get()?.get_res()?;
 
         let mut insert_request = client.clone().cast_to::<database::Client>().build_insert_request(insert_params::ParamsStruct {
-            _ins: insert::ParamsStruct {
+            _ins: Some(insert::ParamsStruct {
                 _fallback: insert::ConflictStrategy::Fail,
                 target: ra_table_ref_cap.clone(),
                 _source: source::ParamsStruct {
@@ -1964,12 +1029,12 @@ mod tests {
                 },
                 cols: vec!["name".to_string(), "data".to_string()],
                 returning: Vec::new(),
-            },
+            }),
         });
         insert_request.send().promise.await?;
 
         let mut insert_request = client.clone().cast_to::<database::Client>().build_insert_request(insert_params::ParamsStruct {
-            _ins: insert::ParamsStruct {
+            _ins: Some(insert::ParamsStruct {
                 _fallback: insert::ConflictStrategy::Abort,
                 target: ra_table_ref_cap.clone(),
                 _source: source::ParamsStruct {
@@ -1984,47 +1049,47 @@ mod tests {
                 },
                 cols: vec!["name".to_string(), "data".to_string()],
                 returning: Vec::new(),
-            },
+            }),
         });
         insert_request.send().promise.await?;
 
         let mut update_request = client.clone().cast_to::<database::Client>().build_update_request(database::update_params::ParamsStruct {
-            _upd: update::ParamsStruct {
+            _upd: Some(update::ParamsStruct {
                 _fallback: update::ConflictStrategy::Fail,
                 assignments: vec![
                     update::assignment::ParamsStruct {
                         name: "name".to_string(),
-                        _expr: expr::ParamsStruct {
+                        _expr: Some(expr::ParamsStruct {
                             uni: expr::ParamsEnum::_Literal(Box::new(d_b_any::ParamsStruct {
                                 uni: d_b_any::ParamsEnum::_Text("Updated".to_string()),
                             })),
-                        },
+                        }),
                     },
                     update::assignment::ParamsStruct {
                         name: "data".to_string(),
-                        _expr: expr::ParamsStruct {
+                        _expr: Some(expr::ParamsStruct {
                             uni: expr::ParamsEnum::_Literal(Box::new(d_b_any::ParamsStruct { uni: d_b_any::ParamsEnum::_Null(()) })),
-                        },
+                        }),
                     },
                 ],
-                _from: join_clause::ParamsStruct {
-                    _tableorsubquery: table_or_subquery::ParamsStruct {
+                _from: Some(join_clause::ParamsStruct {
+                    _tableorsubquery: Some(table_or_subquery::ParamsStruct {
                         uni: table_or_subquery::ParamsEnum::_Tableref(ro_tableref_cap.clone()),
-                    },
+                    }),
                     joinoperations: Vec::new(),
-                },
-                _sql_where: expr::ParamsStruct {
+                }),
+                _sql_where: Some(expr::ParamsStruct {
                     uni: expr::ParamsEnum::_Literal(Box::new(d_b_any::ParamsStruct {
                         uni: d_b_any::ParamsEnum::_Text("name = 'ToUpdate'".to_string()),
                     })),
-                },
+                }),
                 returning: Vec::new(),
-            },
+            }),
         });
         update_request.send().promise.await?;
 
         let mut prepare_insert_request = client.clone().cast_to::<database::Client>().build_prepare_insert_request(prepare_insert_params::ParamsStruct {
-            _ins: insert::ParamsStruct {
+            _ins: Some(insert::ParamsStruct {
                 _fallback: insert::ConflictStrategy::Ignore,
                 target: ra_table_ref_cap.clone(),
                 cols: vec!["name".to_string(), "data".to_string()],
@@ -2041,7 +1106,7 @@ mod tests {
                 returning: vec![expr::ParamsStruct {
                     uni: expr::ParamsEnum::_Bindparam(()),
                 }],
-            },
+            }),
         });
         let prepared = prepare_insert_request.send().promise.await?.get()?.get_stmt()?;
         let mut run_request = client.clone().cast_to::<database::Client>().run_prepared_insert_request();
@@ -2050,14 +1115,14 @@ mod tests {
         run_request.send().promise.await?;
 
         let mut select_request = client.clone().cast_to::<r_o_database::Client>().build_select_request(select_params::ParamsStruct {
-            _q: select::ParamsStruct {
+            _q: Some(select::ParamsStruct {
                 _selectcore: Some(Box::new(select_core::ParamsStruct {
-                    _from: join_clause::ParamsStruct {
-                        _tableorsubquery: table_or_subquery::ParamsStruct {
+                    _from: Some(join_clause::ParamsStruct {
+                        _tableorsubquery: Some(table_or_subquery::ParamsStruct {
                             uni: table_or_subquery::ParamsEnum::_Tableref(ro_tableref_cap),
-                        },
+                        }),
                         joinoperations: Vec::new(),
-                    },
+                    }),
                     result: vec![
                         expr::ParamsStruct {
                             uni: expr::ParamsEnum::_Literal(Box::new(d_b_any::ParamsStruct {
@@ -2075,15 +1140,13 @@ mod tests {
                             })),
                         },
                     ],
-                    _sql_where: expr::ParamsStruct {
-                        uni: expr::ParamsEnum::_Literal(Box::new(d_b_any::ParamsStruct { uni: d_b_any::ParamsEnum::_Null(()) })),
-                    },
+                    _sql_where: None,
                 })),
                 mergeoperations: Vec::new(),
                 orderby: Vec::new(),
                 _limit: None,
                 names: Vec::new(),
-            },
+            }),
         });
 
         let mut res_stream = select_request.send().promise.await?.get()?.get_res()?;

@@ -1,4 +1,8 @@
 fn main() {
-    let manifest: std::path::PathBuf = std::env::var_os("CARGO_MANIFEST_DIR").unwrap().into();
-    println!("cargo::metadata=SCHEMA_DIR={}", manifest.display());
+    // Re-export schema environment variables
+    for (key, value) in std::env::vars() {
+        if key.starts_with("DEP_") && key.ends_with("_SCHEMA_DIR") {
+            println!("cargo::rustc-env={key}={value}");
+        }
+    }
 }

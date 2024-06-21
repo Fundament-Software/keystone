@@ -1,7 +1,7 @@
 capnp_import::capnp_import!(
     "indirect_world.capnp",
-    "../hello-world/hello_world.capnp",
-    "../../core/schema/**/*.capnp"
+    "/hello_world.capnp",
+    "/schema/**/*.capnp"
 );
 
 pub mod indirect_world;
@@ -13,7 +13,9 @@ use capnp::any_pointer::Owned as any_pointer;
 use capnp_macros::capnproto_rpc;
 use capnp_rpc::{rpc_twoparty_capnp, twoparty, RpcSystem};
 use std::cell::RefCell;
+#[cfg(feature = "tracing")]
 use std::fs::File;
+#[cfg(feature = "tracing")]
 use tracing::Level;
 
 pub struct ModuleImpl {
@@ -31,7 +33,8 @@ impl module_start::Server<config::Owned, root::Owned> for ModuleImpl {
         Ok(())
     }
     async fn stop(&self) -> Result<(), ::capnp::Error> {
-        if let Some(d) = self.disconnector.borrow_mut().take() {
+        let r = self.disconnector.borrow_mut().take();
+        if let Some(d) = r {
             d.await?;
             Ok(())
         } else {
@@ -45,7 +48,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // let args: Vec<String> = ::std::env::args().collect();
     tracing::info!("server started");
 
+    #[cfg(feature = "tracing")]
     let log_file = File::create("indirect-world.log")?;
+    #[cfg(feature = "tracing")]
     tracing_subscriber::fmt()
         .with_max_level(Level::DEBUG)
         .with_writer(log_file)
@@ -91,6 +96,102 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await;
 
     tracing::info!("RPC gracefully terminated");
+
+    Ok(())
+}
+
+#[cfg(test)]
+use tempfile::NamedTempFile;
+
+#[test]
+fn test_indirect_init() -> eyre::Result<()> {
+    let temp_db = NamedTempFile::new().unwrap().into_temp_path();
+    let temp_log = NamedTempFile::new().unwrap().into_temp_path();
+    let temp_prefix = NamedTempFile::new().unwrap().into_temp_path();
+    let mut source = keystone_util::build_temp_config(&temp_db, &temp_log, &temp_prefix);
+
+    source.push_str(
+        format!(
+            r#"
+
+[[modules]]
+name = "Hello World"
+path = "{}"
+config = {{ greeting = "Indirect" }}
+
+[[modules]]
+name = "Indirect World"
+path = "{}"
+config = {{ helloWorld = {{ "@Hello World" = 0 }} }}
+    
+    "#,
+            keystone_util::get_binary_path("hello-world-module")
+                .as_os_str()
+                .to_str()
+                .unwrap()
+                .replace('\\', "/"),
+            keystone_util::get_binary_path("indirect-world-module")
+                .as_os_str()
+                .to_str()
+                .unwrap()
+                .replace('\\', "/")
+        )
+        .as_str(),
+    );
+
+    let pool = tokio::task::LocalSet::new();
+    let fut = pool.run_until(async {
+        let mut instance = keystone::keystone::Keystone::new_from_string(&source)
+            .await
+            .unwrap();
+
+        {
+            let module = &instance.modules[&instance.namemap["Hello World"]];
+            let pipe = module.api.as_ref().unwrap().pipeline.get_api().as_cap();
+
+            let hello_client: crate::hello_world_capnp::root::Client =
+                capnp::capability::FromClientHook::new(pipe);
+
+            let mut sayhello = hello_client.say_hello_request();
+            sayhello.get().init_request().set_name("Keystone".into());
+            let hello_response = sayhello.send().promise.await.unwrap();
+
+            let msg = hello_response
+                .get()
+                .unwrap()
+                .get_reply()
+                .unwrap()
+                .get_message()
+                .unwrap();
+
+            assert_eq!(msg, "Indirect, Keystone!");
+        }
+
+        {
+            let module = &instance.modules[&instance.namemap["Indirect World"]];
+            let pipe = module.api.as_ref().unwrap().pipeline.get_api().as_cap();
+
+            let indirect_client: crate::indirect_world_capnp::root::Client =
+                capnp::capability::FromClientHook::new(pipe);
+
+            let mut sayhello = indirect_client.say_hello_request();
+            sayhello.get().init_request().set_name("Keystone".into());
+            let hello_response = sayhello.send().promise.await.unwrap();
+
+            let msg = hello_response
+                .get()
+                .unwrap()
+                .get_reply()
+                .unwrap()
+                .get_message()
+                .unwrap();
+
+            assert_eq!(msg, "Indirect, Keystone!");
+        }
+        instance.shutdown().await;
+    });
+
+    tokio::runtime::Runtime::new()?.block_on(fut);
 
     Ok(())
 }

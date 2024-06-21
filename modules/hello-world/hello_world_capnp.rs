@@ -23,10 +23,9 @@ pub mod root {
       &*self.client.hook
     }
   }
-  impl  ::capnp::introspect::Introspect for Client { fn introspect() -> ::capnp::introspect::Type { ::capnp::introspect::TypeVariant::Capability(::capnp::introspect::RawCapabilitySchema { encoded_node: &_private::ENCODED_NODE }).into() } }
   #[derive(Copy, Clone)]
   pub struct Owned(());
-  impl ::capnp::introspect::Introspect for Owned { fn introspect() -> ::capnp::introspect::Type { ::capnp::introspect::TypeVariant::Capability(::capnp::introspect::RawCapabilitySchema { encoded_node: &_private::ENCODED_NODE }).into() } }
+  impl ::capnp::introspect::Introspect for Owned { fn introspect() -> ::capnp::introspect::Type { ::capnp::introspect::TypeVariant::Capability.into() } }
   impl ::capnp::traits::Owned for Owned { type Reader<'a> = Client; type Builder<'a> = Client; }
   impl ::capnp::traits::Pipelined for Owned { type Pipeline = Client; }
   impl <'a,> ::capnp::traits::FromPointerReader<'a> for Client<>  {
@@ -100,50 +99,6 @@ pub mod root {
   }
   pub mod _private {
     pub const TYPE_ID: u64 = 0xbe95_f484_53a4_3d37;
-    pub static ENCODED_NODE: [::capnp::Word; 42] = [
-      ::capnp::word(0, 0, 0, 0, 5, 0, 6, 0),
-      ::capnp::word(55, 61, 164, 83, 132, 244, 149, 190),
-      ::capnp::word(55, 0, 0, 0, 3, 0, 0, 0),
-      ::capnp::word(53, 250, 74, 96, 221, 244, 99, 150),
-      ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
-      ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
-      ::capnp::word(21, 0, 0, 0, 226, 1, 0, 0),
-      ::capnp::word(49, 0, 0, 0, 39, 0, 0, 0),
-      ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
-      ::capnp::word(77, 0, 0, 0, 71, 0, 0, 0),
-      ::capnp::word(121, 0, 0, 0, 7, 0, 0, 0),
-      ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
-      ::capnp::word(70, 58, 47, 99, 111, 100, 101, 47),
-      ::capnp::word(107, 101, 121, 115, 116, 111, 110, 101),
-      ::capnp::word(47, 109, 111, 100, 117, 108, 101, 115),
-      ::capnp::word(47, 104, 101, 108, 108, 111, 45, 119),
-      ::capnp::word(111, 114, 108, 100, 47, 104, 101, 108),
-      ::capnp::word(108, 111, 95, 119, 111, 114, 108, 100),
-      ::capnp::word(46, 99, 97, 112, 110, 112, 58, 82),
-      ::capnp::word(111, 111, 116, 0, 0, 0, 0, 0),
-      ::capnp::word(8, 0, 0, 0, 1, 0, 1, 0),
-      ::capnp::word(214, 51, 78, 125, 218, 90, 29, 231),
-      ::capnp::word(9, 0, 0, 0, 106, 0, 0, 0),
-      ::capnp::word(200, 179, 91, 247, 82, 164, 165, 229),
-      ::capnp::word(9, 0, 0, 0, 90, 0, 0, 0),
-      ::capnp::word(72, 101, 108, 108, 111, 82, 101, 113),
-      ::capnp::word(117, 101, 115, 116, 0, 0, 0, 0),
-      ::capnp::word(72, 101, 108, 108, 111, 82, 101, 112),
-      ::capnp::word(108, 121, 0, 0, 0, 0, 0, 0),
-      ::capnp::word(4, 0, 0, 0, 3, 0, 5, 0),
-      ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
-      ::capnp::word(42, 158, 144, 49, 114, 45, 250, 239),
-      ::capnp::word(150, 183, 211, 199, 255, 79, 222, 177),
-      ::capnp::word(17, 0, 0, 0, 74, 0, 0, 0),
-      ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
-      ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
-      ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
-      ::capnp::word(9, 0, 0, 0, 7, 0, 0, 0),
-      ::capnp::word(115, 97, 121, 72, 101, 108, 108, 111),
-      ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
-      ::capnp::word(0, 0, 0, 0, 0, 0, 1, 0),
-      ::capnp::word(0, 0, 0, 0, 1, 0, 1, 0),
-    ];
   }
 
   pub mod hello_request {

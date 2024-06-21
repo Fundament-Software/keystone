@@ -1,6 +1,6 @@
 @0xeef7e45ab0218bda;
 
-using TOML = import "toml.capnp";
+using TOML = import "std/toml.capnp";
 
 enum LogLevel {
   trace @0;

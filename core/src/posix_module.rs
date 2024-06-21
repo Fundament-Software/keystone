@@ -210,7 +210,6 @@ mod tests {
     use super::{any_pointer, PosixModuleImpl, PosixModuleProgramImpl};
     use crate::byte_stream::ByteStreamBufferImpl;
     use crate::byte_stream::ByteStreamImpl;
-    use crate::keystone::get_binary_path;
     use crate::spawn::posix_process::PosixProgramImpl;
     use cap_std::io_lifetimes::{FromFilelike, IntoFilelike};
     use std::cell::RefCell;
@@ -225,7 +224,7 @@ mod tests {
     #[tokio::test]
     async fn test_raw_pipes() {
         let spawn_process_server = cap_std::fs::File::from_filelike(
-            File::open(get_binary_path("hello-world-module"))
+            File::open(keystone_util::get_binary_path("hello-world-module"))
                 .unwrap()
                 .into_filelike(),
         );
@@ -314,8 +313,9 @@ mod tests {
     #[async_backtrace::framed]
     #[tokio::test]
     async fn test_process_creation() {
-        let spawn_process_server =
-            PosixProgramImpl::new_std(File::open(get_binary_path("hello-world-module")).unwrap());
+        let spawn_process_server = PosixProgramImpl::new_std(
+            File::open(keystone_util::get_binary_path("hello-world-module")).unwrap(),
+        );
         let spawn_process_client: crate::spawn::posix_process::PosixProgramClient =
             capnp_rpc::new_client(spawn_process_server);
 

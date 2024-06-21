@@ -1,0 +1,23 @@
+[package]
+name = "keystone-build"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors = ["Erik McClure <erikm@fundament.software>"]
+description = """
+Helper crate for modules intending to integrate with keystone
+"""
+homepage.workspace = true
+repository = "https://github.com/Fundament-Software/keystone/tree/main/build"
+readme.workspace = true
+license.workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+object = { version = "0.30", default-features = false, features = ["write"] }
+platforms = "3.4.0"
+wasm-gen = "0.1.4"
+capstone-gen.workspace = true
+current_platform = "0.2.0"

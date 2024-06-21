@@ -10,7 +10,6 @@ use capnp::{
     traits::HasTypeId,
 };
 use eyre::{eyre, Result};
-use rusqlite::types::Type;
 use toml::{value::Offset, Table, Value};
 
 fn expr_recurse<'b>(val: &'b Value, exprs: &mut HashMap<*const Value, u32>) {
@@ -26,8 +25,8 @@ fn expr_recurse<'b>(val: &'b Value, exprs: &mut HashMap<*const Value, u32>) {
         Value::Table(t) => {
             for (k, v) in t {
                 if k.starts_with('@') {
-                    if !exprs.contains_key(&(v as *const Value)) {
-                        exprs.insert(v as *const Value, exprs.len() as u32);
+                    if !exprs.contains_key(&(val as *const Value)) {
+                        exprs.insert(val as *const Value, exprs.len() as u32);
                     }
                 }
                 expr_recurse(v, exprs);
@@ -179,8 +178,6 @@ where
     }
 
     if let Some(c) = v.get("config") {
-        let binding = std::env::current_dir()?;
-
         let msg = if let Some(schema) = v.get("schema") {
             if let Some(str) = schema.as_str() {
                 builder.set_schema(str.into());
@@ -201,6 +198,7 @@ where
                 },
             )?
         } else {
+            println!("path: {}", path.display());
             let file_contents = std::fs::read(path)?;
 
             let binary = crate::binary_embed::load_deps_from_binary(&file_contents)?;
@@ -340,7 +338,7 @@ Simple TOML example:
 config = { my_mod_ref = { "@indirect" = 0 } }
 
 Complex TOML example:
-config = { my_mod_ref = { "@indirect".field1.method1 = { "#" = [-2, "asdf", false, { another = "struct" }, { "@indirect2".field1 }]; field2 =   } } }
+config = { my_mod_ref = { "@indirect".field1.method1 = [-2, "asdf", false, { another = "struct" }, { "@indirect2".field1 }, { "#field2.method2" = [ "#field3" ] } ] } } }
  */
 
 fn eval_toml_schema<F>(
@@ -355,6 +353,7 @@ where
     // base(expr.init_subject());
     // If it's a method call, we have to look through the method table of the interface
 
+    todo!();
     Ok(())
 }
 
@@ -509,7 +508,7 @@ where
     }
 }
 
-pub fn to_capnp<'a, 'b>(config: &'b Table, mut msg: keystone_config::Builder<'a>) -> Result<()> {
+pub fn to_capnp(config: &Table, mut msg: keystone_config::Builder<'_>) -> Result<()> {
     let dynamic: dynamic_value::Builder = msg.reborrow().into();
     let mut exprs: HashMap<*const Value, u32> = HashMap::new();
     let mut schemas: HashMap<String, DynamicSchema> = HashMap::new();
@@ -565,7 +564,7 @@ path = "/test/"
 "#;
 
     to_capnp(&source.parse::<toml::Table>()?, msg.reborrow())?;
-    println!("{:#?}", msg.reborrow_as_reader());
+    //println!("{:#?}", msg.reborrow_as_reader());
 
     Ok(())
 }
@@ -584,7 +583,7 @@ name = "Hello World"
 path = "{}"
 config = {{ greeting = "Bonjour" }}
 "#,
-        crate::keystone::get_binary_path("hello-world-module")
+        keystone_util::get_binary_path("hello-world-module")
             .as_os_str()
             .to_str()
             .unwrap()
@@ -592,12 +591,11 @@ config = {{ greeting = "Bonjour" }}
     );
 
     to_capnp(&source.parse::<toml::Table>()?, msg.reborrow())?;
-    println!("{:#?}", msg.reborrow_as_reader());
+    //println!("{:#?}", msg.reborrow_as_reader());
 
     Ok(())
 }
 
-#[ignore]
 #[test]
 fn test_indirect_config() -> Result<()> {
     let mut message = ::capnp::message::Builder::new_default();
@@ -615,14 +613,14 @@ config = {{ greeting = "Bonjour" }}
 [[modules]]
 name = "Indirect World"
 path = "{}"
-config = {{ hello_world = {{ "@Hello World" }} }}
+config = {{ helloWorld = {{ "@Hello World" = 0 }} }}
 "#,
-        crate::keystone::get_binary_path("hello-world-module")
+        keystone_util::get_binary_path("hello-world-module")
             .as_os_str()
             .to_str()
             .unwrap()
             .replace('\\', "/"),
-        crate::keystone::get_binary_path("indirect-world-module")
+        keystone_util::get_binary_path("indirect-world-module")
             .as_os_str()
             .to_str()
             .unwrap()
@@ -630,7 +628,7 @@ config = {{ hello_world = {{ "@Hello World" }} }}
     );
 
     to_capnp(&source.parse::<toml::Table>()?, msg.reborrow())?;
-    println!("{:#?}", msg.reborrow_as_reader());
+    //println!("{:#?}", msg.reborrow_as_reader());
 
     Ok(())
 }

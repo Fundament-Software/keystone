@@ -9,7 +9,6 @@ fn get_data(data: &[u8], range: std::ops::Range<usize>) -> Result<&[u8], Error> 
 
 /// Load an embedded schema file from a binary
 pub fn load_deps_from_binary(data: &[u8]) -> Result<&[u8]> {
-    let format = binfarce::detect_format(data);
     match binfarce::detect_format(data) {
         Format::Elf32 { byte_order } => {
             let section = binfarce::elf32::parse(data, byte_order)?

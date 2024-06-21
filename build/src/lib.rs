@@ -1,12 +1,19 @@
-#![allow(dead_code)]
-pub mod http;
 mod object_file;
 
 use std::path::PathBuf;
 
-capnp_import::capnp_import!("schema/**/*.capnp");
+pub fn create_binary_file(
+    contents: &[u8],
+    symbol_name: &str,
+) -> Option<(Vec<u8>, Option<&'static str>)> {
+    crate::object_file::create_metadata_file(
+        current_platform::CURRENT_PLATFORM,
+        contents,
+        symbol_name,
+    )
+}
 
-pub fn keystone_build_step(cmdpath: &PathBuf, capnp_file: &str) {
+pub fn standard(cmdpath: &PathBuf, capnp_file: &str) {
     println!("cargo::rerun-if-changed={}", capnp_file);
 
     let out_dir: PathBuf = std::env::var_os("OUT_DIR").unwrap().into();

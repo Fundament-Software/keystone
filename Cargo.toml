@@ -2,10 +2,13 @@
 resolver = "2"
 members = [
   "core",
+  "core/schema",
+  "build",
   "modules/sqlite-ks",
   "modules/hello-world",
-  #"modules/indirect-world",
+  "modules/indirect-world",
   "modules/test",
+  "util",
 ]
 default-members = ["core"]
 
@@ -32,6 +35,8 @@ tokio = { version = "1.18", features = [
   "io-std",
   "time",
   "tracing",
+  "signal",
+  "process",
 ] }
 tokio-util = { version = "0.7.4", features = ["compat"] }
 async-backtrace = "0.2.7"
@@ -44,14 +49,7 @@ capstone-macros = { git = "https://github.com/Fundament-Software/capstone-rs" }
 capstone-gen = { git = "https://github.com/Fundament-Software/capstone-rs" }
 uuid = "1.*"
 rusqlite = { version = "0.31", features = ["bundled"] }
-
-[patch."https://github.com/Fundament-Software/capstone-rs"]
-capstone = { path = "../capstone-rs/capnp" }
-capstone-futures = { path = "../capstone-rs/capnp-futures" }
-capstone-import = { path = "../capstone-rs/capnp-import" }
-capstone-rpc = { path = "../capstone-rs/capnp-rpc" }
-capstone-macros = { path = "../capstone-rs/capnp-macros" }
-capstone-gen = { path = "../capstone-rs/capnpc" }
-
-[patch."https://github.com/Fundament-Software/caplog"]
-caplog = { path = "../caplog" }
+keystone-schema = { path = "core/schema" }
+keystone-build = { path = "build" }
+keystone-util = { path = "util" }
+tempfile = "3"

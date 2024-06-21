@@ -1,5 +1,5 @@
 [package]
-name = "hello-world-module"
+name = "hello-world"
 edition.workspace = true
 rust-version.workspace = true
 version = "0.1.0"
@@ -14,6 +14,11 @@ links = "hello_world"
 
 [features]
 tracing = []
+default = []
+
+[lib]
+doctest = false
+path = "lib.rs"
 
 [[bin]]
 name = "hello-world-module"
@@ -29,11 +34,11 @@ tokio.workspace = true
 tokio-util.workspace = true
 tracing-subscriber.workspace = true
 tracing.workspace = true
-keystone = { path = "../../core" }
+keystone-schema.workspace = true
 
 [build-dependencies]
 capstone-gen.workspace = true
 capstone-import.workspace = true
-tempfile = "3"
+tempfile.workspace = true
 eyre.workspace = true
-keystone = { path = "../../core" }
+keystone-build.workspace = true

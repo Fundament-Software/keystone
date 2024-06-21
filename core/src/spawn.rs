@@ -104,6 +104,7 @@ pub mod posix_process {
     impl crate::byte_stream_capnp::byte_stream::Server for Rc<RefCell<Option<ChildStdin>>> {
         #[async_backtrace::framed]
         async fn write(&self, bytes: &[u8]) {
+            // TODO: This holds our borrow_mut across an await point, which may deadlock
             if let Some(stdin) = self.borrow_mut().as_mut() {
                 match stdin.write_all(bytes).await {
                     Ok(_) => stdin
@@ -113,16 +114,16 @@ pub mod posix_process {
                     Err(e) => Err(capnp::Error::failed(e.to_string())),
                 }
             } else {
-                Err(capnp::Error {
-                    kind: capnp::ErrorKind::Failed,
-                    extra: String::from("Write called on byte stream after closed."),
-                })
+                Err(capnp::Error::failed(
+                    "Write called on byte stream after closed.".into(),
+                ))
             }
         }
 
         #[async_backtrace::framed]
         async fn end(&self) {
-            if let Some(mut stdin) = self.borrow_mut().take() {
+            let take = self.borrow_mut().take();
+            if let Some(mut stdin) = take {
                 stdin
                     .shutdown()
                     .await
@@ -134,10 +135,7 @@ pub mod posix_process {
 
         #[async_backtrace::framed]
         async fn get_substream(&self) {
-            Err(capnp::Error {
-                kind: capnp::ErrorKind::Unimplemented,
-                extra: String::from("Not implemented"),
-            })
+            Err(capnp::Error::unimplemented("Not implemented".into()))
         }
     }
 
@@ -244,6 +242,7 @@ pub mod posix_process {
             let results_builder = results.get();
             let mut process_error_builder = results_builder.init_result();
 
+            // TODO: This holds our borrow_mut across an await point, which may deadlock
             match self.borrow_mut().child.try_wait() {
                 Ok(Some(exitstatus)) => {
                     // TODO: use std::os::unix::process::ExitStatusExt on unix to handle None
@@ -281,7 +280,7 @@ pub mod posix_process {
         async fn join(&self, _: JoinParams, mut results: JoinResults) -> Result<(), capnp::Error> {
             let results_builder = results.get();
             let mut process_error_builder = results_builder.init_result();
-
+            // TODO: This holds our borrow_mut across an await point, which may deadlock
             match self.borrow_mut().child.wait().await {
                 Ok(exitstatus) => {
                     // TODO: use std::os::unix::process::ExitStatusExt on unix to handle None

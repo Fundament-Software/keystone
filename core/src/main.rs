@@ -2,17 +2,30 @@
 mod binary_embed;
 mod buffer_allocator;
 mod byte_stream;
+mod cap_replacement;
 mod cap_std_capnproto;
 mod cell;
 mod config;
 mod database;
-mod keystone;
-mod object_file;
+pub mod http;
+pub mod keystone;
 mod posix_module;
 mod posix_spawn;
+mod proxy;
 mod spawn;
 
-capnp_import::capnp_import!("schema/**/*.capnp");
+//capnp_import::capnp_import!("/schema/**/*.capnp");
+capnp_import::capnp_import!("/schema/boot.capnp");
+capnp_import::capnp_import!("/schema/cap_std.capnp");
+capnp_import::capnp_import!("/schema/http.capnp");
+capnp_import::capnp_import!("/schema/keystone.capnp");
+capnp_import::capnp_import!("/schema/module.capnp");
+capnp_import::capnp_import!("/schema/posix*.capnp");
+capnp_import::capnp_import!("/schema/spawn.capnp");
+capnp_import::capnp_import!("/schema/storage.capnp");
+capnp_import::capnp_import!("/schema/wasm.capnp");
+
+capnp_import::capnp_import!("/schema/std/*.capnp");
 
 #[cfg(test)]
 capnp_import::capnp_import!("../modules/hello-world/*.capnp");
@@ -21,7 +34,6 @@ use crate::keystone_capnp::keystone_config;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use eyre::Result;
 use std::{convert::Into, str::FromStr};
-use windows_sys::Win32::Security::Authentication::Identity::SCH_CRED_MAX_STORE_NAME_SIZE;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -176,6 +188,7 @@ async fn shutdown_signal() {
         .expect("failed to listen to shutdown signal");
 }
 
+#[allow(unused)]
 #[async_backtrace::framed]
 #[tokio::main]
 async fn main() -> Result<()> {

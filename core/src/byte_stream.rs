@@ -1,8 +1,5 @@
 use bytes::BytesMut;
-use capnp::{
-    capability::{RemotePromise, Response},
-    ErrorKind,
-};
+use capnp::capability::{RemotePromise, Response};
 use capnp_macros::capnproto_rpc;
 use futures_util::FutureExt;
 use std::future::Future;
@@ -58,10 +55,9 @@ where
         if let Some(f) = &mut *self.consumer.borrow_mut() {
             f(bytes).await
         } else {
-            Err(capnp::Error {
-                kind: ErrorKind::Failed,
-                extra: String::from("Write called on byte stream after closed."),
-            })
+            Err(capnp::Error::failed(
+                "Write called on byte stream after closed.".into(),
+            ))
         }
     }
 
@@ -73,10 +69,7 @@ where
 
     #[async_backtrace::framed]
     async fn get_substream(&self) {
-        Err(capnp::Error {
-            kind: ErrorKind::Unimplemented,
-            extra: String::from("Not implemented"),
-        })
+        Err(capnp::Error::unimplemented("Not implemented".into()))
     }
 }
 
@@ -138,10 +131,9 @@ impl Server for ByteStreamBufferImpl {
             }
             Ok(())
         } else {
-            Err(capnp::Error {
-                kind: ErrorKind::Failed,
-                extra: String::from("Write called on byte stream after closed."),
-            })
+            Err(capnp::Error::failed(
+                "Write called on byte stream after closed.".into(),
+            ))
         }
     }
 
@@ -153,10 +145,7 @@ impl Server for ByteStreamBufferImpl {
 
     #[async_backtrace::framed]
     async fn get_substream(&self) {
-        Err(capnp::Error {
-            kind: ErrorKind::Unimplemented,
-            extra: String::from("Not implemented"),
-        })
+        Err(capnp::Error::unimplemented("Not implemented".into()))
     }
 }
 

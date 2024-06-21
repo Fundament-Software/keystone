@@ -29,7 +29,8 @@ impl module_start::Server<config::Owned, root::Owned> for ModuleImpl {
         Ok(())
     }
     async fn stop(&self) -> Result<(), ::capnp::Error> {
-        if let Some(d) = self.disconnector.borrow_mut().take() {
+        let r = self.disconnector.borrow_mut().take();
+        if let Some(d) = r {
             d.await?;
             Ok(())
         } else {
@@ -44,7 +45,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("server started");
 
     #[cfg(feature = "tracing")]
-    let log_file = File::create("my_cool_trace.log")?;
+    let log_file = File::create("hello_world.log")?;
     #[cfg(feature = "tracing")]
     tracing_subscriber::fmt()
         .with_max_level(Level::DEBUG)

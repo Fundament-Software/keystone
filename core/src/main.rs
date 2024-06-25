@@ -14,18 +14,7 @@ mod posix_spawn;
 mod proxy;
 mod spawn;
 
-//capnp_import::capnp_import!("/schema/**/*.capnp");
-capnp_import::capnp_import!("/schema/boot.capnp");
-capnp_import::capnp_import!("/schema/cap_std.capnp");
-capnp_import::capnp_import!("/schema/http.capnp");
-capnp_import::capnp_import!("/schema/keystone.capnp");
-capnp_import::capnp_import!("/schema/module.capnp");
-capnp_import::capnp_import!("/schema/posix*.capnp");
-capnp_import::capnp_import!("/schema/spawn.capnp");
-capnp_import::capnp_import!("/schema/storage.capnp");
-capnp_import::capnp_import!("/schema/wasm.capnp");
-
-capnp_import::capnp_import!("/schema/std/*.capnp");
+capnp_import::capnp_import!("/schema/**/*.capnp");
 
 #[cfg(test)]
 capnp_import::capnp_import!("../modules/hello-world/*.capnp");

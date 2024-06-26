@@ -25,12 +25,12 @@ unsafe impl capnp::message::Allocator for BufferAllocator {
             unsafe { (std::alloc::alloc_zeroed(layout), minimum_size) }
         } else {
             self.used = true;
-            (self.buf.as_mut_ptr() as *mut u8, self.buf.len() as u32)
+            (self.buf.as_mut_ptr(), self.buf.len() as u32)
         }
     }
 
     unsafe fn deallocate_segment(&mut self, ptr: *mut u8, word_size: u32, words_used: u32) {
-        if self.buf.as_ptr() as *const u8 == ptr {
+        if self.buf.as_ptr() == ptr {
             self.buf[..words_used as usize].fill(0);
             self.used = false;
         } else {

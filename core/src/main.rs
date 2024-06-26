@@ -62,14 +62,14 @@ enum LogLevel {
     Error,
 }
 
-impl Into<tracing_subscriber::filter::LevelFilter> for LogLevel {
-    fn into(self) -> tracing_subscriber::filter::LevelFilter {
-        match self {
-            Self::Trace => tracing_subscriber::filter::LevelFilter::TRACE,
-            Self::Debug => tracing_subscriber::filter::LevelFilter::DEBUG,
-            Self::Info => tracing_subscriber::filter::LevelFilter::INFO,
-            Self::Warn => tracing_subscriber::filter::LevelFilter::WARN,
-            Self::Error => tracing_subscriber::filter::LevelFilter::ERROR,
+impl From<LogLevel> for tracing_subscriber::filter::LevelFilter {
+    fn from(val: LogLevel) -> Self {
+        match val {
+            LogLevel::Trace => tracing_subscriber::filter::LevelFilter::TRACE,
+            LogLevel::Debug => tracing_subscriber::filter::LevelFilter::DEBUG,
+            LogLevel::Info => tracing_subscriber::filter::LevelFilter::INFO,
+            LogLevel::Warn => tracing_subscriber::filter::LevelFilter::WARN,
+            LogLevel::Error => tracing_subscriber::filter::LevelFilter::ERROR,
         }
     }
 }

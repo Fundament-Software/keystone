@@ -475,7 +475,6 @@ dependencies = [
 [[package]]
 name = "caplog"
 version = "0.1.0"
-source = "git+https://github.com/Fundament-Software/caplog#4f84f13594753d6ff820c428a575fdd5208b38e0"
 dependencies = [
  "bitfield-struct",
  "capstone",
@@ -496,7 +495,6 @@ dependencies = [
 [[package]]
 name = "capstone"
 version = "0.18.0"
-source = "git+https://github.com/Fundament-Software/capstone-rs#aea89c9b93d995ba54d014c0619173309ac80e42"
 dependencies = [
  "embedded-io",
  "smallvec",
@@ -505,7 +503,6 @@ dependencies = [
 [[package]]
 name = "capstone-futures"
 version = "0.18.0"
-source = "git+https://github.com/Fundament-Software/capstone-rs#aea89c9b93d995ba54d014c0619173309ac80e42"
 dependencies = [
  "capstone",
  "futures-util",
@@ -516,7 +513,6 @@ dependencies = [
 [[package]]
 name = "capstone-gen"
 version = "0.18.0"
-source = "git+https://github.com/Fundament-Software/capstone-rs#aea89c9b93d995ba54d014c0619173309ac80e42"
 dependencies = [
  "capstone",
 ]
@@ -524,7 +520,6 @@ dependencies = [
 [[package]]
 name = "capstone-import"
 version = "0.18.0"
-source = "git+https://github.com/Fundament-Software/capstone-rs#aea89c9b93d995ba54d014c0619173309ac80e42"
 dependencies = [
  "capstone",
  "capstone-gen",
@@ -546,7 +541,6 @@ dependencies = [
 [[package]]
 name = "capstone-macros"
 version = "0.18.0"
-source = "git+https://github.com/Fundament-Software/capstone-rs#aea89c9b93d995ba54d014c0619173309ac80e42"
 dependencies = [
  "capstone",
  "capstone-rpc",
@@ -559,7 +553,6 @@ dependencies = [
 [[package]]
 name = "capstone-rpc"
 version = "0.18.0"
-source = "git+https://github.com/Fundament-Software/capstone-rs#aea89c9b93d995ba54d014c0619173309ac80e42"
 dependencies = [
  "capstone",
  "capstone-futures",
@@ -570,9 +563,9 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.0.100"
+version = "1.0.101"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c891175c3fb232128f48de6590095e59198bbeb8620c310be349bfc3afd12c7b"
+checksum = "ac367972e516d45567c7eafc73d24e1c193dcf200a8d94e9db7b3d38b349572d"
 dependencies = [
  "jobserver",
  "libc",
@@ -901,9 +894,9 @@ checksum = "fea41bba32d969b513997752735605054bc0dfa92b4c56bf1189f2e174be7a10"
 
 [[package]]
 name = "either"
-version = "1.12.0"
+version = "1.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3dca9240753cf90908d7e4aac30f630662b02aebaa1b58a3cadabdb23385b58b"
+checksum = "60b1af1c220855b6ceac025d3f6ecdd2b7c4894bfe9cd9bda4fbb4bc7c0d4cf0"
 
 [[package]]
 name = "embedded-io"

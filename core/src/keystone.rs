@@ -26,6 +26,12 @@ type SpawnProgram = crate::spawn_capnp::program::Client<
 >;
 type SpawnProcess =
     crate::spawn_capnp::process::Client<any_pointer, module_error::Owned<any_pointer>>;
+type SpawnResults = crate::spawn_capnp::program::spawn_results::Owned<
+    posix_module_args::Owned<any_pointer>,
+    any_pointer,
+    module_error::Owned<any_pointer>,
+>;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(thiserror::Error, Debug)]
@@ -155,8 +161,8 @@ impl Keystone {
             db,
             log: CapLog::<MAX_BUFFER_SIZE>::new(
                 caplog_config.get_max_file_size(),
-                &Path::new(caplog_config.get_trie_file()?.to_str()?),
-                &Path::new(caplog_config.get_data_prefix()?.to_str()?),
+                Path::new(caplog_config.get_trie_file()?.to_str()?),
+                Path::new(caplog_config.get_data_prefix()?.to_str()?),
                 caplog_config.get_max_open_files() as usize,
                 check_consistency,
             )?,
@@ -189,13 +195,13 @@ impl Keystone {
         let spawn_process_client: crate::spawn::posix_process::PosixProgramClient =
             capnp_rpc::new_client(spawn_process_server);
 
-        Ok(Self::wrap_posix(spawn_process_client).await?)
+        Self::wrap_posix(spawn_process_client).await
     }
 
     #[inline]
-    fn extract_config_pair<'a>(
-        config: keystone_config::module_config::Reader<'a, any_pointer>,
-    ) -> Result<(capnp::any_pointer::Reader<'a>, &'a Path), capnp::Error> {
+    fn extract_config_pair(
+        config: keystone_config::module_config::Reader<'_, any_pointer>,
+    ) -> Result<(capnp::any_pointer::Reader, &Path), capnp::Error> {
         Ok((
             config.get_config()?,
             Path::new(config.get_path()?.to_str()?),
@@ -203,18 +209,9 @@ impl Keystone {
     }
 
     fn process_spawn_request(
-        x: Result<
-            capnp::capability::Response<
-                crate::spawn_capnp::program::spawn_results::Owned<
-                    posix_module_args::Owned<any_pointer>,
-                    any_pointer,
-                    module_error::Owned<any_pointer>,
-                >,
-            >,
-            capnp::Error,
-        >,
+        x: Result<capnp::capability::Response<SpawnResults>, capnp::Error>,
     ) -> Result<SpawnProcess, capnp::Error> {
-        Ok(x?.get()?.get_result()?)
+        x?.get()?.get_result()
     }
 
     fn recurse_cap_expr(
@@ -325,7 +322,7 @@ impl Keystone {
             });
 
             let mut pair = builder.init_args();
-            let mut anybuild: capnp::any_pointer::Builder = pair.reborrow().init_config().into();
+            let mut anybuild: capnp::any_pointer::Builder = pair.reborrow().init_config();
             if let Err(e) = anybuild.set_as(replacement) {
                 return Self::failed_start(&mut self.modules, id, e);
             }
@@ -431,7 +428,7 @@ impl Keystone {
         };
 
         // Call the stop method with some timeout
-        if let Err(_) = tokio::time::timeout(timeout, stop_request.promise).await {
+        if (tokio::time::timeout(timeout, stop_request.promise).await).is_err() {
             // Force kill the module.
             Self::kill_module(module).await;
             Ok(())

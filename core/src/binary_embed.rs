@@ -87,5 +87,5 @@ fn get_data_wasm(mut input: &[u8]) -> Result<&[u8], Error> {
         }
     }
 
-    Err(Error::NotValidSchema.into())
+    Err(Error::NotValidSchema)
 }

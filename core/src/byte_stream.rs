@@ -52,13 +52,17 @@ where
 {
     #[async_backtrace::framed]
     async fn write(&self, bytes: &[u8]) {
-        if let Some(f) = &mut *self.consumer.borrow_mut() {
-            f(bytes).await
-        } else {
-            Err(capnp::Error::failed(
-                "Write called on byte stream after closed.".into(),
-            ))
-        }
+        let fut = {
+            let mut cell = self.consumer.borrow_mut();
+            if let Some(f) = &mut *cell {
+                f(bytes)
+            } else {
+                return Err(capnp::Error::failed(
+                    "Write called on byte stream after closed.".into(),
+                ));
+            }
+        };
+        fut.await
     }
 
     #[async_backtrace::framed]

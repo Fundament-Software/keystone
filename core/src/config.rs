@@ -12,7 +12,7 @@ use capnp::{
 use eyre::{eyre, Result};
 use toml::{value::Offset, Table, Value};
 
-fn expr_recurse<'b>(val: &'b Value, exprs: &mut HashMap<*const Value, u32>) {
+fn expr_recurse(val: &Value, exprs: &mut HashMap<*const Value, u32>) {
     // We recurse through all the tables and arrays, looking for any module references
     // "@module", then add a reference to that value to our exprs vec
 
@@ -24,10 +24,8 @@ fn expr_recurse<'b>(val: &'b Value, exprs: &mut HashMap<*const Value, u32>) {
         }
         Value::Table(t) => {
             for (k, v) in t {
-                if k.starts_with('@') {
-                    if !exprs.contains_key(&(val as *const Value)) {
-                        exprs.insert(val as *const Value, exprs.len() as u32);
-                    }
+                if k.starts_with('@') && !exprs.contains_key(&(val as *const Value)) {
+                    exprs.insert(val as *const Value, exprs.len() as u32);
                 }
                 expr_recurse(v, exprs);
             }
@@ -36,8 +34,8 @@ fn expr_recurse<'b>(val: &'b Value, exprs: &mut HashMap<*const Value, u32>) {
     }
 }
 
-fn value_to_list<'b, F>(
-    l: &'b Vec<Value>,
+fn value_to_list<F>(
+    l: &[Value],
     mut builder: ::capnp::dynamic_list::Builder,
     schema: capnp::schema_capnp::type_::Reader,
     schemas: &mut HashMap<String, DynamicSchema>,
@@ -111,9 +109,9 @@ where
 fn toml_to_capnp(v: &Value, mut builder: toml_capnp::value::Builder) -> Result<()> {
     match v {
         Value::String(s) => builder.set_string(s.as_str().into()),
-        Value::Integer(i) => builder.set_int((*i).into()),
-        Value::Float(f) => builder.set_float((*f).into()),
-        Value::Boolean(b) => builder.set_boolean((*b).into()),
+        Value::Integer(i) => builder.set_int(*i),
+        Value::Float(f) => builder.set_float(*f),
+        Value::Boolean(b) => builder.set_boolean(*b),
         Value::Datetime(d) => {
             let mut dt = builder.init_datetime();
             if let Some(x) = d.date {
@@ -152,8 +150,8 @@ fn toml_to_capnp(v: &Value, mut builder: toml_capnp::value::Builder) -> Result<(
     Ok(())
 }
 
-fn toml_to_config<'b, F>(
-    v: &'b Table,
+fn toml_to_config<F>(
+    v: &Table,
     mut builder: keystone_config::module_config::Builder<capnp::any_pointer::Owned>,
     schemas: &mut HashMap<String, DynamicSchema>,
     callback: &mut F,
@@ -185,7 +183,7 @@ where
 
             let schemafile = path
                 .parent()
-                .unwrap_or(&Path::new(""))
+                .unwrap_or(Path::new(""))
                 .join(schema.as_str().ok_or(eyre!("Schema isn't a string?!"))?);
 
             let f = File::open(schemafile)?;
@@ -236,8 +234,8 @@ where
     }
 }
 
-fn value_to_struct<'b, F>(
-    t: &'b Table,
+fn value_to_struct<F>(
+    t: &Table,
     mut builder: dynamic_struct::Builder,
     schemas: &mut HashMap<String, DynamicSchema>,
     callback: &mut F,
@@ -348,7 +346,7 @@ fn eval_toml_schema<F>(
     base: F,
 ) -> Result<()>
 where
-    F: FnOnce(cap_expr::Builder) -> (),
+    F: FnOnce(cap_expr::Builder),
 {
     // base(expr.init_subject());
     // If it's a method call, we have to look through the method table of the interface

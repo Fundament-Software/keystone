@@ -50,41 +50,40 @@ impl Server for ProxyServer {
         let p = params.hook.get()?;
         let reader: GetPointerReader = p.get_as()?;
         let caps = reader.reader.get_cap_table();
-        let mut set = self.set.borrow_mut();
 
-        let mut table = match caps {
-            capnp::private::layout::CapTableReader::Plain(phooks) => {
-                let hooks: &Vec<Option<Box<dyn ClientHook>>> = unsafe { &**phooks };
-                CapTable::with_capacity(hooks.len())
-            }
-        };
+        let mut table = CapTable::with_capacity(caps.len());
 
-        for index in 0..table.capacity() {
+        for index in 0..caps.len() {
             table.push(if let Some(cap) = caps.extract_cap(index) {
                 let client = Client::new(cap.add_ref());
-                Some(if let Some(server) = set.get_local_server(&client).await {
-                    if cap.get_brand() == self.target.hook.get_brand() {
-                        // This is a proxy for a cap that belongs to this connection, so unwrap it
-                        server.as_ref().target.hook.add_ref()
-                    } else if cap.get_brand() == 0 {
-                        // TODO
-                        // Proxy for an internal keystone module from another RPC connection, so we
-                        // simply create a new cap from our internal server for it.
-                        cap
-                    } else {
-                        //  Proxy that should stay a proxy.
-                        cap
-                    }
-                } else {
-                    if cap.get_brand() == self.target.hook.get_brand() {
+                let client = capnp::capability::get_resolved_cap(client).await;
+                Some(
+                    if let Some(server) =
+                        self.set.borrow_mut().get_local_server_of_resolved(&client)
+                    {
+                        if cap.get_brand() == self.target.hook.get_brand() {
+                            // This is a proxy for a cap that belongs to this connection, so unwrap it
+                            server.as_ref().target.hook.add_ref()
+                        } else if cap.get_brand() == 0 {
+                            // TODO
+                            // Proxy for an internal keystone module from another RPC connection, so we
+                            // simply create a new cap from our internal server for it.
+                            cap
+                        } else {
+                            //  Proxy that should stay a proxy.
+                            cap
+                        }
+                    } else if cap.get_brand() == self.target.hook.get_brand() {
                         // Not a proxy, belongs to either side of the RPC connection, so doesn't need a proxy
                         cap
                     } else {
                         // Not a proxy, belongs to some other RPC connection, needs a proxy
-                        // TODO: wait how does this know what connection it belongs to???
-                        set.new_client(ProxyServer::new(cap, self.set.clone())).hook
-                    }
-                })
+                        self.set
+                            .borrow_mut()
+                            .new_client(ProxyServer::new(cap, self.set.clone()))
+                            .hook
+                    },
+                )
             } else {
                 None
             });

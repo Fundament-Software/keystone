@@ -20,7 +20,7 @@ const ROOT_STATES: usize = 0;
 const ROOT_STURDYREFS: usize = 1;
 const ROOT_OBJECTS: usize = 2;
 const ROOT_STRINGMAP: usize = 3;
-const ROOT_TABLES: &'static [&'static str] = &["states", "sturdyrefs", "objects", "stringmap"];
+const ROOT_TABLES: &[&str] = &["states", "sturdyrefs", "objects", "stringmap"];
 
 impl RootDatabase {
     fn expect_change(call: Result<usize, rusqlite::Error>, count: usize) -> Result<()> {
@@ -200,7 +200,7 @@ impl DatabaseInterface for RootDatabase {
                         id    INTEGER PRIMARY KEY,
                         data  BLOB NOT NULL
                     )",
-                    ROOT_TABLES[t as usize]
+                    ROOT_TABLES[t]
                 )
                 .as_str(),
                 (),

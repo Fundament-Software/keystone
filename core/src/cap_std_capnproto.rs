@@ -70,6 +70,12 @@ impl AmbientAuthorityImpl {
     }
 }
 
+impl Default for AmbientAuthorityImpl {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[capnproto_rpc(ambient_authority)]
 impl ambient_authority::Server for Rc<RefCell<AmbientAuthorityImpl>> {
     async fn file_open_ambient(&self, path: Reader) {
@@ -1134,7 +1140,7 @@ impl instant::Server for InstantImpl {
                 "Earlier instant not from the same machine".into(),
             ));
         };
-        let earlier = instant_impl.as_ref().borrow().instant.clone();
+        let earlier = instant_impl.as_ref().borrow().instant;
         let dur = self.instant.duration_since(earlier);
         let mut response = results.get().init_duration();
         response.set_secs(dur.as_secs());
@@ -1153,7 +1159,7 @@ impl instant::Server for InstantImpl {
                 "Earlier instant not from the same machine".into(),
             ));
         };
-        let earlier = instant_impl.as_ref().borrow().instant.clone();
+        let earlier = instant_impl.as_ref().borrow().instant;
         let Some(dur) = self.instant.checked_duration_since(earlier) else {
             return Err(Error::failed(
                 "Earlier instant not from the same machine".into(),
@@ -1176,7 +1182,7 @@ impl instant::Server for InstantImpl {
                 "Earlier instant not from the same machine".into(),
             ));
         };
-        let earlier = instant_impl.as_ref().borrow().instant.clone();
+        let earlier = instant_impl.as_ref().borrow().instant;
         let dur = self.instant.saturating_duration_since(earlier);
         let mut response = results.get().init_duration();
         response.set_secs(dur.as_secs());
@@ -1236,7 +1242,7 @@ impl monotonic_clock::Server for MonotonicClockImpl {
                 "Earlier instant not from the same machine".into(),
             ));
         };
-        let instant = instant_impl.as_ref().borrow().instant.clone();
+        let instant = instant_impl.as_ref().borrow().instant;
         let dur = self.monotonic_clock.elapsed(instant);
         let mut response = results.get().init_duration();
         response.set_secs(dur.as_secs());

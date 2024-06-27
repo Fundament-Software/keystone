@@ -1,14 +1,20 @@
 #![allow(dead_code)]
+mod binary_embed;
+mod buffer_allocator;
 mod byte_stream;
+mod cap_replacement;
 mod cap_std_capnproto;
+mod cell;
 mod config;
 mod database;
-mod keystone;
+pub mod http;
+pub mod keystone;
 mod posix_module;
 mod posix_spawn;
+mod proxy;
 mod spawn;
 
-capnp_import::capnp_import!("schema/**/*.capnp");
+capnp_import::capnp_import!("/schema/**/*.capnp");
 
 #[cfg(test)]
 capnp_import::capnp_import!("../modules/hello-world/*.capnp");
@@ -16,7 +22,7 @@ capnp_import::capnp_import!("../modules/hello-world/*.capnp");
 use crate::keystone_capnp::keystone_config;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use eyre::Result;
-use std::convert::Into;
+use std::{convert::Into, str::FromStr};
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -56,14 +62,14 @@ enum LogLevel {
     Error,
 }
 
-impl Into<tracing_subscriber::filter::LevelFilter> for LogLevel {
-    fn into(self) -> tracing_subscriber::filter::LevelFilter {
-        match self {
-            Self::Trace => tracing_subscriber::filter::LevelFilter::TRACE,
-            Self::Debug => tracing_subscriber::filter::LevelFilter::DEBUG,
-            Self::Info => tracing_subscriber::filter::LevelFilter::INFO,
-            Self::Warn => tracing_subscriber::filter::LevelFilter::WARN,
-            Self::Error => tracing_subscriber::filter::LevelFilter::ERROR,
+impl From<LogLevel> for tracing_subscriber::filter::LevelFilter {
+    fn from(val: LogLevel) -> Self {
+        match val {
+            LogLevel::Trace => tracing_subscriber::filter::LevelFilter::TRACE,
+            LogLevel::Debug => tracing_subscriber::filter::LevelFilter::DEBUG,
+            LogLevel::Info => tracing_subscriber::filter::LevelFilter::INFO,
+            LogLevel::Warn => tracing_subscriber::filter::LevelFilter::WARN,
+            LogLevel::Error => tracing_subscriber::filter::LevelFilter::ERROR,
         }
     }
 }
@@ -76,6 +82,11 @@ enum Commands {
         config: String,
         #[arg(short = 'o')]
         out: Option<String>,
+    },
+    /// Given either a copmiled schema file or a binary with an embedded schema file, displays the textual output of that file.
+    Inspect {
+        #[arg(short = 's')]
+        schema: String,
     },
     /// Given a keystone database, dumps the config to a TOML file. If no database is provided, tries to find a running keystone server.
     Dump {
@@ -158,10 +169,6 @@ enum CapNPCommands {
     Eval { schema_file: String, name: String },
 }
 
-//async fn hello_world(_req: Request<Body>) -> Result<Response<Body>, Infallible> {
-//    Ok(Response::new("Hello, World".into()))
-//}
-
 #[async_backtrace::framed]
 async fn shutdown_signal() {
     // Wait for the CTRL+C signal
@@ -170,6 +177,7 @@ async fn shutdown_signal() {
         .expect("failed to listen to shutdown signal");
 }
 
+#[allow(unused)]
 #[async_backtrace::framed]
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -193,10 +201,7 @@ async fn main() -> Result<()> {
             let mut msg = message.init_root::<keystone_config::Builder>();
             let source = std::fs::read_to_string(config)?;
 
-            config::to_capnp::<keystone_config::Owned>(
-                &source.parse::<toml::Table>()?,
-                msg.reborrow(),
-            )?;
+            config::to_capnp(&source.parse::<toml::Table>()?, msg.reborrow())?;
             println!("{:#?}", msg.reborrow_as_reader());
         }
         Commands::Dump { database, out } => {
@@ -209,6 +214,13 @@ async fn main() -> Result<()> {
         Commands::Module(ModuleCommandArgs { _args }) => {
             //
             println!("TODO!!!: {:?}", _args);
+        }
+        Commands::Inspect { schema } => {
+            let file_contents =
+                std::fs::read(std::path::PathBuf::from_str(schema.as_str())?.as_path())?;
+
+            let binary = crate::binary_embed::load_deps_from_binary(&file_contents)?;
+            println!("success???");
         }
         _ => todo!(),
     }

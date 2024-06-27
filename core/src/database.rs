@@ -1,3 +1,4 @@
+use crate::buffer_allocator::BufferAllocator;
 use capnp::message::{ReaderOptions, TypedReader};
 use eyre::{eyre, Result};
 use rusqlite::{params, Connection, OpenFlags};
@@ -10,6 +11,7 @@ pub trait DatabaseInterface {
 
 pub struct RootDatabase {
     conn: Connection,
+    alloc: BufferAllocator,
     buf: Vec<u8>,
 }
 
@@ -18,7 +20,7 @@ const ROOT_STATES: usize = 0;
 const ROOT_STURDYREFS: usize = 1;
 const ROOT_OBJECTS: usize = 2;
 const ROOT_STRINGMAP: usize = 3;
-const ROOT_TABLES: &'static [&'static str] = &["states", "sturdyrefs", "objects", "stringmap"];
+const ROOT_TABLES: &[&str] = &["states", "sturdyrefs", "objects", "stringmap"];
 
 impl RootDatabase {
     fn expect_change(call: Result<usize, rusqlite::Error>, count: usize) -> Result<()> {
@@ -31,56 +33,82 @@ impl RootDatabase {
     fn get_generic<const TABLE: usize>(
         &mut self,
         id: i64,
-        builder: &mut capnp::any_pointer::Builder<'_>,
+        mut builder: capnp::any_pointer::Builder<'_>,
     ) -> Result<()> {
         let mut stmt = self.conn.prepare_cached(
             format!("SELECT data FROM {} WHERE id = ?1", ROOT_TABLES[TABLE]).as_str(),
         )?;
-        self.buf = stmt.query_row(
+        stmt.query_row(
             params![id],
-            |row: &rusqlite::Row| -> Result<Vec<u8>, rusqlite::Error> { row.get(0) },
+            |row: &rusqlite::Row| -> Result<(), rusqlite::Error> {
+                let v = row.get_ref(0)?;
+                let mut slice = v.as_blob()?;
+                let message_reader = TypedReader::<_, capnp::any_pointer::Owned>::new(
+                    capnp::serialize::read_message_from_flat_slice_no_alloc(
+                        &mut slice,
+                        ReaderOptions {
+                            traversal_limit_in_words: None,
+                            nesting_limit: 128,
+                        },
+                    )
+                    .map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?,
+                );
+                builder
+                    .set_as(
+                        message_reader
+                            .get()
+                            .map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?,
+                    )
+                    .map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))
+            },
         )?;
-        let mut slice = self.buf.as_slice();
-
-        let message_reader = TypedReader::<_, capnp::any_pointer::Owned>::new(
-            capnp::serialize::read_message_from_flat_slice_no_alloc(
-                &mut slice,
-                ReaderOptions {
-                    traversal_limit_in_words: None,
-                    nesting_limit: 128,
-                },
-            )?,
-        );
-        builder.set_as(message_reader.get()?)?;
         Ok(())
     }
 
-    fn set_generic<const TABLE: usize, R: capnp::message::ReaderSegments>(
+    fn set_generic<const TABLE: usize, R: capnp::traits::SetPointerBuilder>(
         &mut self,
         string_index: i64,
-        data: &R,
+        data: R,
     ) -> Result<()> {
-        capnp::serialize::write_message_segments(&mut self.buf, data)?;
+        let mut message = capnp::message::Builder::new(&mut self.alloc);
+        message.set_root(data)?;
+        let slice =
+            if let capnp::OutputSegments::SingleSegment(s) = message.get_segments_for_output() {
+                s[0]
+            } else {
+                self.buf.clear();
+                capnp::serialize::write_message(&mut self.buf, &message)?;
+                self.buf.as_slice()
+            };
+
         let result = self.conn.prepare_cached(
             format!("INSERT INTO {} (id, data) VALUES (?1, ?2) ON CONFLICT(id) DO UPDATE SET data=?2", ROOT_TABLES[TABLE]).as_str())?.execute(
-            params![string_index, self.buf.as_slice()]
+            params![string_index, slice]
         );
-        self.buf.clear();
         Self::expect_change(result, 1)
     }
 
-    fn add_generic<const TABLE: usize, R: capnp::message::ReaderSegments>(
+    fn add_generic<const TABLE: usize, R: capnp::traits::SetPointerBuilder>(
         &mut self,
-        data: &R,
+        data: R,
     ) -> Result<i64> {
-        capnp::serialize::write_message_segments(&mut self.buf, data)?;
+        let mut message = capnp::message::Builder::new(&mut self.alloc);
+        message.set_root(data)?;
+        let slice =
+            if let capnp::OutputSegments::SingleSegment(s) = message.get_segments_for_output() {
+                s[0]
+            } else {
+                self.buf.clear();
+                capnp::serialize::write_message(&mut self.buf, &message)?;
+                self.buf.as_slice()
+            };
+
         let result = self
             .conn
             .prepare_cached(
                 format!("INSERT INTO {} (data) VALUES (?1)", ROOT_TABLES[TABLE]).as_str(),
             )?
-            .execute(params![self.buf.as_slice()]);
-        self.buf.clear();
+            .execute(params![slice]);
         Self::expect_change(result, 1)?;
         Ok(self.conn.last_insert_rowid())
     }
@@ -99,15 +127,15 @@ impl RootDatabase {
     pub fn get_state(
         &mut self,
         string_index: i64,
-        builder: &mut capnp::any_pointer::Builder<'_>,
+        builder: capnp::any_pointer::Builder<'_>,
     ) -> Result<()> {
         self.get_generic::<ROOT_STATES>(string_index, builder)
     }
 
-    pub fn set_state<R: capnp::message::ReaderSegments>(
+    pub fn set_state<R: capnp::traits::SetPointerBuilder>(
         &mut self,
         string_index: i64,
-        data: &R,
+        data: R,
     ) -> Result<()> {
         self.set_generic::<ROOT_STATES, R>(string_index, data)
     }
@@ -115,31 +143,27 @@ impl RootDatabase {
     pub fn get_sturdyref(
         &mut self,
         sturdy_id: i64,
-        builder: &mut capnp::any_pointer::Builder<'_>,
+        builder: capnp::any_pointer::Builder<'_>,
     ) -> Result<()> {
         self.get_generic::<ROOT_STURDYREFS>(sturdy_id, builder)
     }
-    pub fn add_sturdyref<R: capnp::message::ReaderSegments>(&mut self, data: &R) -> Result<i64> {
+    pub fn add_sturdyref<R: capnp::traits::SetPointerBuilder>(&mut self, data: R) -> Result<i64> {
         self.add_generic::<ROOT_STURDYREFS, R>(data)
     }
-    pub fn set_sturdyref<R: capnp::message::ReaderSegments>(
+    pub fn set_sturdyref<R: capnp::traits::SetPointerBuilder>(
         &mut self,
         sturdy_id: i64,
-        data: &R,
+        data: R,
     ) -> Result<()> {
         self.set_generic::<ROOT_STURDYREFS, R>(sturdy_id, data)
     }
     pub fn drop_sturdyref(&mut self, id: i64) -> Result<()> {
         self.drop_generic::<ROOT_STURDYREFS>(id)
     }
-    pub fn add_object<R: capnp::message::ReaderSegments>(&mut self, data: &R) -> Result<i64> {
+    pub fn add_object<R: capnp::traits::SetPointerBuilder>(&mut self, data: R) -> Result<i64> {
         self.add_generic::<ROOT_OBJECTS, R>(data)
     }
-    pub fn get_object(
-        &mut self,
-        id: i64,
-        builder: &mut capnp::any_pointer::Builder<'_>,
-    ) -> Result<()> {
+    pub fn get_object(&mut self, id: i64, builder: capnp::any_pointer::Builder<'_>) -> Result<()> {
         self.get_generic::<ROOT_OBJECTS>(id, builder)
     }
     pub fn drop_object(&mut self, id: i64) -> Result<()> {
@@ -160,6 +184,7 @@ impl From<Connection> for RootDatabase {
     fn from(conn: Connection) -> Self {
         Self {
             conn,
+            alloc: BufferAllocator::new(),
             buf: Vec::new(),
         }
     }
@@ -175,7 +200,7 @@ impl DatabaseInterface for RootDatabase {
                         id    INTEGER PRIMARY KEY,
                         data  BLOB NOT NULL
                     )",
-                    ROOT_TABLES[t as usize]
+                    ROOT_TABLES[t]
                 )
                 .as_str(),
                 (),

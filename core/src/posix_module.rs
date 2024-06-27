@@ -20,7 +20,6 @@ use capnp_rpc::CapabilityServerSet;
 use capnp_rpc::Disconnector;
 use capnp_rpc::{rpc_twoparty_capnp, RpcSystem};
 use std::cell::RefCell;
-use std::rc::Rc;
 
 pub struct PosixModuleProcessImpl {
     posix_process: process::Client<ByteStream, PosixError>,
@@ -30,13 +29,12 @@ pub struct PosixModuleProcessImpl {
     api: RemotePromise<module_start::start_results::Owned<any_pointer, cap_pointer>>,
 }
 
+type AnyPointerClient = process::Client<cap_pointer, module_error::Owned<any_pointer>>;
+
 // TODO: For now we have to use a global threadlocal process set until we figure out how to pass in keystone state
 thread_local!(
     pub static PROCESS_SET: RefCell<
-        CapabilityServerSet<
-            RefCell<PosixModuleProcessImpl>,
-            process::Client<cap_pointer, module_error::Owned<any_pointer>>,
-        >,
+        CapabilityServerSet<RefCell<PosixModuleProcessImpl>, AnyPointerClient>,
     > = RefCell::new(CapabilityServerSet::new());
 );
 
@@ -51,13 +49,8 @@ impl process::Server<cap_pointer, module_error::Owned<any_pointer>>
         _: process::GetErrorParams<cap_pointer, module_error::Owned<any_pointer>>,
         mut results: process::GetErrorResults<cap_pointer, module_error::Owned<any_pointer>>,
     ) -> Result<(), capnp::Error> {
-        let posix_err = self
-            .borrow_mut()
-            .posix_process
-            .get_error_request()
-            .send()
-            .promise
-            .await?;
+        let request = self.borrow_mut().posix_process.get_error_request();
+        let posix_err = request.send().promise.await?;
         let builder = results.get().init_result();
         builder
             .init_backing()
@@ -71,12 +64,8 @@ impl process::Server<cap_pointer, module_error::Owned<any_pointer>>
         _: process::KillParams<cap_pointer, module_error::Owned<any_pointer>>,
         _: process::KillResults<cap_pointer, module_error::Owned<any_pointer>>,
     ) -> Result<(), capnp::Error> {
-        self.borrow_mut()
-            .posix_process
-            .kill_request()
-            .send()
-            .promise
-            .await?;
+        let request = self.borrow_mut().posix_process.kill_request();
+        request.send().promise.await?;
         Ok(())
     }
 
@@ -166,15 +155,12 @@ impl
                             handle: tokio::task::spawn_local(
                                 async_backtrace::location!().frame(rpc_system),
                             ),
-                            disconnector: disconnector,
-                            bootstrap: bootstrap,
-                            api: api,
+                            disconnector,
+                            bootstrap,
+                            api,
                         };
 
-                        let module_process_client: process::Client<
-                            cap_pointer,
-                            module_error::Owned<any_pointer>,
-                        > = PROCESS_SET
+                        let module_process_client: AnyPointerClient = PROCESS_SET
                             .with_borrow_mut(|x| x.new_client(RefCell::new(module_process)));
                         results.get().set_result(module_process_client);
                         Ok(())
@@ -224,15 +210,8 @@ mod tests {
     #[async_backtrace::framed]
     #[tokio::test]
     async fn test_raw_pipes() {
-        #[cfg(windows)]
         let spawn_process_server = cap_std::fs::File::from_filelike(
-            File::open("../target/debug/hello-world-module.exe")
-                .unwrap()
-                .into_filelike(),
-        );
-        #[cfg(not(windows))]
-        let spawn_process_server = cap_std::fs::File::from_filelike(
-            File::open("../target/debug/hello-world-module")
+            File::open(keystone_util::get_binary_path("hello-world-module"))
                 .unwrap()
                 .into_filelike(),
         );
@@ -321,14 +300,9 @@ mod tests {
     #[async_backtrace::framed]
     #[tokio::test]
     async fn test_process_creation() {
-        #[cfg(windows)]
         let spawn_process_server = PosixProgramImpl::new_std(
-            File::open("../target/debug/hello-world-module.exe").unwrap(),
+            File::open(keystone_util::get_binary_path("hello-world-module")).unwrap(),
         );
-        #[cfg(not(windows))]
-        let spawn_process_server =
-            PosixProgramImpl::new_std(File::open("../target/debug/hello-world-module").unwrap());
-
         let spawn_process_client: crate::spawn::posix_process::PosixProgramClient =
             capnp_rpc::new_client(spawn_process_server);
 

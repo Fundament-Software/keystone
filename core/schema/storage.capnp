@@ -82,8 +82,8 @@ interface RestoreRaw {
 }
 
 interface Cell(T) {
-    get @0 () -> (x :T);
-    set @1 (x :T);
+    get @0 () -> (data :T);
+    set @1 (data :T);
 }
 
 interface ObjectStore {

@@ -6,6 +6,7 @@ members = [
   "build",
   "modules/sqlite-ks",
   "modules/hello-world",
+  "modules/lua-process",
   "modules/indirect-world",
   "modules/test",
   "util",

@@ -149,7 +149,7 @@ dependencies = [
  "loom",
  "once_cell",
  "pin-project-lite",
- "rustc-hash",
+ "rustc-hash 1.1.0",
  "static_assertions",
 ]
 
@@ -475,6 +475,7 @@ dependencies = [
 [[package]]
 name = "caplog"
 version = "0.1.0"
+source = "git+https://github.com/Fundament-Software/caplog#4f84f13594753d6ff820c428a575fdd5208b38e0"
 dependencies = [
  "bitfield-struct",
  "capstone",
@@ -493,16 +494,57 @@ dependencies = [
 ]
 
 [[package]]
+name = "capnp"
+version = "0.18.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "384b671a5b39eadb909b0c2b81d22a400d446526e651e64be9eb6674b33644a4"
+dependencies = [
+ "embedded-io 0.5.0",
+]
+
+[[package]]
+name = "capnp-futures"
+version = "0.18.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b8697b857f5b014ff378f02817426d3b6fb90a69f32e330fe010f24fe10cf8f1"
+dependencies = [
+ "capnp",
+ "futures",
+]
+
+[[package]]
+name = "capnp-rpc"
+version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "94b87a9e0f74600628e227d39b79ef8652c558a408999ac46ba22b19dbad0010"
+dependencies = [
+ "capnp",
+ "capnp-futures",
+ "futures",
+]
+
+[[package]]
+name = "capnpc"
+version = "0.18.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a642faaaa78187e70bdcc0014c593c213553cfeda3b15054426d0d596048b131"
+dependencies = [
+ "capnp",
+]
+
+[[package]]
 name = "capstone"
 version = "0.18.0"
+source = "git+https://github.com/Fundament-Software/capstone-rs#c61ec49ea96c418ba2138bb71dff0810732ef14f"
 dependencies = [
- "embedded-io",
+ "embedded-io 0.6.1",
  "smallvec",
 ]
 
 [[package]]
 name = "capstone-futures"
 version = "0.18.0"
+source = "git+https://github.com/Fundament-Software/capstone-rs#c61ec49ea96c418ba2138bb71dff0810732ef14f"
 dependencies = [
  "capstone",
  "futures-util",
@@ -513,6 +555,7 @@ dependencies = [
 [[package]]
 name = "capstone-gen"
 version = "0.18.0"
+source = "git+https://github.com/Fundament-Software/capstone-rs#c61ec49ea96c418ba2138bb71dff0810732ef14f"
 dependencies = [
  "capstone",
 ]
@@ -520,6 +563,7 @@ dependencies = [
 [[package]]
 name = "capstone-import"
 version = "0.18.0"
+source = "git+https://github.com/Fundament-Software/capstone-rs#c61ec49ea96c418ba2138bb71dff0810732ef14f"
 dependencies = [
  "capstone",
  "capstone-gen",
@@ -534,13 +578,14 @@ dependencies = [
  "tempfile",
  "walkdir",
  "wax",
- "which",
+ "which 4.4.2",
  "zip-extract",
 ]
 
 [[package]]
 name = "capstone-macros"
 version = "0.18.0"
+source = "git+https://github.com/Fundament-Software/capstone-rs#c61ec49ea96c418ba2138bb71dff0810732ef14f"
 dependencies = [
  "capstone",
  "capstone-rpc",
@@ -553,6 +598,7 @@ dependencies = [
 [[package]]
 name = "capstone-rpc"
 version = "0.18.0"
+source = "git+https://github.com/Fundament-Software/capstone-rs#c61ec49ea96c418ba2138bb71dff0810732ef14f"
 dependencies = [
  "capstone",
  "capstone-futures",
@@ -903,6 +949,12 @@ name = "embedded-io"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "658bbadc628dc286b9ae02f0cb0f5411c056eb7487b72f0083203f115de94060"
+
+[[package]]
+name = "embedded-io"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "edd0f118536f44f5ccd48bcb8b111bdc3de888b58c74639dfb034a357d0f206d"
 
 [[package]]
 name = "encoding_rs"
@@ -1751,6 +1803,40 @@ dependencies = [
 ]
 
 [[package]]
+name = "lua-hello-world"
+version = "0.0.0"
+dependencies = [
+ "capnp",
+ "capnp-rpc",
+ "capnpc",
+ "color-eyre",
+ "eyre",
+ "futures",
+ "mlua",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
+name = "lua-src"
+version = "546.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2da0daa7eee611a4c30c8f5ee31af55266e26e573971ba9336d2993e2da129b2"
+dependencies = [
+ "cc",
+]
+
+[[package]]
+name = "luajit-src"
+version = "210.5.8+5790d25"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "441f18d9ad792e871fc2f7f2cb8902c386f6f56fdbddef3b835b61475e375346"
+dependencies = [
+ "cc",
+ "which 6.0.1",
+]
+
+[[package]]
 name = "matchers"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1816,6 +1902,33 @@ dependencies = [
  "libc",
  "wasi",
  "windows-sys 0.48.0",
+]
+
+[[package]]
+name = "mlua"
+version = "0.9.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d111deb18a9c9bd33e1541309f4742523bfab01d276bfa9a27519f6de9c11dc7"
+dependencies = [
+ "bstr 1.9.1",
+ "futures-util",
+ "mlua-sys",
+ "num-traits",
+ "once_cell",
+ "rustc-hash 2.0.0",
+]
+
+[[package]]
+name = "mlua-sys"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a088ed0723df7567f569ba018c5d48c23c501f3878b190b04144dfa5ebfa8abc"
+dependencies = [
+ "cc",
+ "cfg-if",
+ "lua-src",
+ "luajit-src",
+ "pkg-config",
 ]
 
 [[package]]
@@ -2419,6 +2532,12 @@ name = "rustc-hash"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "08d43f7aa6b08d49f382cde6a7982047c3426db949b1424bc4b7ec9ae12c6ce2"
+
+[[package]]
+name = "rustc-hash"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "583034fd73374156e66797ed8e5b0d5690409c9226b22d87cb7f19821c05d152"
 
 [[package]]
 name = "rustix"
@@ -3295,6 +3414,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "which"
+version = "6.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8211e4f58a2b2805adfbefbc07bab82958fc91e3836339b1ab7ae32465dce0d7"
+dependencies = [
+ "either",
+ "home",
+ "rustix 0.38.34",
+ "winsafe",
+]
+
+[[package]]
 name = "winapi"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3591,6 +3722,12 @@ dependencies = [
  "cfg-if",
  "windows-sys 0.48.0",
 ]
+
+[[package]]
+name = "winsafe"
+version = "0.0.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d135d17ab770252ad95e9a872d365cf3090e3be864a34ab46f48555993efc904"
 
 [[package]]
 name = "winx"

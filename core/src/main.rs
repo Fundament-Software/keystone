@@ -19,6 +19,9 @@ capnp_import::capnp_import!("/schema/**/*.capnp");
 #[cfg(test)]
 capnp_import::capnp_import!("../modules/hello-world/*.capnp");
 
+#[cfg(test)]
+capnp_import::capnp_import!("../modules/stateful/*.capnp");
+
 use crate::keystone_capnp::keystone_config;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use eyre::Result;

@@ -1,22 +1,33 @@
-use crate::hello_world_capnp::root;
+use crate::stateful_capnp::my_state;
+use crate::stateful_capnp::root;
+use crate::storage_capnp::cell;
 
-pub struct HelloWorldImpl {
-    pub greeting: String,
+pub struct StatefulImpl {
+    pub echo_word: String,
+    pub echo_last: cell::Client<my_state::Owned>,
 }
 
-impl root::Server for HelloWorldImpl {
-    async fn say_hello(
+impl root::Server for StatefulImpl {
+    async fn echo_last(
         &self,
-        params: root::SayHelloParams,
-        mut results: root::SayHelloResults,
+        params: root::EchoLastParams,
+        mut results: root::EchoLastResults,
     ) -> Result<(), ::capnp::Error> {
-        tracing::info!("say_hello was called!");
+        tracing::info!("echo_last was called!");
         let request = params.get()?.get_request()?;
         let name = request.get_name()?.to_str()?;
-        let greet = self.greeting.as_str();
-        let message = format!("{greet}, {name}!");
+        let prev_request = self.echo_last.get_request().send();
+        let prev_response = prev_request.promise.await?;
+        let last_reader = prev_response.get()?.get_data()?.get_last()?;
+        let last = last_reader.to_string()?;
+        let word = self.echo_word.as_str();
+        let message = format!("{word} {last}");
 
+        let mut set_request = self.echo_last.set_request();
+        let mut data = set_request.get().init_data();
+        data.set_last(name.into());
         results.get().init_reply().set_message(message[..].into());
+        set_request.send().promise.await?;
         Ok(())
     }
 }

@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::{fs::File, io::BufReader, path::Path};
 
+use crate::keystone::Error;
 use crate::keystone_capnp::cap_expr;
 use crate::keystone_capnp::keystone_config;
 use crate::toml_capnp;
@@ -56,7 +57,11 @@ where
                     if let Value::Table(t) = &l[idx as usize] {
                         toml_to_config(t, dynamic.downcast()?, schemas, callback)?;
                     } else {
-                        return Err(eyre!("Config value must be a table!"));
+                        return Err(Error::InvalidTypeTOML(
+                            "ModuleConfig List Element".into(),
+                            "table".to_string(),
+                        )
+                        .into());
                     }
                 }
                 return Ok(());
@@ -80,7 +85,7 @@ where
                             continue 'outer;
                         }
                     }
-                    return Err(eyre!("{:?} is not a valid enumeration value!", s));
+                    return Err(Error::InvalidEnumValue(s.into()).into());
                 } else {
                     builder.set(idx, s.as_str().into())?
                 }
@@ -159,13 +164,18 @@ fn toml_to_config<F>(
 where
     F: FnMut(*const Value) -> Option<u32>,
 {
-    let path = v.get("path").ok_or(eyre!("Can't find path!"))?;
+    let path = v
+        .get("path")
+        .ok_or(Error::MissingFieldTOML("path".into()))?;
 
     if let Some(str) = path.as_str() {
         builder.set_path(str.into());
     }
 
-    let path = Path::new(path.as_str().ok_or(eyre!("Path isn't a string?!"))?);
+    let path = Path::new(
+        path.as_str()
+            .ok_or(Error::InvalidTypeTOML("path".into(), "string".into()))?,
+    );
     let mut name = None;
 
     if let Some(n) = v.get("name") {
@@ -181,10 +191,11 @@ where
                 builder.set_schema(str.into());
             }
 
-            let schemafile = path
-                .parent()
-                .unwrap_or(Path::new(""))
-                .join(schema.as_str().ok_or(eyre!("Schema isn't a string?!"))?);
+            let schemafile = path.parent().unwrap_or(Path::new("")).join(
+                schema
+                    .as_str()
+                    .ok_or(Error::InvalidTypeTOML("schema".into(), "string".into()))?,
+            );
 
             let f = File::open(schemafile)?;
             let bufread = BufReader::new(f);
@@ -196,7 +207,6 @@ where
                 },
             )?
         } else {
-            println!("path: {}", path.display());
             let file_contents = std::fs::read(path)?;
 
             let binary = crate::binary_embed::load_deps_from_binary(&file_contents)?;
@@ -212,9 +222,9 @@ where
 
         let anyconfig: capnp::any_pointer::Builder = builder.init_config();
         let schema = DynamicSchema::new(msg)?;
-        let configtype = schema
-            .get_type_by_scope(vec!["Config".to_string()])
-            .ok_or(eyre::eyre!("Can't find 'Config' type in schema!"))?;
+        let configtype = schema.get_type_by_scope(vec!["Config".to_string()]).ok_or(
+            Error::MissingSchemaField("Config type".into(), path.display().to_string()),
+        )?;
 
         if let TypeVariant::Struct(st) = configtype {
             let dynobj: capnp::dynamic_struct::Builder = anyconfig.init_dynamic((*st).into())?;
@@ -224,10 +234,10 @@ where
                 }
                 value_to_struct(t, dynobj, schemas, callback)
             } else {
-                Err(eyre::eyre!("Config value must be a table!"))
+                Err(Error::InvalidTypeTOML("Config".into(), "table".into()).into())
             }
         } else {
-            Err(eyre::eyre!("Config type must be a struct!"))
+            Err(Error::TypeMismatchCapstone("Config".into(), "struct".into()).into())
         }
     } else {
         Ok(())
@@ -243,6 +253,18 @@ fn value_to_struct<F>(
 where
     F: FnMut(*const Value) -> Option<u32>,
 {
+    // Check if this struct has an autofill cell
+    for field in builder.get_schema().get_fields()? {
+        for annotation in field.get_annotations()?.iter() {
+            if annotation.get_id() == crate::module_capnp::autocell::ID {
+                // Add this as a null value pointer (or None if the unsafe pointer is ever turned into an optional reference)
+                unsafe {
+                    builder.set_capability_to_int(field, callback(std::ptr::null()).unwrap())?;
+                }
+            }
+        }
+    }
+
     'outer: for (k, v) in t.iter() {
         let mut builder = builder.reborrow();
         let field = builder.get_schema().get_field_by_name(k)?;
@@ -254,6 +276,19 @@ where
                     let dynamic: dynamic_struct::Builder = builder.init(field)?.downcast();
                     toml_to_capnp(v, dynamic.downcast()?)?;
                     return Ok(());
+                }
+            }
+
+            // Throw an error if you attempt to assign a value to an autofill cell
+            for annotation in field.get_annotations()?.iter() {
+                match annotation.get_type().which() {
+                    TypeVariant::Capability(rs) => {
+                        let schema: capnp::schema::CapabilitySchema = rs.into();
+                        if schema.get_proto().get_id() == crate::module_capnp::autocell::ID {
+                            return Err(Error::CannotAssignAutocell.into());
+                        }
+                    }
+                    _ => (),
                 }
             }
 
@@ -283,7 +318,7 @@ where
                             continue 'outer;
                         }
                     }
-                    return Err(eyre!("{:?} is not a valid enumeration value!", s));
+                    return Err(Error::InvalidEnumValue(s.clone()).into());
                 } else {
                     builder.set(field, s.as_str().into())?
                 }
@@ -302,7 +337,7 @@ where
                         callback,
                     )?
                 } else {
-                    return Err(eyre!("{:?} is a group, no groups allowed in configs!", k));
+                    return Err(Error::UnsupportedType(k.into(), "group".into()).into());
                 }
             }
             Value::Table(t) => {
@@ -385,7 +420,11 @@ where
                 let dynobj = builder.init_dynamic((*st).into())?;
                 value_to_struct(v, dynobj, schemas, callback)?;
             } else {
-                return Err(eyre!("Params for {} weren't a struct?!", name));
+                return Err(Error::TypeMismatchCapstone(
+                    format!("Params for {}", name),
+                    "struct".into(),
+                )
+                .into());
             }
             return Ok(true);
         }
@@ -472,9 +511,10 @@ where
                         // Now we pull up the schema for this module reference.
                         // TODO: Insert keystone's schema into the map, or detect it as a hardcoded option
                         if let Some(schema) = schemas.get(module_name) {
-                            let variant = schema
-                                .get_type_by_scope(vec!["Root".to_string()])
-                                .ok_or(eyre::eyre!("Can't find 'Root' interface in schema!"))?;
+                            let variant =
+                                schema.get_type_by_scope(vec!["Root".to_string()]).ok_or(
+                                    Error::MissingSchemaField("Root".into(), module_name.into()),
+                                )?;
 
                             eval_toml_schema(
                                 v,
@@ -516,11 +556,16 @@ pub fn to_capnp(config: &Table, mut msg: keystone_config::Builder<'_>) -> Result
         dynamic.downcast(),
         &mut schemas,
         &mut |v| -> Option<u32> {
-            expr_recurse(unsafe { v.as_ref().unwrap() }, exprs_ref);
-            if exprs_ref.contains_key(&v) {
+            if v.is_null() {
+                exprs_ref.insert(v, exprs_ref.len() as u32);
                 Some(exprs_ref[&v])
             } else {
-                None
+                expr_recurse(unsafe { v.as_ref().unwrap() }, exprs_ref);
+                if exprs_ref.contains_key(&v) {
+                    Some(exprs_ref[&v])
+                } else {
+                    None
+                }
             }
         },
     )?;
@@ -528,20 +573,23 @@ pub fn to_capnp(config: &Table, mut msg: keystone_config::Builder<'_>) -> Result
     // We've already identified all capexprs that need to be rooted in the cap table
     let mut builder = msg.init_cap_table(exprs.len() as u32);
     for (k, v) in &exprs {
-        // Note: The lifetimes here do work out such that we could store a safe reference alongside the hashable pointer,
-        // thus avoiding the unsafe as_ref() call, but this is simpler to implement for now.
-        compile_toml_expr(
-            unsafe { k.as_ref().unwrap() },
-            builder.reborrow().get(*v),
-            &mut schemas,
-            &mut |v| -> Option<u32> {
-                if exprs.contains_key(&v) {
-                    Some(exprs[&v])
-                } else {
-                    None
-                }
-            },
-        )?;
+        // A blank key means this cap index is the autogenerated state cell, so we leave it's entry blank
+        if !k.is_null() {
+            // Note: The lifetimes here do work out such that we could store a safe reference alongside the hashable pointer,
+            // thus avoiding the unsafe as_ref() call, but this is simpler to implement for now.
+            compile_toml_expr(
+                unsafe { k.as_ref().unwrap() },
+                builder.reborrow().get(*v),
+                &mut schemas,
+                &mut |v| -> Option<u32> {
+                    if exprs.contains_key(&v) {
+                        Some(exprs[&v])
+                    } else {
+                        None
+                    }
+                },
+            )?;
+        }
     }
 
     Ok(())
@@ -619,6 +667,33 @@ config = {{ helloWorld = {{ "@Hello World" = 0 }} }}
             .unwrap()
             .replace('\\', "/"),
         keystone_util::get_binary_path("indirect-world-module")
+            .as_os_str()
+            .to_str()
+            .unwrap()
+            .replace('\\', "/")
+    );
+
+    to_capnp(&source.parse::<toml::Table>()?, msg.reborrow())?;
+    //println!("{:#?}", msg.reborrow_as_reader());
+
+    Ok(())
+}
+
+#[test]
+fn test_stateful_config() -> Result<()> {
+    let mut message = ::capnp::message::Builder::new_default();
+    let mut msg = message.init_root::<keystone_config::Builder>();
+    let source = format!(
+        r#"
+database = "test.sqlite"
+defaultLog = "debug"
+
+[[modules]]
+name = "Stateful"
+path = "{}"
+config = {{ echoWord = "Echo" }}
+"#,
+        keystone_util::get_binary_path("stateful-module")
             .as_os_str()
             .to_str()
             .unwrap()

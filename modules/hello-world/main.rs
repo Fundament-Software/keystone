@@ -55,41 +55,44 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tokio::task::LocalSet::new()
         .run_until(async move {
-            let mut set: capnp_rpc::CapabilityServerSet<
-                ModuleImpl,
-                module_start::Client<crate::hello_world_capnp::config::Owned, root::Owned>,
-            > = capnp_rpc::CapabilityServerSet::new();
+            tokio::task::spawn_local(async move {
+                let mut set: capnp_rpc::CapabilityServerSet<
+                    ModuleImpl,
+                    module_start::Client<crate::hello_world_capnp::config::Owned, root::Owned>,
+                > = capnp_rpc::CapabilityServerSet::new();
 
-            let module_client: module_start::Client<
-                crate::hello_world_capnp::config::Owned,
-                root::Owned,
-            > = set.new_client(ModuleImpl {
-                bootstrap: None.into(),
-                disconnector: None.into(),
-            });
+                let module_client: module_start::Client<
+                    crate::hello_world_capnp::config::Owned,
+                    root::Owned,
+                > = set.new_client(ModuleImpl {
+                    bootstrap: None.into(),
+                    disconnector: None.into(),
+                });
 
-            let reader = tokio::io::stdin();
-            let writer = tokio::io::stdout();
+                let reader = tokio::io::stdin();
+                let writer = tokio::io::stdout();
 
-            let network = twoparty::VatNetwork::new(
-                reader,
-                writer,
-                rpc_twoparty_capnp::Side::Server,
-                Default::default(),
-            );
-            let mut rpc_system =
-                RpcSystem::new(Box::new(network), Some(module_client.clone().client));
+                let network = twoparty::VatNetwork::new(
+                    reader,
+                    writer,
+                    rpc_twoparty_capnp::Side::Server,
+                    Default::default(),
+                );
+                let mut rpc_system =
+                    RpcSystem::new(Box::new(network), Some(module_client.clone().client));
 
-            let server = set.get_local_server_of_resolved(&module_client).unwrap();
-            let borrow = server.as_ref();
-            *borrow.bootstrap.borrow_mut() =
-                Some(rpc_system.bootstrap(rpc_twoparty_capnp::Side::Client));
-            *borrow.disconnector.borrow_mut() = Some(rpc_system.get_disconnector());
+                let server = set.get_local_server_of_resolved(&module_client).unwrap();
+                let borrow = server.as_ref();
+                *borrow.bootstrap.borrow_mut() =
+                    Some(rpc_system.bootstrap(rpc_twoparty_capnp::Side::Client));
+                *borrow.disconnector.borrow_mut() = Some(rpc_system.get_disconnector());
 
-            tracing::info!("spawned rpc");
-            tokio::task::spawn_local(rpc_system).await.unwrap().unwrap();
+                tracing::info!("spawned rpc");
+                tokio::task::spawn_local(rpc_system).await.unwrap().unwrap();
+            })
+            .await
         })
-        .await;
+        .await?;
 
     tracing::info!("RPC gracefully terminated");
 

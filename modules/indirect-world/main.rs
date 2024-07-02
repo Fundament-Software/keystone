@@ -59,41 +59,44 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tokio::task::LocalSet::new()
         .run_until(async move {
-            let mut set: capnp_rpc::CapabilityServerSet<
-                ModuleImpl,
-                module_start::Client<crate::indirect_world_capnp::config::Owned, root::Owned>,
-            > = capnp_rpc::CapabilityServerSet::new();
+            tokio::task::spawn_local(async move {
+                let mut set: capnp_rpc::CapabilityServerSet<
+                    ModuleImpl,
+                    module_start::Client<crate::indirect_world_capnp::config::Owned, root::Owned>,
+                > = capnp_rpc::CapabilityServerSet::new();
 
-            let module_client: module_start::Client<
-                crate::indirect_world_capnp::config::Owned,
-                root::Owned,
-            > = set.new_client(ModuleImpl {
-                bootstrap: None.into(),
-                disconnector: None.into(),
-            });
+                let module_client: module_start::Client<
+                    crate::indirect_world_capnp::config::Owned,
+                    root::Owned,
+                > = set.new_client(ModuleImpl {
+                    bootstrap: None.into(),
+                    disconnector: None.into(),
+                });
 
-            let reader = tokio::io::stdin();
-            let writer = tokio::io::stdout();
+                let reader = tokio::io::stdin();
+                let writer = tokio::io::stdout();
 
-            let network = twoparty::VatNetwork::new(
-                reader,
-                writer,
-                rpc_twoparty_capnp::Side::Server,
-                Default::default(),
-            );
-            let mut rpc_system =
-                RpcSystem::new(Box::new(network), Some(module_client.clone().client));
+                let network = twoparty::VatNetwork::new(
+                    reader,
+                    writer,
+                    rpc_twoparty_capnp::Side::Server,
+                    Default::default(),
+                );
+                let mut rpc_system =
+                    RpcSystem::new(Box::new(network), Some(module_client.clone().client));
 
-            let server = set.get_local_server_of_resolved(&module_client).unwrap();
-            let borrow = server.as_ref();
-            *borrow.bootstrap.borrow_mut() =
-                Some(rpc_system.bootstrap(rpc_twoparty_capnp::Side::Client));
-            *borrow.disconnector.borrow_mut() = Some(rpc_system.get_disconnector());
+                let server = set.get_local_server_of_resolved(&module_client).unwrap();
+                let borrow = server.as_ref();
+                *borrow.bootstrap.borrow_mut() =
+                    Some(rpc_system.bootstrap(rpc_twoparty_capnp::Side::Client));
+                *borrow.disconnector.borrow_mut() = Some(rpc_system.get_disconnector());
 
-            tracing::info!("spawned rpc");
-            tokio::task::spawn_local(rpc_system).await.unwrap().unwrap();
+                tracing::info!("spawned rpc");
+                tokio::task::spawn_local(rpc_system).await.unwrap().unwrap();
+            })
+            .await
         })
-        .await;
+        .await?;
 
     tracing::info!("RPC gracefully terminated");
 
@@ -110,88 +113,78 @@ fn test_indirect_init() -> eyre::Result<()> {
     let temp_prefix = NamedTempFile::new().unwrap().into_temp_path();
     let mut source = keystone_util::build_temp_config(&temp_db, &temp_log, &temp_prefix);
 
-    source.push_str(
-        format!(
-            r#"
+    source.push_str(&keystone_util::build_module_config(
+        "Hello World",
+        "hello-world-module",
+        r#"{ greeting = "Indirect" }"#,
+    ));
 
-[[modules]]
-name = "Hello World"
-path = "{}"
-config = {{ greeting = "Indirect" }}
-
-[[modules]]
-name = "Indirect World"
-path = "{}"
-config = {{ helloWorld = {{ "@Hello World" = 0 }} }}
-    
-    "#,
-            keystone_util::get_binary_path("hello-world-module")
-                .as_os_str()
-                .to_str()
-                .unwrap()
-                .replace('\\', "/"),
-            keystone_util::get_binary_path("indirect-world-module")
-                .as_os_str()
-                .to_str()
-                .unwrap()
-                .replace('\\', "/")
-        )
-        .as_str(),
-    );
+    source.push_str(&keystone_util::build_module_config(
+        "Indirect World",
+        "indirect-world-module",
+        r#"{ helloWorld = { "@Hello World" = 0 } }"#,
+    ));
 
     let pool = tokio::task::LocalSet::new();
-    let fut = pool.run_until(async {
-        let mut instance = keystone::keystone::Keystone::new_from_string(&source)
-            .await
-            .unwrap();
-
-        {
-            let module = &instance.modules[&instance.namemap["Hello World"]];
-            let pipe = module.api.as_ref().unwrap().pipeline.get_api().as_cap();
-
-            let hello_client: crate::hello_world_capnp::root::Client =
-                capnp::capability::FromClientHook::new(pipe);
-
-            let mut sayhello = hello_client.say_hello_request();
-            sayhello.get().init_request().set_name("Keystone".into());
-            let hello_response = sayhello.send().promise.await.unwrap();
-
-            let msg = hello_response
-                .get()
-                .unwrap()
-                .get_reply()
-                .unwrap()
-                .get_message()
+    let fut = pool.run_until(async move {
+        tokio::task::spawn_local(async move {
+            let mut instance = keystone::keystone::Keystone::new_from_string(&source)
+                .await
                 .unwrap();
 
-            assert_eq!(msg, "Indirect, Keystone!");
-        }
+            {
+                let module = &instance.modules[&instance.namemap["Hello World"]];
+                let pipe = module
+                    .api
+                    .as_ref()
+                    .ok_or(capnp::Error::failed("api ref didn't exist".to_string()))?
+                    .pipeline
+                    .get_api()
+                    .as_cap();
 
-        {
-            let module = &instance.modules[&instance.namemap["Indirect World"]];
-            let pipe = module.api.as_ref().unwrap().pipeline.get_api().as_cap();
+                let hello_client: crate::hello_world_capnp::root::Client =
+                    capnp::capability::FromClientHook::new(pipe);
 
-            let indirect_client: crate::indirect_world_capnp::root::Client =
-                capnp::capability::FromClientHook::new(pipe);
+                let mut sayhello = hello_client.say_hello_request();
+                sayhello.get().init_request().set_name("Keystone".into());
+                let hello_response = sayhello.send().promise.await?;
 
-            let mut sayhello = indirect_client.say_hello_request();
-            sayhello.get().init_request().set_name("Keystone".into());
-            let hello_response = sayhello.send().promise.await.unwrap();
+                let msg = hello_response.get()?.get_reply()?.get_message()?;
 
-            let msg = hello_response
-                .get()
-                .unwrap()
-                .get_reply()
-                .unwrap()
-                .get_message()
-                .unwrap();
+                assert_eq!(msg, "Indirect, Keystone!");
+            }
 
-            assert_eq!(msg, "Indirect, Keystone!");
-        }
-        instance.shutdown().await;
+            {
+                let module = &instance.modules[&instance.namemap["Indirect World"]];
+                let pipe = module
+                    .api
+                    .as_ref()
+                    .ok_or(capnp::Error::failed("api ref didn't exist".to_string()))?
+                    .pipeline
+                    .get_api()
+                    .as_cap();
+
+                let indirect_client: crate::indirect_world_capnp::root::Client =
+                    capnp::capability::FromClientHook::new(pipe);
+
+                let mut sayhello = indirect_client.say_hello_request();
+                sayhello.get().init_request().set_name("Keystone".into());
+                let hello_response = sayhello.send().promise.await?;
+
+                let msg = hello_response.get()?.get_reply()?.get_message()?;
+
+                assert_eq!(msg, "Indirect, Keystone!");
+            }
+            instance.shutdown().await;
+            Ok::<(), capnp::Error>(())
+        })
+        .await
     });
 
-    tokio::runtime::Runtime::new()?.block_on(fut);
+    let runtime = tokio::runtime::Runtime::new()?;
+    let result = runtime.block_on(fut);
+    runtime.shutdown_timeout(std::time::Duration::from_millis(1));
+    result.unwrap().unwrap();
 
     Ok(())
 }

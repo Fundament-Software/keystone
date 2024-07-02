@@ -7,6 +7,7 @@ members = [
   "modules/sqlite-ks",
   "modules/hello-world",
   "modules/indirect-world",
+  "modules/stateful",
   "modules/test",
   "util",
 ]
@@ -48,7 +49,12 @@ capstone-rpc = { git = "https://github.com/Fundament-Software/capstone-rs" }
 capstone-macros = { git = "https://github.com/Fundament-Software/capstone-rs" }
 capstone-gen = { git = "https://github.com/Fundament-Software/capstone-rs" }
 uuid = "1.*"
-rusqlite = { version = "0.31", features = ["bundled"] }
+rusqlite = { version = "0.31", features = [
+  "bundled",
+  "modern_sqlite",
+  "i128_blob",
+  "uuid",
+] }
 keystone-schema = { path = "core/schema" }
 keystone-build = { path = "build" }
 keystone-util = { path = "util" }

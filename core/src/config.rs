@@ -281,14 +281,8 @@ where
 
             // Throw an error if you attempt to assign a value to an autofill cell
             for annotation in field.get_annotations()?.iter() {
-                match annotation.get_type().which() {
-                    TypeVariant::Capability(rs) => {
-                        let schema: capnp::schema::CapabilitySchema = rs.into();
-                        if schema.get_proto().get_id() == crate::module_capnp::autocell::ID {
-                            return Err(Error::CannotAssignAutocell.into());
-                        }
-                    }
-                    _ => (),
+                if annotation.get_id() == crate::module_capnp::autocell::ID {
+                    return Err(Error::CannotAssignAutocell.into());
                 }
             }
 

@@ -438,7 +438,7 @@ impl Keystone {
         for s in modules.iter() {
             let id = self.get_id(s)?;
             if let Err(e) = self.init_module(id, s, config.get_cap_table()?).await {
-                eprintln!("Module Start Failure: {}", e.to_string());
+                eprintln!("Module Start Failure: {}", e);
                 // TODO: log error
             }
         }
@@ -455,14 +455,14 @@ impl Keystone {
     }
 
     fn halted(state: &ModuleState) -> bool {
-        match state {
-            ModuleState::NotStarted => true,
-            ModuleState::Closed => true,
-            ModuleState::Aborted => true,
-            ModuleState::StartFailure => true,
-            ModuleState::CloseFailure => true,
-            _ => false,
-        }
+        matches!(
+            state,
+            ModuleState::NotStarted
+                | ModuleState::Closed
+                | ModuleState::Aborted
+                | ModuleState::StartFailure
+                | ModuleState::CloseFailure
+        )
     }
 
     pub async fn stop_module(module: &mut ModuleInstance, timeout: Duration) -> Result<()> {

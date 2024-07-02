@@ -2,10 +2,7 @@
 
 using Cell = import "storage.capnp".Cell;
 
-struct StatefulConfig(Config, State) {
-    config @0 :Config;
-    state @1 :Cell(State);
-}
+annotation autocell(field) :Void;
 
 struct ModuleError(BackingError) {
     union {

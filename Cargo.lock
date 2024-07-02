@@ -475,6 +475,7 @@ dependencies = [
 [[package]]
 name = "caplog"
 version = "0.1.0"
+source = "git+https://github.com/Fundament-Software/caplog#579ff30c1b1a459e5f126dcc74ff5454c28dc88d"
 dependencies = [
  "bitfield-struct",
  "capstone",
@@ -495,6 +496,7 @@ dependencies = [
 [[package]]
 name = "capstone"
 version = "0.18.0"
+source = "git+https://github.com/Fundament-Software/capstone-rs#cd8c89965a4baefa704e1cdf789e3927b4ee1464"
 dependencies = [
  "embedded-io",
  "smallvec",
@@ -503,6 +505,7 @@ dependencies = [
 [[package]]
 name = "capstone-futures"
 version = "0.18.0"
+source = "git+https://github.com/Fundament-Software/capstone-rs#cd8c89965a4baefa704e1cdf789e3927b4ee1464"
 dependencies = [
  "capstone",
  "futures-util",
@@ -513,6 +516,7 @@ dependencies = [
 [[package]]
 name = "capstone-gen"
 version = "0.18.0"
+source = "git+https://github.com/Fundament-Software/capstone-rs#cd8c89965a4baefa704e1cdf789e3927b4ee1464"
 dependencies = [
  "capstone",
 ]
@@ -520,6 +524,7 @@ dependencies = [
 [[package]]
 name = "capstone-import"
 version = "0.18.0"
+source = "git+https://github.com/Fundament-Software/capstone-rs#cd8c89965a4baefa704e1cdf789e3927b4ee1464"
 dependencies = [
  "capstone",
  "capstone-gen",
@@ -541,6 +546,7 @@ dependencies = [
 [[package]]
 name = "capstone-macros"
 version = "0.18.0"
+source = "git+https://github.com/Fundament-Software/capstone-rs#cd8c89965a4baefa704e1cdf789e3927b4ee1464"
 dependencies = [
  "capstone",
  "capstone-rpc",
@@ -553,6 +559,7 @@ dependencies = [
 [[package]]
 name = "capstone-rpc"
 version = "0.18.0"
+source = "git+https://github.com/Fundament-Software/capstone-rs#cd8c89965a4baefa704e1cdf789e3927b4ee1464"
 dependencies = [
  "capstone",
  "capstone-futures",
@@ -900,9 +907,9 @@ checksum = "60b1af1c220855b6ceac025d3f6ecdd2b7c4894bfe9cd9bda4fbb4bc7c0d4cf0"
 
 [[package]]
 name = "embedded-io"
-version = "0.5.0"
+version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "658bbadc628dc286b9ae02f0cb0f5411c056eb7487b72f0083203f115de94060"
+checksum = "edd0f118536f44f5ccd48bcb8b111bdc3de888b58c74639dfb034a357d0f206d"
 
 [[package]]
 name = "encoding_rs"
@@ -2406,6 +2413,7 @@ dependencies = [
  "hashlink",
  "libsqlite3-sys",
  "smallvec",
+ "uuid",
 ]
 
 [[package]]
@@ -2656,6 +2664,28 @@ dependencies = [
  "eyre",
  "rusqlite",
  "tokio",
+]
+
+[[package]]
+name = "stateful-module"
+version = "0.1.0"
+dependencies = [
+ "capstone",
+ "capstone-futures",
+ "capstone-gen",
+ "capstone-import",
+ "capstone-macros",
+ "capstone-rpc",
+ "eyre",
+ "keystone",
+ "keystone-build",
+ "keystone-schema",
+ "keystone-util",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

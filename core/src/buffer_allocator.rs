@@ -12,26 +12,37 @@ impl BufferAllocator {
             used: false,
         }
     }
+
+    /// Sets the internal buffer to have a capacity of at least minimum_size
+    pub fn reserve(&mut self, minimum_size: usize) {
+        if minimum_size > self.buf.len() {
+            self.buf.resize(minimum_size, 0);
+        }
+    }
 }
 
 unsafe impl capnp::message::Allocator for BufferAllocator {
     fn allocate_segment(&mut self, minimum_size: u32) -> (*mut u8, u32) {
-        if self.used || minimum_size as usize > self.buf.len() {
-            let layout = std::alloc::Layout::from_size_align(
-                minimum_size as usize * std::mem::size_of::<u64>(),
-                8,
-            )
-            .unwrap();
+        let byte_count = minimum_size as usize * std::mem::size_of::<u64>();
+        if self.used {
+            let layout = std::alloc::Layout::from_size_align(byte_count, 8).unwrap();
             unsafe { (std::alloc::alloc_zeroed(layout), minimum_size) }
         } else {
             self.used = true;
-            (self.buf.as_mut_ptr(), self.buf.len() as u32)
+            if byte_count > self.buf.len() {
+                // If the buffer wasn't big enough, expand to double the minimum amount
+                self.buf.resize(byte_count * 2, 0);
+            }
+            (
+                self.buf.as_mut_ptr(),
+                (self.buf.len() / std::mem::size_of::<u64>()) as u32,
+            )
         }
     }
 
     unsafe fn deallocate_segment(&mut self, ptr: *mut u8, word_size: u32, words_used: u32) {
         if self.buf.as_ptr() == ptr {
-            self.buf[..words_used as usize].fill(0);
+            self.buf[..words_used as usize * std::mem::size_of::<u64>()].fill(0);
             self.used = false;
         } else {
             unsafe {

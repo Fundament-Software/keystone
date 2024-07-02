@@ -1,6 +1,7 @@
 @0xef862f668d5adcb6;
 
-using import "module.capnp".StatefulConfig;
+using import "/schema/storage.capnp".Cell;
+using import "/schema/module.capnp".autocell;
 
 # A Keystone module must expose an interface called Root that corresponds to the API returned by start()
 interface Root {
@@ -15,15 +16,16 @@ interface Root {
     echoLast @0 (request: EchoRequest) -> (reply: EchoReply);
 }
 
-struct MyConfig {
-    echoWord @0 :Text;
-}
-
 struct MyState {
     last @0 :Text;
 }
 
-using Config = StatefulConfig(MyConfig, MyState);
+struct Config {
+    echoWord @0 :Text;
+    # The annotation here is supposed to mark this as being automatically filled by keystone, but we can't dynamically
+    # load annotations yet, so instead the fact that it's called "state" is what gets it autofilled by keystone.
+    state @1 :Cell(MyState) $autocell;
+}
 
 #const properties :ModuleProperties = (
 #    friendlyName = "Stateful",

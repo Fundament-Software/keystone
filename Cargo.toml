@@ -1,12 +1,21 @@
 [workspace]
 resolver = "2"
-members = ["core", "modules/sqlite-ks", "modules/hello-world", "modules/test"]
+members = [
+  "core",
+  "core/schema",
+  "build",
+  "modules/sqlite-ks",
+  "modules/hello-world",
+  "modules/indirect-world",
+  "modules/test",
+  "util",
+]
 default-members = ["core"]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.75.0"
+rust-version = "1.77.0"
 license = "Apache-2.0"
 homepage = "https://github.com/Fundament-Software/keystone"
 repository = "https://github.com/Fundament-Software/keystone/"
@@ -28,6 +37,8 @@ tokio = { version = "1.18", features = [
   "io-std",
   "time",
   "tracing",
+  "signal",
+  "process",
 ] }
 tokio-util = { version = "0.7.4", features = ["compat"] }
 async-backtrace = "0.2.7"
@@ -38,3 +49,9 @@ capstone-import = { git = "https://github.com/Fundament-Software/capstone-rs" }
 capstone-rpc = { git = "https://github.com/Fundament-Software/capstone-rs" }
 capstone-macros = { git = "https://github.com/Fundament-Software/capstone-rs" }
 capstone-gen = { git = "https://github.com/Fundament-Software/capstone-rs" }
+uuid = "1.*"
+rusqlite = { version = "0.31", features = ["bundled"] }
+keystone-schema = { path = "core/schema" }
+keystone-build = { path = "build" }
+keystone-util = { path = "util" }
+tempfile = "3"

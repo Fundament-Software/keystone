@@ -1,4 +1,4 @@
-capnp_import::capnp_import!("hello_world.capnp", "/schema/**/*.capnp");
+capnp_import::capnp_import!("hello_world.capnp", "../../core/schema/**/*.capnp");
 
 pub mod hello_world;
 use crate::hello_world::HelloWorldImpl;
@@ -8,10 +8,11 @@ use crate::module_capnp::module_start;
 use capnp::any_pointer::Owned as any_pointer;
 use capnp_macros::capnproto_rpc;
 use capnp_rpc::{rpc_twoparty_capnp, twoparty, RpcSystem};
+use std::borrow::BorrowMut;
 use std::cell::RefCell;
-#[cfg(feature = "tracing")]
 use std::fs::File;
-#[cfg(feature = "tracing")]
+use tokio::sync::Mutex;
+use tokio::time::{sleep, Duration};
 use tracing::Level;
 
 pub struct ModuleImpl {
@@ -22,15 +23,14 @@ pub struct ModuleImpl {
 #[capnproto_rpc(module_start)]
 impl module_start::Server<config::Owned, root::Owned> for ModuleImpl {
     async fn start(&self, config: Reader) -> Result<(), ::capnp::Error> {
-        let client: root::Client = capnp_rpc::new_client(HelloWorldImpl {
+        let client: root::Client = capnp_rpc::new_client(IndirectWorldImpl {
             greeting: config.get_greeting()?.to_string()?,
         });
         results.get().set_api(client)?;
         Ok(())
     }
     async fn stop(&self) -> Result<(), ::capnp::Error> {
-        let r = self.disconnector.borrow_mut().take();
-        if let Some(d) = r {
+        if let Some(d) = self.disconnector.borrow_mut().take() {
             d.await?;
             Ok(())
         } else {
@@ -41,12 +41,10 @@ impl module_start::Server<config::Owned, root::Owned> for ModuleImpl {
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let _: Vec<String> = ::std::env::args().collect();
+    let args: Vec<String> = ::std::env::args().collect();
     tracing::info!("server started");
 
-    #[cfg(feature = "tracing")]
-    let log_file = File::create("hello_world.log")?;
-    #[cfg(feature = "tracing")]
+    let log_file = File::create("my_cool_trace.log")?;
     tracing_subscriber::fmt()
         .with_max_level(Level::DEBUG)
         .with_writer(log_file)
@@ -91,7 +89,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
         .await;
 
-    tracing::info!("RPC gracefully terminated");
+        tracing::info!("RPC gracefully terminated");
 
     Ok(())
 }

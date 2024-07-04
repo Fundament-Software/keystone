@@ -20,10 +20,14 @@ keywords = [
 license.workspace = true
 
 [lib]
+path = "src/main.rs"
 doctest = false
 
+[[bin]]
+name = "keystone"
+path = "src/main.rs"
+
 [dependencies]
-atomic-counter = "1.0"
 bytes = "1.4.0"
 cap-std.workspace = true
 cap-tempfile = "2.0.0"
@@ -34,14 +38,11 @@ capstone-futures.workspace = true
 capstone-import.workspace = true
 capstone-rpc.workspace = true
 capstone-macros.workspace = true
-chrono = "0.4"
 color-eyre.workspace = true
-dlopen = "0.1.8"
 eyre.workspace = true
 hyper = { version = "0.14", features = ["full"] }
 hyper-tls = "0.5"
 serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
 tokio.workspace = true
 tokio-util.workspace = true
 url = "2.3.1"
@@ -52,6 +53,11 @@ time = "0.3.34"
 toml = "0.8.12"
 async-backtrace.workspace = true
 futures-util.workspace = true
+rusqlite.workspace = true
+binfarce = "0.2.1"
+thiserror = "1.0.61"
+wasmparser = { version = "0.207.0", default-features = false, optional = true }
+keystone-schema.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2.139"
@@ -64,3 +70,10 @@ features = ["Win32_Foundation"]
 predicates = "2.1"
 assert_fs = "1.0"
 console-subscriber = "0.2.0"
+tempfile.workspace = true
+serde_json = "1.0"
+keystone-util.workspace = true
+
+[features]
+default = ["wasm"]
+wasm = ["wasmparser"]

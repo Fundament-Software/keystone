@@ -28,7 +28,6 @@ capstone-import.workspace = true
 async-backtrace.workspace = true
 #sqlite_nostd = { git="https://github.com/vlcn-io/sqlite-rs-embedded.git" }
 rusqlite.workspace = true
-rand.workspace = true
 
 #[features]
 #default = ["static"]

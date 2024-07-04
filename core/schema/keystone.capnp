@@ -1,6 +1,6 @@
 @0xeef7e45ab0218bda;
 
-using TOML = import "toml.capnp";
+using TOML = import "std/toml.capnp";
 
 enum LogLevel {
   trace @0;
@@ -18,21 +18,38 @@ enum CallLogLevel {
   fullContent @4;
 }
 
+struct CapExpr {
+  union {
+    moduleRef @0 :Text;
+    field :group {
+      base @1 :CapExpr;
+      index @2 :UInt16;
+    }
+    method :group {
+      subject @3 :CapExpr;
+      interfaceId @4 :UInt64;
+      methodId @5 :UInt16;
+      args @6 :AnyPointer;
+    }
+  }
+} 
+
 struct KeystoneConfig {
   struct CapLogConfig {
-    trieFile @0 :Text;
-    dataPrefix @1 :Text;
-    maxFileSize @2 :UInt64;
-    maxOpenFiles @3 :UInt64;
+    trieFile @0 :Text = "caplog.trie";
+    dataPrefix @1 :Text = "caplog";
+    maxFileSize @2 :UInt64 = 268435456;
+    maxOpenFiles @3 :UInt64 = 10;
   }
 
-  database @0 :Text;
+  database @0 :Text = "keystone.sqlite";
   caplog @1 :CapLogConfig;
 
-  struct ModuleConfig {
-    path @0 :Text; # todo: replace with hash value once we have a store
-    transient @1 :Bool;
-    config @2 :AnyPointer;
+  struct ModuleConfig(T) {
+    name @0 :Text;
+    config @1 :T;
+    path @2 :Text; # todo: replace with hash value once we have a store
+    schema @3 :Text; # if this is left empty, keystone will try to extract it from the EXE
   }
 
   modules @2 :List(ModuleConfig);
@@ -41,6 +58,9 @@ struct KeystoneConfig {
   socketName @5 :Text; # This is optional, if empty, keystone will put a socket in /run for installed daemons, or the user's home folder for a local session.
   password @6 :Text; # This is optional, an empty string correlates to no password.
   keys @7 :List(Text); # also optional, but will warn if no password or key is used.
+  msTimeout @8 :UInt64 = 30000; # Maximum amount of time a module has to obey a stop command, in milliseconds.
+
+  capTable @9 :List(CapExpr);
 }
 
 interface Host(State) {

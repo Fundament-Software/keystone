@@ -81,7 +81,7 @@ pub mod posix_process {
     use cap_std::fs::File;
     use cap_std::io_lifetimes::raw::{FromRawFilelike, RawFilelike};
     use capnp_macros::capnproto_rpc;
-    use std::cell::RefCell;
+    use futures_util::lock::Mutex;
     use std::rc::Rc;
     use std::result::Result;
     use tokio::io::{AsyncRead, AsyncWriteExt};
@@ -89,22 +89,22 @@ pub mod posix_process {
     use tokio::process::ChildStdin;
     use tokio::task::{spawn_local, JoinHandle};
     use tokio_util::sync::CancellationToken;
-
     pub type PosixProgramClient = program::Client<PosixArgs, ByteStream, PosixError>;
 
     pub struct PosixProcessImpl {
         pub cancellation_token: CancellationToken,
-        stdin: Rc<RefCell<Option<ChildStdin>>>,
+        stdin: Rc<Mutex<Option<ChildStdin>>>,
         stdout_task: JoinHandle<eyre::Result<Option<usize>>>,
         stderr_task: JoinHandle<eyre::Result<Option<usize>>>,
         child: Child,
     }
 
     #[capnproto_rpc(crate::byte_stream_capnp::byte_stream)]
-    impl crate::byte_stream_capnp::byte_stream::Server for Rc<RefCell<Option<ChildStdin>>> {
+    impl crate::byte_stream_capnp::byte_stream::Server for Rc<Mutex<Option<ChildStdin>>> {
         #[async_backtrace::framed]
         async fn write(&self, bytes: &[u8]) {
-            if let Some(stdin) = self.borrow_mut().as_mut() {
+            // TODO: This holds our borrow_mut across an await point, which may deadlock
+            if let Some(stdin) = self.lock().await.as_mut() {
                 match stdin.write_all(bytes).await {
                     Ok(_) => stdin
                         .flush()
@@ -113,16 +113,16 @@ pub mod posix_process {
                     Err(e) => Err(capnp::Error::failed(e.to_string())),
                 }
             } else {
-                Err(capnp::Error {
-                    kind: capnp::ErrorKind::Failed,
-                    extra: String::from("Write called on byte stream after closed."),
-                })
+                Err(capnp::Error::failed(
+                    "Write called on byte stream after closed.".into(),
+                ))
             }
         }
 
         #[async_backtrace::framed]
         async fn end(&self) {
-            if let Some(mut stdin) = self.borrow_mut().take() {
+            let take = self.lock().await.take();
+            if let Some(mut stdin) = take {
                 stdin
                     .shutdown()
                     .await
@@ -134,10 +134,7 @@ pub mod posix_process {
 
         #[async_backtrace::framed]
         async fn get_substream(&self) {
-            Err(capnp::Error {
-                kind: capnp::ErrorKind::Unimplemented,
-                extra: String::from("Not implemented"),
-            })
+            Err(capnp::Error::unimplemented("Not implemented".into()))
         }
     }
 
@@ -169,7 +166,7 @@ pub mod posix_process {
         ) -> Self {
             Self {
                 cancellation_token,
-                stdin: Rc::new(RefCell::new(stdin)),
+                stdin: Rc::new(Mutex::new(stdin)),
                 stdout_task,
                 stderr_task,
                 child,
@@ -230,9 +227,7 @@ pub mod posix_process {
     type JoinResults = process::JoinResults<ByteStream, PosixError>;
     type PosixProcessClient = process::Client<ByteStream, PosixError>;
 
-    // You might ask why this trait is implementated for an `Rc` + `RefCell` of `PosixProcessImpl`
-    // Well thats a very good question
-    impl process::Server<ByteStream, PosixError> for Rc<RefCell<PosixProcessImpl>> {
+    impl process::Server<ByteStream, PosixError> for Rc<Mutex<PosixProcessImpl>> {
         /// In this implementation of `spawn`, the functions returns the exit code of the child
         /// process.
         #[async_backtrace::framed]
@@ -244,7 +239,8 @@ pub mod posix_process {
             let results_builder = results.get();
             let mut process_error_builder = results_builder.init_result();
 
-            match self.borrow_mut().child.try_wait() {
+            // TODO: This holds our borrow_mut across an await point, which may deadlock
+            match self.lock().await.child.try_wait() {
                 Ok(Some(exitstatus)) => {
                     // TODO: use std::os::unix::process::ExitStatusExt on unix to handle None
                     let exitcode = exitstatus.code().unwrap_or(i32::MIN);
@@ -259,8 +255,9 @@ pub mod posix_process {
 
         #[async_backtrace::framed]
         async fn kill(&self, _: KillParams, _: KillResults) -> Result<(), capnp::Error> {
-            self.borrow_mut().cancellation_token.cancel();
-            match self.borrow_mut().child.kill().await {
+            let mut this = self.lock().await;
+            this.cancellation_token.cancel();
+            match this.child.kill().await {
                 Ok(_) => Ok(()),
                 Err(e) => Err(capnp::Error::failed(e.to_string())),
             }
@@ -274,15 +271,14 @@ pub mod posix_process {
         ) -> Result<(), capnp::Error> {
             results
                 .get()
-                .set_api(capnp_rpc::new_client(self.borrow().stdin.clone()))
+                .set_api(capnp_rpc::new_client(self.lock().await.stdin.clone()))
         }
 
         #[async_backtrace::framed]
         async fn join(&self, _: JoinParams, mut results: JoinResults) -> Result<(), capnp::Error> {
             let results_builder = results.get();
             let mut process_error_builder = results_builder.init_result();
-
-            match self.borrow_mut().child.wait().await {
+            match self.lock().await.child.wait().await {
                 Ok(exitstatus) => {
                     // TODO: use std::os::unix::process::ExitStatusExt on unix to handle None
                     let exitcode = exitstatus.code().unwrap_or(0);
@@ -339,7 +335,7 @@ pub mod posix_process {
             match PosixProcessImpl::spawn_process(&self.program, argv_iter, stdout, stderr) {
                 Err(e) => Err(capnp::Error::failed(e.to_string())),
                 Ok(process_impl) => {
-                    let server_pointer = Rc::new(RefCell::new(process_impl));
+                    let server_pointer = Rc::new(Mutex::new(process_impl));
                     let process_client: PosixProcessClient = capnp_rpc::new_client(server_pointer);
                     results.get().set_result(process_client);
                     Ok(())

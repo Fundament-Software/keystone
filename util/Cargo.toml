@@ -1,0 +1,19 @@
+[package]
+name = "keystone-util"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors = ["Erik McClure <erikm@fundament.software>"]
+description = """
+Helper crate for modules to create their own keystone tests
+"""
+homepage.workspace = true
+repository = "https://github.com/Fundament-Software/keystone/tree/main/util"
+readme.workspace = true
+license.workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+tempfile.workspace = true

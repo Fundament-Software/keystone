@@ -12,7 +12,7 @@ use sqlite_capnp::{d_b_any, delete, function_invocation, insert::source, prepare
 use sqlite_capnp::{expr, index, indexed_column, insert, join_clause, select_core, table_field, table_function_ref, table_or_subquery};
 use sturdyref_capnp::{restorer, saveable};
 
-capnp_import::capnp_import!("sqlite.capnp", "../../core/schema/sturdyref.capnp");
+capnp_import::capnp_import!("sqlite.capnp", "../../core/schema/std/sturdyref.capnp");
 
 enum dbany {
     None,

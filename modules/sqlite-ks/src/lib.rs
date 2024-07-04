@@ -109,10 +109,10 @@ impl r_o_database::Server for SqliteDatabase {
     async fn select(&self, q: Select) {
         let statement_and_params = build_select_statement(self, q, StatementAndParams::new(80))?;
 
-        let mut stmt = self.connection.prepare(statement_and_params.statement.as_str())?;
+        let mut stmt = self.connection.prepare(statement_and_params.statement.as_str()).map_err(convert_rusqlite_error)?;
         println!("{}", statement_and_params.statement); //Debugging
         println!("{:?}", statement_and_params.sql_params);
-        let mut rows = stmt.query(params_from_iter(statement_and_params.sql_params.iter()))?;
+        let mut rows = stmt.query(params_from_iter(statement_and_params.sql_params.iter())).map_err(convert_rusqlite_error)?;
         let row_vec = build_results_stream_buffer(rows)?;
         results.get().set_res(capnp_rpc::new_client(PlaceholderResults {
             buffer: row_vec,
@@ -134,10 +134,10 @@ impl r_o_database::Server for SqliteDatabase {
             return Err(capnp::Error::failed("Prepared statement doesn't exist, or was created on a different machine".to_string()));
         };
 
-        let mut prepared = self.connection.prepare_cached(statement_and_params.statement.as_str())?;
+        let mut prepared = self.connection.prepare_cached(statement_and_params.statement.as_str()).map_err(convert_rusqlite_error)?;
         let mut params = statement_and_params.sql_params.clone();
         fill_in_bindparams(&statement_and_params.bindparam_indexes, &mut params, bindings).await?;
-        let mut rows = prepared.query(params_from_iter(params.iter()))?;
+        let mut rows = prepared.query(params_from_iter(params.iter())).map_err(convert_rusqlite_error)?;
         let row_vec = build_results_stream_buffer(rows)?;
         results.get().set_res(capnp_rpc::new_client(PlaceholderResults {
             buffer: row_vec,
@@ -154,8 +154,8 @@ impl database::Server for SqliteDatabase {
         println!("{}", statement_and_params.statement);
         println!("{:?}", statement_and_params.sql_params);
 
-        let mut stmt = self.connection.prepare(statement_and_params.statement.as_str())?;
-        let mut rows = stmt.query(params_from_iter(statement_and_params.sql_params.iter()))?;
+        let mut stmt = self.connection.prepare(statement_and_params.statement.as_str()).map_err(convert_rusqlite_error)?;
+        let mut rows = stmt.query(params_from_iter(statement_and_params.sql_params.iter())).map_err(convert_rusqlite_error)?;
         let row_vec = build_results_stream_buffer(rows)?;
         results.get().set_res(capnp_rpc::new_client(PlaceholderResults {
             buffer: row_vec,
@@ -175,12 +175,12 @@ impl database::Server for SqliteDatabase {
         let Some(statement_and_params) = self.prepared_insert_set.borrow_mut().get_local_server_of_resolved(&resolved) else {
             return Err(capnp::Error::failed("Prepared statement doesn't exist, or was created on a different machine".to_string()));
         };
-        let mut prepared = self.connection.prepare_cached(statement_and_params.statement.as_str())?;
+        let mut prepared = self.connection.prepare_cached(statement_and_params.statement.as_str()).map_err(convert_rusqlite_error)?;
         let mut params = statement_and_params.sql_params.clone();
         fill_in_bindparams(&statement_and_params.bindparam_indexes, &mut params, bindings).await?;
         println!("{}", statement_and_params.statement);
         println!("{:?}", params);
-        let mut rows = prepared.query(params_from_iter(params.iter()))?;
+        let mut rows = prepared.query(params_from_iter(params.iter())).map_err(convert_rusqlite_error)?;
         let row_vec = build_results_stream_buffer(rows)?;
         results.get().set_res(capnp_rpc::new_client(PlaceholderResults {
             buffer: row_vec,
@@ -192,8 +192,8 @@ impl database::Server for SqliteDatabase {
         let statement_and_params = build_update_statement(self, upd, StatementAndParams::new(120)).await?;
         println!("{}", statement_and_params.statement);
         println!("{:?}", statement_and_params.sql_params);
-        let mut stmt = self.connection.prepare(statement_and_params.statement.as_str())?;
-        let mut rows = stmt.query(params_from_iter(statement_and_params.sql_params.iter()))?;
+        let mut stmt = self.connection.prepare(statement_and_params.statement.as_str()).map_err(convert_rusqlite_error)?;
+        let mut rows = stmt.query(params_from_iter(statement_and_params.sql_params.iter())).map_err(convert_rusqlite_error)?;
         let row_vec = build_results_stream_buffer(rows)?;
         results.get().set_res(capnp_rpc::new_client(PlaceholderResults {
             buffer: row_vec,
@@ -212,10 +212,10 @@ impl database::Server for SqliteDatabase {
         let Some(statement_and_params) = self.prepared_update_set.borrow_mut().get_local_server_of_resolved(&resolved) else {
             return Err(capnp::Error::failed("Prepared statement doesn't exist, or was created on a different machine".to_string()));
         };
-        let mut prepared = self.connection.prepare_cached(statement_and_params.statement.as_str())?;
+        let mut prepared = self.connection.prepare_cached(statement_and_params.statement.as_str()).map_err(convert_rusqlite_error)?;
         let mut params = statement_and_params.sql_params.clone();
         fill_in_bindparams(&statement_and_params.bindparam_indexes, &mut params, bindings).await?;
-        let mut rows = prepared.query(params_from_iter(params.iter()))?;
+        let mut rows = prepared.query(params_from_iter(params.iter())).map_err(convert_rusqlite_error)?;
         let row_vec = build_results_stream_buffer(rows)?;
         results.get().set_res(capnp_rpc::new_client(PlaceholderResults {
             buffer: row_vec,
@@ -226,8 +226,8 @@ impl database::Server for SqliteDatabase {
     async fn delete(&self, del: Delete) {
         let statement_and_params = build_delete_statement(self, del, StatementAndParams::new(80)).await?;
 
-        let mut stmt = self.connection.prepare(statement_and_params.statement.as_str())?;
-        let mut rows = stmt.query(params_from_iter(statement_and_params.sql_params.iter()))?;
+        let mut stmt = self.connection.prepare(statement_and_params.statement.as_str()).map_err(convert_rusqlite_error)?;
+        let mut rows = stmt.query(params_from_iter(statement_and_params.sql_params.iter())).map_err(convert_rusqlite_error)?;
         let row_vec = build_results_stream_buffer(rows)?;
         results.get().set_res(capnp_rpc::new_client(PlaceholderResults {
             buffer: row_vec,
@@ -246,10 +246,10 @@ impl database::Server for SqliteDatabase {
         let Some(statement_and_params) = self.prepared_delete_set.borrow_mut().get_local_server_of_resolved(&resolved) else {
             return Err(capnp::Error::failed("Prepared statement doesn't exist, or was created on a different machine".to_string()));
         };
-        let mut prepared = self.connection.prepare_cached(statement_and_params.statement.as_str())?;
+        let mut prepared = self.connection.prepare_cached(statement_and_params.statement.as_str()).map_err(convert_rusqlite_error)?;
         let mut params = statement_and_params.sql_params.clone();
         fill_in_bindparams(&statement_and_params.bindparam_indexes, &mut params, bindings).await?;
-        let mut rows = prepared.query(params_from_iter(params.iter()))?;
+        let mut rows = prepared.query(params_from_iter(params.iter())).map_err(convert_rusqlite_error)?;
         let row_vec = build_results_stream_buffer(rows)?;
         results.get().set_res(capnp_rpc::new_client(PlaceholderResults {
             buffer: row_vec,
@@ -324,7 +324,7 @@ impl add_d_b::Server for SqliteDatabase {
             statement.truncate(statement.len() - 2);
         }
         statement.push_str(")");
-        self.connection.execute(statement.as_str(), ())?;
+        self.connection.execute(statement.as_str(), ()).map_err(convert_rusqlite_error)?;
         let table_client: table::Client = capnp_rpc::new_client(table);
         results.get().set_res(table_client);
         Ok(())
@@ -350,7 +350,9 @@ impl add_d_b::Server for SqliteDatabase {
         statement.push_str("AS ");
         let statement_and_params = build_select_statement(self, def, StatementAndParams::new(80))?;
         statement.push_str(statement_and_params.statement.as_str());
-        self.connection.execute(statement.as_str(), params_from_iter(statement_and_params.sql_params.iter()))?;
+        self.connection
+            .execute(statement.as_str(), params_from_iter(statement_and_params.sql_params.iter()))
+            .map_err(convert_rusqlite_error)?;
         let client = ROTABLE_REF_SET.with_borrow_mut(|set| set.borrow_mut().new_client(view_name));
         results.get().set_res(client);
         Ok(())
@@ -395,8 +397,8 @@ impl add_d_b::Server for SqliteDatabase {
             statement_and_params.statement.push_str("WHERE ");
             match_where(self, params.get()?.get_sql_where()?, &mut statement_and_params)?;
         }
-        let mut stmt = self.connection.prepare(statement_and_params.statement.as_str())?;
-        let mut rows = stmt.query(params_from_iter(statement_and_params.sql_params.iter()))?;
+        let mut stmt = self.connection.prepare(statement_and_params.statement.as_str()).map_err(convert_rusqlite_error)?;
+        let mut rows = stmt.query(params_from_iter(statement_and_params.sql_params.iter())).map_err(convert_rusqlite_error)?;
         results.get().set_res(self.index_set.borrow_mut().new_client(index_name));
         Ok(())
     }
@@ -626,10 +628,10 @@ async fn build_update_statement<'a>(db: &SqliteDatabase, upd: update::Reader<'a>
     return Ok(statement_and_params);
 }
 fn build_select_statement<'a>(db: &SqliteDatabase, select: select::Reader<'a>, mut statement_and_params: StatementAndParams) -> Result<StatementAndParams, capnp::Error> {
-    capnp_let!({names, selectcore : {from, result}, mergeoperations, orderby, limit} = select);
+    capnp_let!({names, selectcore : {from, results}, mergeoperations, orderby, limit} = select);
     statement_and_params.statement.push_str("SELECT ");
     let mut names_iter = names.iter();
-    for expr in result.iter() {
+    for expr in results.iter() {
         match expr.which()? {
             expr::Which::Literal(dbany) => {
                 //TODO Probably need some checks against injection
@@ -973,29 +975,24 @@ async fn fill_in_bindparams<'a>(bindparam_indexes: &Vec<usize>, params: &mut Vec
 
 #[cfg(test)]
 mod tests {
-    use database::{insert_params, prepare_insert_params};
-    use r_o_database::select_params;
-
     use super::*;
     #[tokio::test]
     async fn test_test() -> eyre::Result<()> {
         let db_path = "test_db";
         let (client, connection) = SqliteDatabase::new(db_path, OpenFlags::default())?;
 
-        let mut create_table_request = client.build_create_table_request(add_d_b::create_table_params::ParamsStruct {
-            def: vec![
-                table_field::ParamsStruct {
-                    name: "name".to_string(),
-                    _base_type: table_field::Type::Text,
-                    nullable: false,
-                },
-                table_field::ParamsStruct {
-                    name: "data".to_string(),
-                    _base_type: table_field::Type::Blob,
-                    nullable: true,
-                },
-            ],
-        });
+        let mut create_table_request = client.build_create_table_request(vec![
+            table_field::TableField {
+                _name: "name".to_string(),
+                _base_type: table_field::Type::Text,
+                _nullable: false,
+            },
+            table_field::TableField {
+                _name: "data".to_string(),
+                _base_type: table_field::Type::Blob,
+                _nullable: true,
+            },
+        ]);
 
         let table_cap = create_table_request.send().promise.await?.get()?.get_res()?;
 
@@ -1015,139 +1012,76 @@ mod tests {
 
         let ro_tableref_cap = ra_table_ref_cap.readonly_request().send().promise.await?.get()?.get_res()?;
 
-        let mut insert_request = client.clone().cast_to::<database::Client>().build_insert_request(insert_params::ParamsStruct {
-            _ins: Some(insert::ParamsStruct {
-                _fallback: insert::ConflictStrategy::Fail,
-                target: ra_table_ref_cap.clone(),
-                _source: source::ParamsStruct {
-                    uni: source::ParamsEnum::_Values(vec![vec![
-                        d_b_any::ParamsStruct {
-                            uni: d_b_any::ParamsEnum::_Text("Steven".to_string()),
-                        },
-                        d_b_any::ParamsStruct { uni: d_b_any::ParamsEnum::_Null(()) },
-                    ]]),
-                },
-                cols: vec!["name".to_string(), "data".to_string()],
-                returning: Vec::new(),
-            }),
-        });
+        let mut insert_request = client.clone().cast_to::<database::Client>().build_insert_request(Some(insert::Insert {
+            _fallback: insert::ConflictStrategy::Fail,
+            _target: ra_table_ref_cap.clone(),
+            _source: source::Source::_Values(vec![vec![d_b_any::DBAny::_Text("Steven".to_string()), d_b_any::DBAny::_Null(())]]),
+            _cols: vec!["name".to_string(), "data".to_string()],
+            _returning: Vec::new(),
+        }));
         insert_request.send().promise.await?;
 
-        let mut insert_request = client.clone().cast_to::<database::Client>().build_insert_request(insert_params::ParamsStruct {
-            _ins: Some(insert::ParamsStruct {
-                _fallback: insert::ConflictStrategy::Abort,
-                target: ra_table_ref_cap.clone(),
-                _source: source::ParamsStruct {
-                    uni: source::ParamsEnum::_Values(vec![vec![
-                        d_b_any::ParamsStruct {
-                            uni: d_b_any::ParamsEnum::_Text("ToUpdate".to_string()),
-                        },
-                        d_b_any::ParamsStruct {
-                            uni: d_b_any::ParamsEnum::_Blob(vec![4, 5, 6]),
-                        },
-                    ]]),
-                },
-                cols: vec!["name".to_string(), "data".to_string()],
-                returning: Vec::new(),
-            }),
-        });
+        let mut insert_request = client.clone().cast_to::<database::Client>().build_insert_request(Some(insert::Insert {
+            _fallback: insert::ConflictStrategy::Abort,
+            _target: ra_table_ref_cap.clone(),
+            _source: source::Source::_Values(vec![vec![d_b_any::DBAny::_Text("ToUpdate".to_string()), d_b_any::DBAny::_Blob(vec![4, 5, 6])]]),
+            _cols: vec!["name".to_string(), "data".to_string()],
+            _returning: Vec::new(),
+        }));
         insert_request.send().promise.await?;
 
-        let mut update_request = client.clone().cast_to::<database::Client>().build_update_request(database::update_params::ParamsStruct {
-            _upd: Some(update::ParamsStruct {
-                _fallback: update::ConflictStrategy::Fail,
-                assignments: vec![
-                    update::assignment::ParamsStruct {
-                        name: "name".to_string(),
-                        _expr: Some(expr::ParamsStruct {
-                            uni: expr::ParamsEnum::_Literal(Box::new(d_b_any::ParamsStruct {
-                                uni: d_b_any::ParamsEnum::_Text("Updated".to_string()),
-                            })),
-                        }),
-                    },
-                    update::assignment::ParamsStruct {
-                        name: "data".to_string(),
-                        _expr: Some(expr::ParamsStruct {
-                            uni: expr::ParamsEnum::_Literal(Box::new(d_b_any::ParamsStruct { uni: d_b_any::ParamsEnum::_Null(()) })),
-                        }),
-                    },
-                ],
-                _from: Some(join_clause::ParamsStruct {
-                    _tableorsubquery: Some(table_or_subquery::ParamsStruct {
-                        uni: table_or_subquery::ParamsEnum::_Tableref(ro_tableref_cap.clone()),
-                    }),
-                    joinoperations: Vec::new(),
-                }),
-                _sql_where: Some(expr::ParamsStruct {
-                    uni: expr::ParamsEnum::_Literal(Box::new(d_b_any::ParamsStruct {
-                        uni: d_b_any::ParamsEnum::_Text("name = 'ToUpdate'".to_string()),
-                    })),
-                }),
-                returning: Vec::new(),
+        let mut update_request = client.clone().cast_to::<database::Client>().build_update_request(Some(update::Update {
+            _fallback: update::ConflictStrategy::Fail,
+            _assignments: vec![
+                update::assignment::Assignment {
+                    _name: "name".to_string(),
+                    _expr: Some(expr::Expr::_Literal(d_b_any::DBAny::_Text("Updated".to_string()))),
+                },
+                update::assignment::Assignment {
+                    _name: "data".to_string(),
+                    _expr: Some(expr::Expr::_Literal(d_b_any::DBAny::_Null(()))),
+                },
+            ],
+            _from: Some(join_clause::JoinClause {
+                _tableorsubquery: Some(table_or_subquery::TableOrSubquery::_Tableref(ro_tableref_cap.clone())),
+                _joinoperations: Vec::new(),
             }),
-        });
+            _sql_where: Some(expr::Expr::_Literal(d_b_any::DBAny::_Text("name = 'ToUpdate'".to_string()))),
+            _returning: Vec::new(),
+        }));
         update_request.send().promise.await?;
 
-        let mut prepare_insert_request = client.clone().cast_to::<database::Client>().build_prepare_insert_request(prepare_insert_params::ParamsStruct {
-            _ins: Some(insert::ParamsStruct {
-                _fallback: insert::ConflictStrategy::Ignore,
-                target: ra_table_ref_cap.clone(),
-                cols: vec!["name".to_string(), "data".to_string()],
-                _source: insert::source::ParamsStruct {
-                    uni: insert::source::ParamsEnum::_Values(vec![vec![
-                        d_b_any::ParamsStruct {
-                            uni: d_b_any::ParamsEnum::_Text("Mike".to_string()),
-                        },
-                        d_b_any::ParamsStruct {
-                            uni: d_b_any::ParamsEnum::_Blob(vec![1, 2, 3]),
-                        },
-                    ]]),
-                },
-                returning: vec![expr::ParamsStruct {
-                    uni: expr::ParamsEnum::_Bindparam(()),
-                }],
-            }),
-        });
+        let mut prepare_insert_request = client.clone().cast_to::<database::Client>().build_prepare_insert_request(Some(insert::Insert {
+            _fallback: insert::ConflictStrategy::Ignore,
+            _target: ra_table_ref_cap.clone(),
+            _cols: vec!["name".to_string(), "data".to_string()],
+            _source: insert::source::Source::_Values(vec![vec![d_b_any::DBAny::_Text("Mike".to_string()), d_b_any::DBAny::_Blob(vec![1, 2, 3])]]),
+            _returning: vec![expr::Expr::_Bindparam(())],
+        }));
         let prepared = prepare_insert_request.send().promise.await?.get()?.get_stmt()?;
         let mut run_request = client.clone().cast_to::<database::Client>().run_prepared_insert_request();
         run_request.get().set_stmt(prepared);
         run_request.get().init_bindings(1).get(0).set_text("meow".into());
         run_request.send().promise.await?;
 
-        let mut select_request = client.clone().cast_to::<r_o_database::Client>().build_select_request(select_params::ParamsStruct {
-            _q: Some(select::ParamsStruct {
-                _selectcore: Some(Box::new(select_core::ParamsStruct {
-                    _from: Some(join_clause::ParamsStruct {
-                        _tableorsubquery: Some(table_or_subquery::ParamsStruct {
-                            uni: table_or_subquery::ParamsEnum::_Tableref(ro_tableref_cap),
-                        }),
-                        joinoperations: Vec::new(),
-                    }),
-                    result: vec![
-                        expr::ParamsStruct {
-                            uni: expr::ParamsEnum::_Literal(Box::new(d_b_any::ParamsStruct {
-                                uni: d_b_any::ParamsEnum::_Text("id".to_string()),
-                            })),
-                        },
-                        expr::ParamsStruct {
-                            uni: expr::ParamsEnum::_Literal(Box::new(d_b_any::ParamsStruct {
-                                uni: d_b_any::ParamsEnum::_Text("name".to_string()),
-                            })),
-                        },
-                        expr::ParamsStruct {
-                            uni: expr::ParamsEnum::_Literal(Box::new(d_b_any::ParamsStruct {
-                                uni: d_b_any::ParamsEnum::_Text("data".to_string()),
-                            })),
-                        },
-                    ],
-                    _sql_where: None,
-                })),
-                mergeoperations: Vec::new(),
-                orderby: Vec::new(),
-                _limit: None,
-                names: Vec::new(),
-            }),
-        });
+        let mut select_request = client.clone().cast_to::<r_o_database::Client>().build_select_request(Some(select::Select {
+            _selectcore: Some(Box::new(select_core::SelectCore {
+                _from: Some(join_clause::JoinClause {
+                    _tableorsubquery: Some(table_or_subquery::TableOrSubquery::_Tableref(ro_tableref_cap)),
+                    _joinoperations: Vec::new(),
+                }),
+                _results: vec![
+                    expr::Expr::_Literal(d_b_any::DBAny::_Text("id".to_string())),
+                    expr::Expr::_Literal(d_b_any::DBAny::_Text("name".to_string())),
+                    expr::Expr::_Literal(d_b_any::DBAny::_Text("data".to_string())),
+                ],
+                _sql_where: None,
+            })),
+            _mergeoperations: Vec::new(),
+            _orderby: Vec::new(),
+            _limit: None,
+            _names: Vec::new(),
+        }));
 
         let mut res_stream = select_request.send().promise.await?.get()?.get_res()?;
         let mut next_request = res_stream.next_request();
@@ -1175,5 +1109,30 @@ mod tests {
         //delete_from_table_request.send().promise.await?;
 
         Ok(())
+    }
+}
+
+//TODO maybe needs to be more specific, but potentially would reveal information that should stay private
+fn convert_rusqlite_error(err: rusqlite::Error) -> capnp::Error {
+    match err {
+        rusqlite::Error::SqliteFailure(_, _) => capnp::Error::failed(format!("Error from underlying sqlite call")),
+        rusqlite::Error::SqliteSingleThreadedMode => capnp::Error::failed(format!("Attempting to open multiple connection when sqlite is in single threaded mode")),
+        rusqlite::Error::FromSqlConversionFailure(_, _, _) => capnp::Error::failed(format!("Error converting sql type to rust type")),
+        rusqlite::Error::IntegralValueOutOfRange(_, _) => capnp::Error::failed(format!("Integral value out of range")),
+        rusqlite::Error::Utf8Error(e) => capnp::Error::from_kind(capnp::ErrorKind::TextContainsNonUtf8Data(e)),
+        rusqlite::Error::NulError(_) => capnp::Error::failed(format!("Error converting string to c-compatible strting, because it contains an embeded null")),
+        rusqlite::Error::InvalidParameterName(_) => capnp::Error::failed(format!("Invalid parameter name")),
+        rusqlite::Error::InvalidPath(_) => capnp::Error::failed(format!("Invalid path")),
+        rusqlite::Error::ExecuteReturnedResults => capnp::Error::failed(format!("Execute call returned rows")),
+        rusqlite::Error::QueryReturnedNoRows => capnp::Error::failed(format!("Query that was expected to return rows returned no rows")),
+        rusqlite::Error::InvalidColumnIndex(_) => capnp::Error::failed(format!("Invalid column index")),
+        rusqlite::Error::InvalidColumnName(_) => capnp::Error::failed(format!("Invalid column name")),
+        rusqlite::Error::InvalidColumnType(_, _, _) => capnp::Error::failed(format!("Invalid column type")),
+        rusqlite::Error::StatementChangedRows(_) => capnp::Error::failed(format!("Query changed more/less rows than expected")),
+        rusqlite::Error::ToSqlConversionFailure(_) => todo!(),
+        rusqlite::Error::InvalidQuery => capnp::Error::failed(format!("Invalid query")),
+        rusqlite::Error::MultipleStatement => capnp::Error::failed(format!("Sql contains multiple statements")),
+        rusqlite::Error::InvalidParameterCount(_, _) => capnp::Error::failed(format!("Invalid parameter count")),
+        _ => capnp::Error::failed(format!("Sqlite error")),
     }
 }

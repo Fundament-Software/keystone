@@ -15,7 +15,7 @@ struct TableField {
 
 struct DBAny {
     union {
-			null @0 :Void;
+	  null @0 :Void;
       integer @1 :Int64;
       real @2 :Float64;
       text @3 :Text;
@@ -188,7 +188,7 @@ struct Select {
 
 struct SelectCore {
  	from @0 :JoinClause; # May be null; if null then the results must be constant expressions and generated select will not have a from clause
-  result @1 :List(Expr); # Must be provided
+  results @1 :List(Expr); # Must be provided
   sqlWhere @2 :Expr; # may be null; if null then the generated select will not have a where clause; must be a boolean valued expression
 }
 

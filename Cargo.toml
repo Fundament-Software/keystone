@@ -32,9 +32,9 @@ tokio = { version = "1.18", features = [
 tokio-util = { version = "0.7.4", features = ["compat"] }
 async-backtrace = "0.2.7"
 futures-util = "0.3"
-capstone = { path = "../../c/capstone-rs/capnp" }
-capstone-futures = { path = "../../c/capstone-rs/capnp-futures" }
-# capstone-import = { git = "https://github.com/Fundament-Software/capstone-rs" }
-capstone-import = { path = "../../c/capstone-rs/capnp-import" }
-capstone-rpc = { path = "../../c/capstone-rs/capnp-rpc" }
-capstone-macros = { path = "../../c/capstone-rs/capnp-macros" }
+capstone = { git = "https://github.com/Fundament-Software/capstone-rs" }
+capstone-futures = { git = "https://github.com/Fundament-Software/capstone-rs" }
+capstone-import = { git = "https://github.com/Fundament-Software/capstone-rs" }
+capstone-rpc = { git = "https://github.com/Fundament-Software/capstone-rs" }
+capstone-macros = { git = "https://github.com/Fundament-Software/capstone-rs" }
+capstone-gen = { git = "https://github.com/Fundament-Software/capstone-rs" }

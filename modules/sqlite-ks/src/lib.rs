@@ -8,7 +8,7 @@ use capnp::capability::FromClientHook;
 use capnp_macros::{capnp_build, capnp_let, capnproto_rpc};
 use capnp_rpc::CapabilityServerSet;
 use rusqlite::{params, params_from_iter, types::ToSqlOutput, Connection, OpenFlags, Result, ToSql};
-use sqlite_capnp::{d_b_any, delete, function_invocation, insert::source, prepared_statement, r_a_table_ref, r_o_table_ref, result_stream, select, sql_function, table, table_ref, update};
+use sqlite_capnp::{where_expr, d_b_any, delete, function_invocation, insert::source, prepared_statement, r_a_table_ref, r_o_table_ref, result_stream, select, sql_function, table, table_ref, update};
 use sqlite_capnp::{expr, index, indexed_column, insert, join_clause, select_core, table_field, table_function_ref, table_or_subquery};
 use sturdyref_capnp::{restorer, saveable};
 
@@ -932,18 +932,22 @@ fn match_dbany<'a>(dbany: d_b_any::Reader<'a>, statement_and_params: &mut Statem
     }
     Ok(())
 }
-fn match_where<'a>(db: &SqliteDatabase, expr: expr::Reader<'a>, statement_and_params: &mut StatementAndParams) -> capnp::Result<()> {
-    //TODO validate or add a better way to specify a boolean evaluated expression in schema
-    match expr.which()? {
-        expr::Which::Literal(dbany) => match dbany?.which()? {
-            d_b_any::Which::Text(text) => {
-                statement_and_params.statement.push_str(format!("{}", text?.to_str()?).as_str());
-            }
-            _ => (),
-        },
-        expr::Which::Bindparam(_) => (),
-        expr::Which::Tablereference(_) => (),
-        expr::Which::Functioninvocation(_) => (),
+fn match_where<'a>(db: &SqliteDatabase, w_expr: where_expr::Reader<'a>, statement_and_params: &mut StatementAndParams) -> capnp::Result<()> {
+    statement_and_params.statement.push_str(format!("{}", w_expr.get_column()?.to_str()?).as_str());
+    if w_expr.get_operator_and_expr()?.is_empty() {
+        return Err(capnp::Error::failed("Where clause is missing operator and condition".to_string()));
+    }
+    for w_expr in w_expr.get_operator_and_expr()?.iter() {
+        match w_expr.get_operator()? {
+            where_expr::Operator::Is => statement_and_params.statement.push_str(" IS "),
+            where_expr::Operator::IsNot => statement_and_params.statement.push_str(" IS NOT "),
+            where_expr::Operator::And => statement_and_params.statement.push_str(" AND "),
+            where_expr::Operator::Or => statement_and_params.statement.push_str(" OR "),
+        }
+        if !w_expr.has_expr() {
+            return Err(capnp::Error::failed("Where clause is missing condition".to_string()));
+        }
+        match_expr(db, w_expr.get_expr()?, statement_and_params)?;
     }
     Ok(())
 }
@@ -1046,7 +1050,7 @@ mod tests {
                 _tableorsubquery: Some(table_or_subquery::TableOrSubquery::_Tableref(ro_tableref_cap.clone())),
                 _joinoperations: Vec::new(),
             }),
-            _sql_where: Some(expr::Expr::_Literal(d_b_any::DBAny::_Text("name = 'ToUpdate'".to_string()))),
+            _sql_where: Some(where_expr::WhereExpr{_column: "name".to_string(), _operator_and_expr: vec![where_expr::op_and_expr::OpAndExpr{_operator: where_expr::Operator::Is, _expr: Some(expr::Expr::_Literal(d_b_any::DBAny::_Text("ToUpdate".to_string())))}]}),
             _returning: Vec::new(),
         }));
         update_request.send().promise.await?;

@@ -107,7 +107,7 @@ impl SqliteDatabase {
 #[capnproto_rpc(r_o_database)]
 impl r_o_database::Server for SqliteDatabase {
     async fn select(&self, q: Select) {
-        let statement_and_params = build_select_statement(self, q, StatementAndParams::new(80))?;
+        let statement_and_params = build_select_statement(self, q, StatementAndParams::new(80)).await?;
 
         let mut stmt = self.connection.prepare(statement_and_params.statement.as_str()).map_err(convert_rusqlite_error)?;
         println!("{}", statement_and_params.statement); //Debugging
@@ -123,7 +123,7 @@ impl r_o_database::Server for SqliteDatabase {
     }
 
     async fn prepare_select(&self, q: Select) {
-        let statement_and_params = build_select_statement(self, q, StatementAndParams::new(80))?;
+        let statement_and_params = build_select_statement(self, q, StatementAndParams::new(80)).await?;
         let client = self.prepared_select_set.borrow_mut().new_client(statement_and_params);
         results.get().set_stmt(client);
         Ok(())
@@ -348,7 +348,7 @@ impl add_d_b::Server for SqliteDatabase {
             statement.push_str(") ");
         }
         statement.push_str("AS ");
-        let statement_and_params = build_select_statement(self, def, StatementAndParams::new(80))?;
+        let statement_and_params = build_select_statement(self, def, StatementAndParams::new(80)).await?;
         statement.push_str(statement_and_params.statement.as_str());
         self.connection
             .execute(statement.as_str(), params_from_iter(statement_and_params.sql_params.iter()))
@@ -367,6 +367,7 @@ impl add_d_b::Server for SqliteDatabase {
         let index_name = create_index_name();
         statement_and_params.statement.push_str(index_name.name.as_str());
         statement_and_params.statement.push_str(" ON ");
+        let base = capnp::capability::get_resolved_cap(base).await;
         TABLE_REF_SET.with_borrow_mut(|set| {
             let Some(server) = set.get_local_server_of_resolved(&base) else {
                 return Err(capnp::Error::failed("Table ref invalid for this database or insufficient permissions".to_string()));
@@ -383,7 +384,7 @@ impl add_d_b::Server for SqliteDatabase {
                     statement_and_params.statement.push_str(name?.to_str()?);
                 }
                 indexed_column::Which::Expr(expr) => {
-                    match_expr(self, expr?, &mut statement_and_params)?;
+                    match_expr(self, expr?, &mut statement_and_params).await?;
                 }
             }
             statement_and_params.statement.push_str(", ");
@@ -395,7 +396,7 @@ impl add_d_b::Server for SqliteDatabase {
 
         if params.get()?.has_sql_where() {
             statement_and_params.statement.push_str("WHERE ");
-            match_where(self, params.get()?.get_sql_where()?, &mut statement_and_params)?;
+            match_where(self, params.get()?.get_sql_where()?, &mut statement_and_params).await?;
         }
         let mut stmt = self.connection.prepare(statement_and_params.statement.as_str()).map_err(convert_rusqlite_error)?;
         let mut rows = stmt.query(params_from_iter(statement_and_params.sql_params.iter())).map_err(convert_rusqlite_error)?;
@@ -484,7 +485,7 @@ async fn build_insert_statement<'a>(db: &SqliteDatabase, ins: insert::Reader<'a>
             for value in values?.iter() {
                 statement_and_params.statement.push_str("(");
                 for dbany in value?.iter() {
-                    match_dbany(dbany, &mut statement_and_params)?;
+                    match_dbany(dbany, &mut statement_and_params).await?;
                     statement_and_params.statement.push_str(", ");
                 }
                 statement_and_params.statement.truncate(statement_and_params.statement.len() - 2);
@@ -492,7 +493,7 @@ async fn build_insert_statement<'a>(db: &SqliteDatabase, ins: insert::Reader<'a>
             }
         }
         insert::source::Which::Select(select) => {
-            statement_and_params = build_select_statement(db, select?, statement_and_params)?;
+            statement_and_params = build_select_statement(db, select?, statement_and_params).await?;
         }
         insert::source::Which::Defaults(_) => {
             statement_and_params.statement.push_str("DEFAULT VALUES");
@@ -505,7 +506,7 @@ async fn build_insert_statement<'a>(db: &SqliteDatabase, ins: insert::Reader<'a>
     if !returning.is_empty() {
         statement_and_params.statement.push_str(" RETURNING ");
         for expr in returning.iter() {
-            match_expr(db, expr, &mut statement_and_params)?;
+            match_expr(db, expr, &mut statement_and_params).await?;
             statement_and_params.statement.push_str(", ");
         }
         statement_and_params.statement.truncate(statement_and_params.statement.len() - 2);
@@ -530,15 +531,14 @@ async fn build_delete_statement<'a>(db: &SqliteDatabase, del: delete::Reader<'a>
 
     if del.has_sql_where() {
         statement_and_params.statement.push_str("WHERE ");
-        //match_expr(db, del.get_sql_where()?, &mut statement_and_params)?;
-        match_where(db, del.get_sql_where()?, &mut statement_and_params)?;
+        match_where(db, del.get_sql_where()?, &mut statement_and_params).await?;
     }
 
     if !returning.is_empty() {
         statement_and_params.statement.push_str(" RETURNING ");
 
         for returning_expr in returning.iter() {
-            match_expr(db, returning_expr, &mut statement_and_params)?;
+            match_expr(db, returning_expr, &mut statement_and_params).await?;
             statement_and_params.statement.push_str(", ");
         }
         statement_and_params.statement.truncate(statement_and_params.statement.len() - 2);
@@ -578,17 +578,17 @@ async fn build_update_statement<'a>(db: &SqliteDatabase, upd: update::Reader<'a>
             statement_and_params.statement.push_str(server.function.as_str());
             statement_and_params.statement.push_str(" (");
             for expr in func.get_exprs()? {
-                match_expr(db, expr, &mut statement_and_params)?;
+                match_expr(db, expr, &mut statement_and_params).await?;
                 statement_and_params.statement.push_str(", ");
             }
             statement_and_params.statement.truncate(statement_and_params.statement.len() - 2);
             statement_and_params.statement.push_str(") ");
         }
         table_or_subquery::Which::Select(select) => {
-            statement_and_params = build_select_statement(db, select?, statement_and_params)?;
+            statement_and_params = build_select_statement(db, select?, statement_and_params).await?;
         }
         table_or_subquery::Which::Joinclause(join) => {
-            statement_and_params = build_join_clause(db, join?, statement_and_params)?;
+            statement_and_params = build_join_clause(db, join?, statement_and_params).await?;
         }
         table_or_subquery::Which::Null(()) => (),
     }
@@ -600,7 +600,7 @@ async fn build_update_statement<'a>(db: &SqliteDatabase, upd: update::Reader<'a>
         for assignment in assignments.iter() {
             statement_and_params.statement.push_str(assignment.get_name()?.to_str()?);
             statement_and_params.statement.push_str(" = ");
-            match_expr(db, assignment.get_expr()?, &mut statement_and_params)?;
+            match_expr(db, assignment.get_expr()?, &mut statement_and_params).await?;
             statement_and_params.statement.push_str(", ");
         }
         statement_and_params.statement.truncate(statement_and_params.statement.len() - 2);
@@ -608,26 +608,25 @@ async fn build_update_statement<'a>(db: &SqliteDatabase, upd: update::Reader<'a>
 
     if from.has_joinoperations() {
         statement_and_params.statement.push_str(" FROM ");
-        statement_and_params = build_join_clause(db, from, statement_and_params)?;
+        statement_and_params = build_join_clause(db, from, statement_and_params).await?;
     }
 
     if upd.has_sql_where() {
         statement_and_params.statement.push_str(" WHERE ");
-        //match_expr(db, upd.get_sql_where()?, &mut statement_and_params)?;
-        match_where(db, upd.get_sql_where()?, &mut statement_and_params)?;
+        match_where(db, upd.get_sql_where()?, &mut statement_and_params).await?;
     }
 
     if !returning.is_empty() {
         statement_and_params.statement.push_str(" RETURNING ");
         for returning_expr in returning.iter() {
-            match_expr(db, returning_expr, &mut statement_and_params)?;
+            match_expr(db, returning_expr, &mut statement_and_params).await?;
             statement_and_params.statement.push_str(", ");
         }
         statement_and_params.statement.truncate(statement_and_params.statement.len() - 2);
     }
     return Ok(statement_and_params);
 }
-fn build_select_statement<'a>(db: &SqliteDatabase, select: select::Reader<'a>, mut statement_and_params: StatementAndParams) -> Result<StatementAndParams, capnp::Error> {
+async fn build_select_statement<'a>(db: &SqliteDatabase, select: select::Reader<'a>, mut statement_and_params: StatementAndParams) -> Result<StatementAndParams, capnp::Error> {
     capnp_let!({names, selectcore : {from, results}, mergeoperations, orderby, limit} = select);
     statement_and_params.statement.push_str("SELECT ");
     let mut names_iter = names.iter();
@@ -652,7 +651,7 @@ fn build_select_statement<'a>(db: &SqliteDatabase, select: select::Reader<'a>, m
                         statement_and_params.statement.push_str(format!("{}, ", std::str::from_utf8(blob?)?).as_str());
                     }
                     d_b_any::Which::Pointer(pointer) => {
-                        let response = tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(pointer.get_as_capability::<saveable::Client>()?.save_request().send().promise))?;
+                        let response = pointer.get_as_capability::<saveable::Client>()?.save_request().send().promise.await?;
                         let restore_key = response.get()?.get_value().get_as::<&[u8]>()?;
                         statement_and_params.statement.push_str(format!("{}, ", std::str::from_utf8(restore_key)?).as_str());
                     }
@@ -668,7 +667,7 @@ fn build_select_statement<'a>(db: &SqliteDatabase, select: select::Reader<'a>, m
                     .push_str(format!("tableref{}.{}, ", table_column.get_reference(), table_column.get_col_name()?.to_str()?).as_str());
             }
             expr::Which::Functioninvocation(func) => {
-                build_function_invocation(db, func?, &mut statement_and_params)?;
+                build_function_invocation(db, func?, &mut statement_and_params).await?;
                 statement_and_params.statement.push_str(", ");
             }
         }
@@ -687,12 +686,11 @@ fn build_select_statement<'a>(db: &SqliteDatabase, select: select::Reader<'a>, m
 
     if from.has_tableorsubquery() || from.has_joinoperations() {
         statement_and_params.statement.push_str(" FROM ");
-        statement_and_params = build_join_clause(db, from, statement_and_params)?;
+        statement_and_params = Box::pin(build_join_clause(db, from, statement_and_params)).await?;
     }
     if selectcore.has_sql_where() {
         statement_and_params.statement.push_str("WHERE ");
-        //match_expr(db, selectcore.get_sql_where()?, &mut statement_and_params)?;
-        match_where(db, selectcore.get_sql_where()?, &mut statement_and_params)?;
+        match_where(db, selectcore.get_sql_where()?, &mut statement_and_params).await?;
         statement_and_params.statement.push_str(" ");
     }
 
@@ -703,12 +701,12 @@ fn build_select_statement<'a>(db: &SqliteDatabase, select: select::Reader<'a>, m
             select::merge_operation::MergeOperator::Intersect => statement_and_params.statement.push_str(" INTERSECT "),
             select::merge_operation::MergeOperator::Except => statement_and_params.statement.push_str(" EXCEPT "),
         }
-        statement_and_params = build_select_statement(db, select, statement_and_params)?;
+        statement_and_params = Box::pin(build_select_statement(db, select, statement_and_params)).await?;
     }
     if !orderby.is_empty() {
         statement_and_params.statement.push_str(" ORDER BY ");
         for term in orderby.iter() {
-            match_expr(db, term.get_expr()?, &mut statement_and_params)?;
+            match_expr(db, term.get_expr()?, &mut statement_and_params).await?;
             match term.get_direction()? {
                 select::ordering_term::AscDesc::Asc => statement_and_params.statement.push_str(" ASC"),
                 select::ordering_term::AscDesc::Desc => statement_and_params.statement.push_str(" DSC"),
@@ -719,18 +717,18 @@ fn build_select_statement<'a>(db: &SqliteDatabase, select: select::Reader<'a>, m
     }
     if limit.has_limit() {
         statement_and_params.statement.push_str("LIMIT ");
-        match_expr(db, limit.get_limit()?, &mut statement_and_params)?;
+        match_expr(db, limit.get_limit()?, &mut statement_and_params).await?;
         statement_and_params.statement.push_str(" ");
     }
     if limit.has_offset() {
         statement_and_params.statement.push_str("OFFSET ");
-        match_expr(db, limit.get_offset()?, &mut statement_and_params)?;
+        match_expr(db, limit.get_offset()?, &mut statement_and_params).await?;
         statement_and_params.statement.push_str(" ");
     }
 
     return Ok(statement_and_params);
 }
-fn build_function_invocation<'a>(db: &SqliteDatabase, function_reader: function_invocation::Reader<'a>, statement_and_params: &mut StatementAndParams) -> Result<(), capnp::Error> {
+async fn build_function_invocation<'a>(db: &SqliteDatabase, function_reader: function_invocation::Reader<'a>, statement_and_params: &mut StatementAndParams) -> Result<(), capnp::Error> {
     let Some(server) = db.sql_function_set.borrow().get_local_server_of_resolved(&function_reader.reborrow().get_function()?) else {
         return Err(capnp::Error::failed("Sql function cap invalid".to_string()));
     };
@@ -738,7 +736,7 @@ fn build_function_invocation<'a>(db: &SqliteDatabase, function_reader: function_
     if function_reader.has_params() {
         statement_and_params.statement.push_str(" (");
         for param in function_reader.get_params()?.iter() {
-            match_expr(db, param, statement_and_params)?;
+            Box::pin(match_expr(db, param, statement_and_params)).await?;
             statement_and_params.statement.push_str(", ");
         }
         statement_and_params.statement.truncate(statement_and_params.statement.len() - 2);
@@ -746,12 +744,12 @@ fn build_function_invocation<'a>(db: &SqliteDatabase, function_reader: function_
     }
     return Ok(());
 }
-fn build_join_clause<'a>(db: &SqliteDatabase, join_clause: join_clause::Reader<'a>, mut statement_and_params: StatementAndParams) -> Result<StatementAndParams, capnp::Error> {
+async fn build_join_clause<'a>(db: &SqliteDatabase, join_clause: join_clause::Reader<'a>, mut statement_and_params: StatementAndParams) -> Result<StatementAndParams, capnp::Error> {
     match join_clause.get_tableorsubquery()?.which()? {
         table_or_subquery::Which::Tableref(tableref) => {
-            //let tableref = capnp::capability::get_resolved_cap(tableref?).await;
+            let tableref = capnp::capability::get_resolved_cap(tableref?).await;
             ROTABLE_REF_SET.with_borrow_mut(|set| {
-                let Some(server) = set.get_local_server_of_resolved(&tableref?) else {
+                let Some(server) = set.get_local_server_of_resolved(&tableref) else {
                     return Err(capnp::Error::failed("Table ref invalid for this database or insufficient permissions".to_string()));
                 };
                 statement_and_params.statement.push_str(server.table_name.as_str());
@@ -768,17 +766,17 @@ fn build_join_clause<'a>(db: &SqliteDatabase, join_clause: join_clause::Reader<'
             statement_and_params.statement.push_str(server.function.as_str());
             statement_and_params.statement.push_str(" (");
             for expr in func.get_exprs()? {
-                match_expr(db, expr, &mut statement_and_params)?;
+                match_expr(db, expr, &mut statement_and_params).await?;
                 statement_and_params.statement.push_str(", ");
             }
             statement_and_params.statement.truncate(statement_and_params.statement.len() - 2);
             statement_and_params.statement.push_str(") ");
         }
         table_or_subquery::Which::Select(select) => {
-            statement_and_params = build_select_statement(db, select?, statement_and_params)?;
+            statement_and_params = build_select_statement(db, select?, statement_and_params).await?;
         }
         table_or_subquery::Which::Joinclause(join) => {
-            statement_and_params = build_join_clause(db, join?, statement_and_params)?;
+            statement_and_params = Box::pin(build_join_clause(db, join?, statement_and_params)).await?;
         }
         table_or_subquery::Which::Null(()) => (),
     }
@@ -808,9 +806,9 @@ fn build_join_clause<'a>(db: &SqliteDatabase, join_clause: join_clause::Reader<'
         }
         match op.get_tableorsubquery()?.which()? {
             table_or_subquery::Which::Tableref(tableref) => {
-                //let tableref = capnp::capability::get_resolved_cap(tableref?).await;
+                let tableref = capnp::capability::get_resolved_cap(tableref?).await;
                 ROTABLE_REF_SET.with_borrow_mut(|set| {
-                    let Some(server) = set.get_local_server_of_resolved(&tableref?) else {
+                    let Some(server) = set.get_local_server_of_resolved(&tableref) else {
                         return Err(capnp::Error::failed("Table ref invalid for this database or insufficient permissions".to_string()));
                     };
                     statement_and_params.statement.push_str(server.table_name.as_str());
@@ -827,24 +825,24 @@ fn build_join_clause<'a>(db: &SqliteDatabase, join_clause: join_clause::Reader<'
                 statement_and_params.statement.push_str(server.function.as_str());
                 statement_and_params.statement.push_str(" (");
                 for expr in func.get_exprs()? {
-                    match_expr(db, expr, &mut statement_and_params)?;
+                    match_expr(db, expr, &mut statement_and_params).await?;
                     statement_and_params.statement.push_str(", ");
                 }
                 statement_and_params.statement.truncate(statement_and_params.statement.len() - 2);
                 statement_and_params.statement.push_str(") ");
             }
             table_or_subquery::Which::Select(select) => {
-                statement_and_params = build_select_statement(db, select?, statement_and_params)?;
+                statement_and_params = build_select_statement(db, select?, statement_and_params).await?;
             }
             table_or_subquery::Which::Joinclause(join) => {
-                statement_and_params = build_join_clause(db, join?, statement_and_params)?;
+                statement_and_params = Box::pin(build_join_clause(db, join?, statement_and_params)).await?;
             }
             table_or_subquery::Which::Null(()) => (),
         }
         match op.get_joinconstraint()?.which()? {
             join_clause::join_operation::join_constraint::Which::Expr(expr) => {
                 statement_and_params.statement.push_str("ON ");
-                match_expr(db, expr?, &mut statement_and_params)?;
+                match_expr(db, expr?, &mut statement_and_params).await?;
             }
             join_clause::join_operation::join_constraint::Which::Cols(cols) => {
                 statement_and_params.statement.push_str("USING ");
@@ -879,10 +877,10 @@ fn build_results_stream_buffer<'a>(mut rows: rusqlite::Rows<'a>) -> capnp::Resul
     }
     return Ok(row_vec);
 }
-fn match_expr<'a>(db: &SqliteDatabase, expr: expr::Reader<'a>, statement_and_params: &mut StatementAndParams) -> capnp::Result<()> {
+async fn match_expr<'a>(db: &SqliteDatabase, expr: expr::Reader<'a>, statement_and_params: &mut StatementAndParams) -> capnp::Result<()> {
     match expr.which()? {
         expr::Which::Literal(dbany) => {
-            match_dbany(dbany?, statement_and_params)?;
+            match_dbany(dbany?, statement_and_params).await?;
         }
         expr::Which::Bindparam(_) => {
             statement_and_params.sql_params.push(rusqlite::types::Value::Null);
@@ -896,12 +894,12 @@ fn match_expr<'a>(db: &SqliteDatabase, expr: expr::Reader<'a>, statement_and_par
                 .push_str(format!("tableref{}.{}", table_column.get_reference(), table_column.get_col_name()?.to_str()?).as_str());
         }
         expr::Which::Functioninvocation(func) => {
-            build_function_invocation(db, func?, statement_and_params)?;
+            build_function_invocation(db, func?, statement_and_params).await?;
         }
     }
     Ok(())
 }
-fn match_dbany<'a>(dbany: d_b_any::Reader<'a>, statement_and_params: &mut StatementAndParams) -> capnp::Result<()> {
+async fn match_dbany<'a>(dbany: d_b_any::Reader<'a>, statement_and_params: &mut StatementAndParams) -> capnp::Result<()> {
     match dbany.which()? {
         d_b_any::Which::Null(_) => {
             statement_and_params.sql_params.push(rusqlite::types::Value::Null);
@@ -924,7 +922,7 @@ fn match_dbany<'a>(dbany: d_b_any::Reader<'a>, statement_and_params: &mut Statem
             statement_and_params.statement.push_str(format!("?{}", statement_and_params.sql_params.len()).as_str());
         }
         d_b_any::Which::Pointer(pointer) => {
-            let response = tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(pointer.get_as_capability::<saveable::Client>()?.save_request().send().promise))?;
+            let response = pointer.get_as_capability::<saveable::Client>()?.save_request().send().promise.await?;
             let restore_key = response.get()?.get_value().get_as::<&[u8]>()?;
             statement_and_params.sql_params.push(rusqlite::types::Value::Blob(restore_key.to_vec()));
             statement_and_params.statement.push_str(format!("?{}", statement_and_params.sql_params.len()).as_str());
@@ -932,7 +930,7 @@ fn match_dbany<'a>(dbany: d_b_any::Reader<'a>, statement_and_params: &mut Statem
     }
     Ok(())
 }
-fn match_where<'a>(db: &SqliteDatabase, w_expr: where_expr::Reader<'a>, statement_and_params: &mut StatementAndParams) -> capnp::Result<()> {
+async fn match_where<'a>(db: &SqliteDatabase, w_expr: where_expr::Reader<'a>, statement_and_params: &mut StatementAndParams) -> capnp::Result<()> {
     statement_and_params.statement.push_str(format!("{}", w_expr.get_column()?.to_str()?).as_str());
     if w_expr.get_operator_and_expr()?.is_empty() {
         return Err(capnp::Error::failed("Where clause is missing operator and condition".to_string()));
@@ -947,7 +945,7 @@ fn match_where<'a>(db: &SqliteDatabase, w_expr: where_expr::Reader<'a>, statemen
         if !w_expr.has_expr() {
             return Err(capnp::Error::failed("Where clause is missing condition".to_string()));
         }
-        match_expr(db, w_expr.get_expr()?, statement_and_params)?;
+        match_expr(db, w_expr.get_expr()?, statement_and_params).await?;
     }
     Ok(())
 }
@@ -1110,7 +1108,7 @@ mod tests {
         let mut builder = delete_from_table_request.get().init_del();
         let table_ref = table_cap.adminless_request().send().promise.await?.get()?.get_res()?;
         builder.set_from(table_ref);
-        //delete_from_table_request.send().promise.await?;
+        delete_from_table_request.send().promise.await?;
 
         Ok(())
     }
@@ -1133,7 +1131,7 @@ fn convert_rusqlite_error(err: rusqlite::Error) -> capnp::Error {
         rusqlite::Error::InvalidColumnName(_) => capnp::Error::failed(format!("Invalid column name")),
         rusqlite::Error::InvalidColumnType(_, _, _) => capnp::Error::failed(format!("Invalid column type")),
         rusqlite::Error::StatementChangedRows(_) => capnp::Error::failed(format!("Query changed more/less rows than expected")),
-        rusqlite::Error::ToSqlConversionFailure(_) => todo!(),
+        rusqlite::Error::ToSqlConversionFailure(_) => capnp::Error::failed(format!("Failed to convert type to sql type")),
         rusqlite::Error::InvalidQuery => capnp::Error::failed(format!("Invalid query")),
         rusqlite::Error::MultipleStatement => capnp::Error::failed(format!("Sql contains multiple statements")),
         rusqlite::Error::InvalidParameterCount(_, _) => capnp::Error::failed(format!("Invalid parameter count")),

@@ -1,14 +1,13 @@
 use std::borrow::BorrowMut;
 use std::cell::Cell;
-use std::fmt::format;
+use std::collections::HashSet;
 use std::{cell::RefCell, ops::AddAssign, path::Path, rc::Rc};
 
 use crate::sqlite_capnp::{add_d_b, database, r_o_database};
-use capnp::capability::FromClientHook;
-use capnp_macros::{capnp_build, capnp_let, capnproto_rpc};
+use capnp_macros::{capnp_let, capnproto_rpc};
 use capnp_rpc::CapabilityServerSet;
 use rusqlite::{params, params_from_iter, types::ToSqlOutput, Connection, OpenFlags, Result, ToSql};
-use sqlite_capnp::{where_expr, d_b_any, delete, function_invocation, insert::source, prepared_statement, r_a_table_ref, r_o_table_ref, result_stream, select, sql_function, table, table_ref, update};
+use sqlite_capnp::{d_b_any, delete, function_invocation, insert::source, prepared_statement, r_a_table_ref, r_o_table_ref, result_stream, select, sql_function, table, table_ref, update, where_expr};
 use sqlite_capnp::{expr, index, indexed_column, insert, join_clause, select_core, table_field, table_function_ref, table_or_subquery};
 use sturdyref_capnp::{restorer, saveable};
 
@@ -47,8 +46,8 @@ impl result_stream::Server for PlaceholderResults {
             for j in 0..self.buffer[i].len() {
                 match &self.buffer[i][j] {
                     dbany::None => dbany_builder.reborrow().get(j as u32).set_null(()),
-                    dbany::int(int) => dbany_builder.reborrow().get(j as u32).set_integer(int.clone()),
-                    dbany::real(r) => dbany_builder.reborrow().get(j as u32).set_real(r.clone()),
+                    dbany::int(int) => dbany_builder.reborrow().get(j as u32).set_integer(*int),
+                    dbany::real(r) => dbany_builder.reborrow().get(j as u32).set_real(*r),
                     dbany::str(str) => dbany_builder.reborrow().get(j as u32).set_text(str.as_str().into()),
                     dbany::blob(blob) => dbany_builder.reborrow().get(j as u32).set_blob(blob),
                     dbany::pointer(key) => {
@@ -78,6 +77,7 @@ thread_local! {
 }
 struct SqliteDatabase {
     connection: Connection,
+    column_set: RefCell<HashSet<String>>,
     prepared_insert_set: RefCell<CapabilityServerSet<StatementAndParams, prepared_statement::Client<insert::Owned>>>,
     prepared_select_set: RefCell<CapabilityServerSet<StatementAndParams, prepared_statement::Client<select::Owned>>>,
     prepared_delete_set: RefCell<CapabilityServerSet<StatementAndParams, prepared_statement::Client<delete::Owned>>>,
@@ -91,6 +91,7 @@ impl SqliteDatabase {
         let connection = Connection::open_with_flags(path.clone(), flags.clone())?;
         let server = SqliteDatabase {
             connection: connection,
+            column_set: RefCell::new(HashSet::new()),
             prepared_insert_set: RefCell::new(CapabilityServerSet::new()),
             prepared_select_set: RefCell::new(CapabilityServerSet::new()),
             prepared_delete_set: RefCell::new(CapabilityServerSet::new()),
@@ -101,7 +102,7 @@ impl SqliteDatabase {
         };
         let client: add_d_b::Client = capnp_rpc::new_client(server);
         let conn = Connection::open_with_flags(path, flags)?;
-        return Ok((client, conn));
+        Ok((client, conn))
     }
 }
 #[capnproto_rpc(r_o_database)]
@@ -110,8 +111,6 @@ impl r_o_database::Server for SqliteDatabase {
         let statement_and_params = build_select_statement(self, q, StatementAndParams::new(80)).await?;
 
         let mut stmt = self.connection.prepare(statement_and_params.statement.as_str()).map_err(convert_rusqlite_error)?;
-        println!("{}", statement_and_params.statement); //Debugging
-        println!("{:?}", statement_and_params.sql_params);
         let mut rows = stmt.query(params_from_iter(statement_and_params.sql_params.iter())).map_err(convert_rusqlite_error)?;
         let row_vec = build_results_stream_buffer(rows)?;
         results.get().set_res(capnp_rpc::new_client(PlaceholderResults {
@@ -151,9 +150,6 @@ impl r_o_database::Server for SqliteDatabase {
 impl database::Server for SqliteDatabase {
     async fn insert(&self, ins: Insert) {
         let statement_and_params = build_insert_statement(self, ins, StatementAndParams::new(100)).await?;
-        println!("{}", statement_and_params.statement);
-        println!("{:?}", statement_and_params.sql_params);
-
         let mut stmt = self.connection.prepare(statement_and_params.statement.as_str()).map_err(convert_rusqlite_error)?;
         let mut rows = stmt.query(params_from_iter(statement_and_params.sql_params.iter())).map_err(convert_rusqlite_error)?;
         let row_vec = build_results_stream_buffer(rows)?;
@@ -178,8 +174,6 @@ impl database::Server for SqliteDatabase {
         let mut prepared = self.connection.prepare_cached(statement_and_params.statement.as_str()).map_err(convert_rusqlite_error)?;
         let mut params = statement_and_params.sql_params.clone();
         fill_in_bindparams(&statement_and_params.bindparam_indexes, &mut params, bindings).await?;
-        println!("{}", statement_and_params.statement);
-        println!("{:?}", params);
         let mut rows = prepared.query(params_from_iter(params.iter())).map_err(convert_rusqlite_error)?;
         let row_vec = build_results_stream_buffer(rows)?;
         results.get().set_res(capnp_rpc::new_client(PlaceholderResults {
@@ -190,8 +184,6 @@ impl database::Server for SqliteDatabase {
     }
     async fn update(&self, upd: Update) {
         let statement_and_params = build_update_statement(self, upd, StatementAndParams::new(120)).await?;
-        println!("{}", statement_and_params.statement);
-        println!("{:?}", statement_and_params.sql_params);
         let mut stmt = self.connection.prepare(statement_and_params.statement.as_str()).map_err(convert_rusqlite_error)?;
         let mut rows = stmt.query(params_from_iter(statement_and_params.sql_params.iter())).map_err(convert_rusqlite_error)?;
         let row_vec = build_results_stream_buffer(rows)?;
@@ -225,7 +217,6 @@ impl database::Server for SqliteDatabase {
     }
     async fn delete(&self, del: Delete) {
         let statement_and_params = build_delete_statement(self, del, StatementAndParams::new(80)).await?;
-
         let mut stmt = self.connection.prepare(statement_and_params.statement.as_str()).map_err(convert_rusqlite_error)?;
         let mut rows = stmt.query(params_from_iter(statement_and_params.sql_params.iter())).map_err(convert_rusqlite_error)?;
         let row_vec = build_results_stream_buffer(rows)?;
@@ -304,10 +295,12 @@ impl add_d_b::Server for SqliteDatabase {
         statement.push_str(table.table_name.as_str());
         statement.push_str(" (");
         statement.push_str("id INTEGER PRIMARY KEY, ");
+        self.column_set.borrow_mut().insert("id".to_string());
 
         for field in def.iter() {
-            statement.push_str(field.get_name()?.to_str()?);
-
+            let field_name = field.get_name()?.to_string()?;
+            statement.push_str(field_name.as_str());
+            self.column_set.borrow_mut().insert(field_name);
             match field.get_base_type()? {
                 table_field::Type::Integer => statement.push_str(" INTEGER"),
                 table_field::Type::Real => statement.push_str(" REAL"),
@@ -323,7 +316,7 @@ impl add_d_b::Server for SqliteDatabase {
         if statement.as_bytes()[statement.len() - 2] == b',' {
             statement.truncate(statement.len() - 2);
         }
-        statement.push_str(")");
+        statement.push(')');
         self.connection.execute(statement.as_str(), ()).map_err(convert_rusqlite_error)?;
         let table_client: table::Client = capnp_rpc::new_client(table);
         results.get().set_res(table_client);
@@ -339,8 +332,10 @@ impl add_d_b::Server for SqliteDatabase {
         if !names.is_empty() {
             statement.push_str("(");
             for name in names.iter() {
-                statement.push_str(name?.to_str()?);
-                statement.push_str(", ")
+                let name = name?.to_string()?;
+                statement.push_str(name.as_str());
+                statement.push_str(", ");
+                self.column_set.borrow_mut().insert(name);
             }
             if statement.as_bytes()[statement.len() - 2] == b',' {
                 statement.truncate(statement.len() - 2);
@@ -377,7 +372,7 @@ impl add_d_b::Server for SqliteDatabase {
             statement_and_params.tableref_number += 1;
             Ok(())
         })?;
-        statement_and_params.statement.push_str("(");
+        statement_and_params.statement.push('(');
         for index_column in cols.iter() {
             match index_column.which()? {
                 indexed_column::Which::Name(name) => {
@@ -392,7 +387,7 @@ impl add_d_b::Server for SqliteDatabase {
         if statement_and_params.statement.as_bytes()[statement_and_params.statement.len() - 2] == b',' {
             statement_and_params.statement.truncate(statement_and_params.statement.len() - 2);
         }
-        statement_and_params.statement.push_str(")");
+        statement_and_params.statement.push(')');
 
         if params.get()?.has_sql_where() {
             statement_and_params.statement.push_str("WHERE ");
@@ -418,15 +413,15 @@ impl prepared_statement::Server<delete::Owned> for StatementAndParams {}
 impl prepared_statement::Server<update::Owned> for StatementAndParams {}
 
 fn generate_table_name() -> TableRefImpl {
-    let name = format!("table{}", rand::random::<u64>().to_string());
+    let name = format!("table{}", rand::random::<u64>());
     TableRefImpl { table_name: Rc::new(name) }
 }
 fn create_index_name() -> IndexImpl {
-    let name = format!("index{}", rand::random::<u64>().to_string());
+    let name = format!("index{}", rand::random::<u64>());
     IndexImpl { name: Rc::new(name) }
 }
 fn create_view_name() -> TableRefImpl {
-    let name = format!("view{}", rand::random::<u64>().to_string());
+    let name = format!("view{}", rand::random::<u64>());
     TableRefImpl { table_name: Rc::new(name) }
 }
 struct StatementAndParams {
@@ -483,7 +478,7 @@ async fn build_insert_statement<'a>(db: &SqliteDatabase, ins: insert::Reader<'a>
         insert::source::Which::Values(values) => {
             statement_and_params.statement.push_str("VALUES ");
             for value in values?.iter() {
-                statement_and_params.statement.push_str("(");
+                statement_and_params.statement.push('(');
                 for dbany in value?.iter() {
                     match_dbany(dbany, &mut statement_and_params).await?;
                     statement_and_params.statement.push_str(", ");
@@ -511,7 +506,7 @@ async fn build_insert_statement<'a>(db: &SqliteDatabase, ins: insert::Reader<'a>
         }
         statement_and_params.statement.truncate(statement_and_params.statement.len() - 2);
     }
-    return Ok(statement_and_params);
+    Ok(statement_and_params)
 }
 
 async fn build_delete_statement<'a>(db: &SqliteDatabase, del: delete::Reader<'a>, mut statement_and_params: StatementAndParams) -> capnp::Result<StatementAndParams> {
@@ -543,7 +538,7 @@ async fn build_delete_statement<'a>(db: &SqliteDatabase, del: delete::Reader<'a>
         }
         statement_and_params.statement.truncate(statement_and_params.statement.len() - 2);
     }
-    return Ok(statement_and_params);
+    Ok(statement_and_params)
 }
 async fn build_update_statement<'a>(db: &SqliteDatabase, upd: update::Reader<'a>, mut statement_and_params: StatementAndParams) -> Result<StatementAndParams, capnp::Error> {
     capnp_let!({assignments, from, returning} = upd);
@@ -624,7 +619,7 @@ async fn build_update_statement<'a>(db: &SqliteDatabase, upd: update::Reader<'a>
         }
         statement_and_params.statement.truncate(statement_and_params.statement.len() - 2);
     }
-    return Ok(statement_and_params);
+    Ok(statement_and_params)
 }
 async fn build_select_statement<'a>(db: &SqliteDatabase, select: select::Reader<'a>, mut statement_and_params: StatementAndParams) -> Result<StatementAndParams, capnp::Error> {
     capnp_let!({names, selectcore : {from, results}, mergeoperations, orderby, limit} = select);
@@ -632,31 +627,49 @@ async fn build_select_statement<'a>(db: &SqliteDatabase, select: select::Reader<
     let mut names_iter = names.iter();
     for expr in results.iter() {
         match expr.which()? {
-            expr::Which::Literal(dbany) => {
-                //TODO Probably need some checks against injection
-                match dbany?.which()? {
-                    d_b_any::Which::Null(_) => {
-                        statement_and_params.statement.push_str(format!("{}, ", "NULL").as_str());
+            expr::Which::Literal(dbany) => match dbany?.which()? {
+                d_b_any::Which::Null(_) => {
+                    if !db.column_set.borrow_mut().contains("null") {
+                        return Err(capnp::Error::failed("Invalid column specified in select clause results".to_string()));
                     }
-                    d_b_any::Which::Integer(int) => {
-                        statement_and_params.statement.push_str(format!("{}, ", int).as_str());
-                    }
-                    d_b_any::Which::Real(real) => {
-                        statement_and_params.statement.push_str(format!("{}, ", real).as_str());
-                    }
-                    d_b_any::Which::Text(text) => {
-                        statement_and_params.statement.push_str(format!("{}, ", text?.to_str()?).as_str());
-                    }
-                    d_b_any::Which::Blob(blob) => {
-                        statement_and_params.statement.push_str(format!("{}, ", std::str::from_utf8(blob?)?).as_str());
-                    }
-                    d_b_any::Which::Pointer(pointer) => {
-                        let response = pointer.get_as_capability::<saveable::Client>()?.save_request().send().promise.await?;
-                        let restore_key = response.get()?.get_value().get_as::<&[u8]>()?;
-                        statement_and_params.statement.push_str(format!("{}, ", std::str::from_utf8(restore_key)?).as_str());
-                    }
+                    statement_and_params.statement.push_str(format!("{}, ", "null").as_str());
                 }
-            }
+                d_b_any::Which::Integer(int) => {
+                    if !db.column_set.borrow_mut().contains(&int.to_string()) {
+                        return Err(capnp::Error::failed("Invalid column specified in select clause results".to_string()));
+                    }
+                    statement_and_params.statement.push_str(format!("{}, ", int).as_str());
+                }
+                d_b_any::Which::Real(real) => {
+                    if !db.column_set.borrow_mut().contains(&real.to_string()) {
+                        return Err(capnp::Error::failed("Invalid column specified in select clause results".to_string()));
+                    }
+                    statement_and_params.statement.push_str(format!("{}, ", real).as_str());
+                }
+                d_b_any::Which::Text(text) => {
+                    let string = text?.to_string()?;
+                    if !db.column_set.borrow_mut().contains(&string) {
+                        return Err(capnp::Error::failed("Invalid column specified in select clause results".to_string()));
+                    }
+                    statement_and_params.statement.push_str(format!("{}, ", string).as_str());
+                }
+                d_b_any::Which::Blob(blob) => {
+                    let string = std::str::from_utf8(blob?)?.to_owned();
+                    if !db.column_set.borrow_mut().contains(&string) {
+                        return Err(capnp::Error::failed("Invalid column specified in select clause results".to_string()));
+                    }
+                    statement_and_params.statement.push_str(format!("{}, ", string).as_str());
+                }
+                d_b_any::Which::Pointer(pointer) => {
+                    let response = pointer.get_as_capability::<saveable::Client>()?.save_request().send().promise.await?;
+                    let restore_key = response.get()?.get_value().get_as::<&[u8]>()?;
+                    let string = std::str::from_utf8(restore_key)?.to_owned();
+                    if !db.column_set.borrow_mut().contains(&string) {
+                        return Err(capnp::Error::failed("Invalid column specified in select clause results".to_string()));
+                    }
+                    statement_and_params.statement.push_str(format!("{}, ", string).as_str());
+                }
+            },
             expr::Which::Bindparam(_) => {
                 return Err(capnp::Error::failed("Select result can't be a bindparam".into()));
             }
@@ -689,9 +702,9 @@ async fn build_select_statement<'a>(db: &SqliteDatabase, select: select::Reader<
         statement_and_params = Box::pin(build_join_clause(db, from, statement_and_params)).await?;
     }
     if selectcore.has_sql_where() {
-        statement_and_params.statement.push_str("WHERE ");
+        statement_and_params.statement.push_str(" WHERE ");
         match_where(db, selectcore.get_sql_where()?, &mut statement_and_params).await?;
-        statement_and_params.statement.push_str(" ");
+        statement_and_params.statement.push(' ');
     }
 
     for merge_operation in mergeoperations.iter() {
@@ -718,15 +731,15 @@ async fn build_select_statement<'a>(db: &SqliteDatabase, select: select::Reader<
     if limit.has_limit() {
         statement_and_params.statement.push_str("LIMIT ");
         match_expr(db, limit.get_limit()?, &mut statement_and_params).await?;
-        statement_and_params.statement.push_str(" ");
+        statement_and_params.statement.push(' ');
     }
     if limit.has_offset() {
         statement_and_params.statement.push_str("OFFSET ");
         match_expr(db, limit.get_offset()?, &mut statement_and_params).await?;
-        statement_and_params.statement.push_str(" ");
+        statement_and_params.statement.push(' ');
     }
 
-    return Ok(statement_and_params);
+    Ok(statement_and_params)
 }
 async fn build_function_invocation<'a>(db: &SqliteDatabase, function_reader: function_invocation::Reader<'a>, statement_and_params: &mut StatementAndParams) -> Result<(), capnp::Error> {
     let Some(server) = db.sql_function_set.borrow().get_local_server_of_resolved(&function_reader.reborrow().get_function()?) else {
@@ -740,9 +753,9 @@ async fn build_function_invocation<'a>(db: &SqliteDatabase, function_reader: fun
             statement_and_params.statement.push_str(", ");
         }
         statement_and_params.statement.truncate(statement_and_params.statement.len() - 2);
-        statement_and_params.statement.push_str(")");
+        statement_and_params.statement.push(')');
     }
-    return Ok(());
+    Ok(())
 }
 async fn build_join_clause<'a>(db: &SqliteDatabase, join_clause: join_clause::Reader<'a>, mut statement_and_params: StatementAndParams) -> Result<StatementAndParams, capnp::Error> {
     match join_clause.get_tableorsubquery()?.which()? {
@@ -846,19 +859,19 @@ async fn build_join_clause<'a>(db: &SqliteDatabase, join_clause: join_clause::Re
             }
             join_clause::join_operation::join_constraint::Which::Cols(cols) => {
                 statement_and_params.statement.push_str("USING ");
-                statement_and_params.statement.push_str("(");
+                statement_and_params.statement.push('(');
                 for col_name in cols?.iter() {
                     statement_and_params.statement.push_str(format!("{}, ", col_name?.to_str()?).as_str());
                 }
                 statement_and_params.statement.truncate(statement_and_params.statement.len() - 2);
-                statement_and_params.statement.push_str(")");
+                statement_and_params.statement.push(')');
             }
             join_clause::join_operation::join_constraint::Which::Empty(_) => (),
         }
     }
-    return Ok(statement_and_params);
+    Ok(statement_and_params)
 }
-fn build_results_stream_buffer<'a>(mut rows: rusqlite::Rows<'a>) -> capnp::Result<Vec<Vec<dbany>>> {
+fn build_results_stream_buffer(mut rows: rusqlite::Rows<'_>) -> capnp::Result<Vec<Vec<dbany>>> {
     let mut row_vec = Vec::new();
     while let Ok(Some(row)) = rows.next() {
         let mut value_vec = Vec::new();
@@ -875,7 +888,7 @@ fn build_results_stream_buffer<'a>(mut rows: rusqlite::Rows<'a>) -> capnp::Resul
         }
         row_vec.push(value_vec)
     }
-    return Ok(row_vec);
+    Ok(row_vec)
 }
 async fn match_expr<'a>(db: &SqliteDatabase, expr: expr::Reader<'a>, statement_and_params: &mut StatementAndParams) -> capnp::Result<()> {
     match expr.which()? {
@@ -931,11 +944,30 @@ async fn match_dbany<'a>(dbany: d_b_any::Reader<'a>, statement_and_params: &mut 
     Ok(())
 }
 async fn match_where<'a>(db: &SqliteDatabase, w_expr: where_expr::Reader<'a>, statement_and_params: &mut StatementAndParams) -> capnp::Result<()> {
-    statement_and_params.statement.push_str(format!("{}", w_expr.get_column()?.to_str()?).as_str());
-    if w_expr.get_operator_and_expr()?.is_empty() {
+    let cols = w_expr.get_cols()?;
+    let cols_len = cols.len();
+    if cols_len == 0 {
+        return Err(capnp::Error::failed("Where clause does not have any column names specified".to_string()));
+    }
+    if cols_len > 1 {
+        statement_and_params.statement.push('(');
+    }
+    for column in cols.iter() {
+        let column = column?.to_string()?;
+        if !db.column_set.borrow_mut().contains(&column) {
+            return Err(capnp::Error::failed("Invalid column specified in where clause".to_string()));
+        }
+        statement_and_params.statement.push_str(format!("{}, ", column).as_str());
+    }
+    statement_and_params.statement.truncate(statement_and_params.statement.len() - 2);
+    if cols_len > 1 {
+        statement_and_params.statement.push(')');
+    }
+    let operator_and_expr = w_expr.get_operator_and_expr()?;
+    if operator_and_expr.is_empty() {
         return Err(capnp::Error::failed("Where clause is missing operator and condition".to_string()));
     }
-    for w_expr in w_expr.get_operator_and_expr()?.iter() {
+    for w_expr in operator_and_expr.iter() {
         match w_expr.get_operator()? {
             where_expr::Operator::Is => statement_and_params.statement.push_str(" IS "),
             where_expr::Operator::IsNot => statement_and_params.statement.push_str(" IS NOT "),
@@ -969,7 +1001,7 @@ async fn fill_in_bindparams<'a>(bindparam_indexes: &Vec<usize>, params: &mut Vec
             return Err(capnp::Error::failed("Not enough params provided for binding slots specified in prepare statement".to_string()));
         }
     }
-    if let Some(_) = bindings_iter.next() {
+    if bindings_iter.next().is_some() {
         return Err(capnp::Error::failed("Too many params provided for binding slots specified in prepare statement".to_string()));
     }
     Ok(())
@@ -977,6 +1009,8 @@ async fn fill_in_bindparams<'a>(bindparam_indexes: &Vec<usize>, params: &mut Vec
 
 #[cfg(test)]
 mod tests {
+    use capnp::capability::FromClientHook;
+
     use super::*;
     #[tokio::test]
     async fn test_test() -> eyre::Result<()> {
@@ -1048,7 +1082,13 @@ mod tests {
                 _tableorsubquery: Some(table_or_subquery::TableOrSubquery::_Tableref(ro_tableref_cap.clone())),
                 _joinoperations: Vec::new(),
             }),
-            _sql_where: Some(where_expr::WhereExpr{_column: "name".to_string(), _operator_and_expr: vec![where_expr::op_and_expr::OpAndExpr{_operator: where_expr::Operator::Is, _expr: Some(expr::Expr::_Literal(d_b_any::DBAny::_Text("ToUpdate".to_string())))}]}),
+            _sql_where: Some(where_expr::WhereExpr {
+                _cols: vec!["name".to_string()],
+                _operator_and_expr: vec![where_expr::op_and_expr::OpAndExpr {
+                    _operator: where_expr::Operator::Is,
+                    _expr: Some(expr::Expr::_Literal(d_b_any::DBAny::_Text("ToUpdate".to_string()))),
+                }],
+            }),
             _returning: Vec::new(),
         }));
         update_request.send().promise.await?;
@@ -1117,24 +1157,24 @@ mod tests {
 //TODO maybe needs to be more specific, but potentially would reveal information that should stay private
 fn convert_rusqlite_error(err: rusqlite::Error) -> capnp::Error {
     match err {
-        rusqlite::Error::SqliteFailure(_, _) => capnp::Error::failed(format!("Error from underlying sqlite call")),
-        rusqlite::Error::SqliteSingleThreadedMode => capnp::Error::failed(format!("Attempting to open multiple connection when sqlite is in single threaded mode")),
-        rusqlite::Error::FromSqlConversionFailure(_, _, _) => capnp::Error::failed(format!("Error converting sql type to rust type")),
-        rusqlite::Error::IntegralValueOutOfRange(_, _) => capnp::Error::failed(format!("Integral value out of range")),
+        rusqlite::Error::SqliteFailure(_, _) => capnp::Error::failed("Error from underlying sqlite call".to_string()),
+        rusqlite::Error::SqliteSingleThreadedMode => capnp::Error::failed("Attempting to open multiple connection when sqlite is in single threaded mode".to_string()),
+        rusqlite::Error::FromSqlConversionFailure(_, _, _) => capnp::Error::failed("Error converting sql type to rust type".to_string()),
+        rusqlite::Error::IntegralValueOutOfRange(_, _) => capnp::Error::failed("Integral value out of range".to_string()),
         rusqlite::Error::Utf8Error(e) => capnp::Error::from_kind(capnp::ErrorKind::TextContainsNonUtf8Data(e)),
-        rusqlite::Error::NulError(_) => capnp::Error::failed(format!("Error converting string to c-compatible strting, because it contains an embeded null")),
-        rusqlite::Error::InvalidParameterName(_) => capnp::Error::failed(format!("Invalid parameter name")),
-        rusqlite::Error::InvalidPath(_) => capnp::Error::failed(format!("Invalid path")),
-        rusqlite::Error::ExecuteReturnedResults => capnp::Error::failed(format!("Execute call returned rows")),
-        rusqlite::Error::QueryReturnedNoRows => capnp::Error::failed(format!("Query that was expected to return rows returned no rows")),
-        rusqlite::Error::InvalidColumnIndex(_) => capnp::Error::failed(format!("Invalid column index")),
-        rusqlite::Error::InvalidColumnName(_) => capnp::Error::failed(format!("Invalid column name")),
-        rusqlite::Error::InvalidColumnType(_, _, _) => capnp::Error::failed(format!("Invalid column type")),
-        rusqlite::Error::StatementChangedRows(_) => capnp::Error::failed(format!("Query changed more/less rows than expected")),
-        rusqlite::Error::ToSqlConversionFailure(_) => capnp::Error::failed(format!("Failed to convert type to sql type")),
-        rusqlite::Error::InvalidQuery => capnp::Error::failed(format!("Invalid query")),
-        rusqlite::Error::MultipleStatement => capnp::Error::failed(format!("Sql contains multiple statements")),
-        rusqlite::Error::InvalidParameterCount(_, _) => capnp::Error::failed(format!("Invalid parameter count")),
-        _ => capnp::Error::failed(format!("Sqlite error")),
+        rusqlite::Error::NulError(_) => capnp::Error::failed("Error converting string to c-compatible strting, because it contains an embeded null".to_string()),
+        rusqlite::Error::InvalidParameterName(_) => capnp::Error::failed("Invalid parameter name".to_string()),
+        rusqlite::Error::InvalidPath(_) => capnp::Error::failed("Invalid path".to_string()),
+        rusqlite::Error::ExecuteReturnedResults => capnp::Error::failed("Execute call returned rows".to_string()),
+        rusqlite::Error::QueryReturnedNoRows => capnp::Error::failed("Query that was expected to return rows returned no rows".to_string()),
+        rusqlite::Error::InvalidColumnIndex(_) => capnp::Error::failed("Invalid column index".to_string()),
+        rusqlite::Error::InvalidColumnName(_) => capnp::Error::failed("Invalid column name".to_string()),
+        rusqlite::Error::InvalidColumnType(_, _, _) => capnp::Error::failed("Invalid column type".to_string()),
+        rusqlite::Error::StatementChangedRows(_) => capnp::Error::failed("Query changed more/less rows than expected".to_string()),
+        rusqlite::Error::ToSqlConversionFailure(_) => capnp::Error::failed("Failed to convert type to sql type".to_string()),
+        rusqlite::Error::InvalidQuery => capnp::Error::failed("Invalid query".to_string()),
+        rusqlite::Error::MultipleStatement => capnp::Error::failed("Sql contains multiple statements".to_string()),
+        rusqlite::Error::InvalidParameterCount(_, _) => capnp::Error::failed("Invalid parameter count".to_string()),
+        _ => capnp::Error::failed("Sqlite error".to_string()),
     }
 }

@@ -143,7 +143,7 @@ struct WhereExpr {
 		operator @0 :Operator;
 		expr @1 :Expr;
 	}
-	column @0 :Text;
+	cols @0 :List(Text);
 	operatorAndExpr @1 :List(OpAndExpr);
 }
 

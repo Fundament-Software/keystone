@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::{fs::File, io::BufReader, path::Path};
 
 use crate::keystone::Error;
@@ -253,17 +253,7 @@ fn value_to_struct<F>(
 where
     F: FnMut(*const Value) -> Option<u32>,
 {
-    // Check if this struct has an autofill cell
-    for field in builder.get_schema().get_fields()? {
-        for annotation in field.get_annotations()?.iter() {
-            if annotation.get_id() == crate::module_capnp::autocell::ID {
-                // Add this as a null value pointer (or None if the unsafe pointer is ever turned into an optional reference)
-                unsafe {
-                    builder.set_capability_to_int(field, callback(std::ptr::null()).unwrap())?;
-                }
-            }
-        }
-    }
+    let mut bypass = HashSet::new();
 
     'outer: for (k, v) in t.iter() {
         let mut builder = builder.reborrow();
@@ -275,27 +265,22 @@ where
                 if s.get_type_id() == toml_capnp::value::Builder::TYPE_ID {
                     let dynamic: dynamic_struct::Builder = builder.init(field)?.downcast();
                     toml_to_capnp(v, dynamic.downcast()?)?;
-                    return Ok(());
-                }
-            }
-
-            // Throw an error if you attempt to assign a value to an autofill cell
-            for annotation in field.get_annotations()?.iter() {
-                if annotation.get_id() == crate::module_capnp::autocell::ID {
-                    return Err(Error::CannotAssignAutocell.into());
+                    continue 'outer;
                 }
             }
 
             // If we've reached a capability, halt TOML parsing and make sure all nested capabilities are registered
             if let schema_capnp::type_::Which::Interface(_) = x.get_type()?.which()? {
-                // TODO: refactor capnproto-rust so we don't have to do this
+                // Register that we set this field so we don't autofill it
+                bypass.insert(field.get_index());
 
+                // TODO: refactor capnproto-rust so we don't have to do this
                 unsafe {
                     if let Some(capid) = callback(v as *const Value) {
                         builder.set_capability_to_int(field, capid)?;
                     }
                 }
-                return Ok(());
+                continue 'outer;
             }
         }
 
@@ -340,6 +325,21 @@ where
         }
     }
 
+    // Check if this struct has an autofill cell, but only if it wasn't already set
+    for field in builder.get_schema().get_fields()? {
+        if !bypass.contains(&field.get_index()) {
+            for annotation in field.get_annotations()?.iter() {
+                if annotation.get_id() == crate::module_capnp::autocell::ID {
+                    // Add this as a null value pointer (or None if the unsafe pointer is ever turned into an optional reference)
+                    unsafe {
+                        builder
+                            .set_capability_to_int(field, callback(std::ptr::null()).unwrap())?;
+                    }
+                    break;
+                }
+            }
+        }
+    }
     Ok(())
 }
 

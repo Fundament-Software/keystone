@@ -2,5 +2,5 @@
     "rust-analyzer.linkedProjects": [
         "Cargo.toml"
     ],
-    "rust-analyzer.checkOnSave": false
+    "rust-analyzer.checkOnSave": true
 }

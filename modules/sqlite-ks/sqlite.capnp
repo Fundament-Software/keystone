@@ -15,17 +15,13 @@ struct TableField {
 
 struct DBAny {
     union {
-			null @0 :Void;
+	  null @0 :Void;
       integer @1 :Int64;
       real @2 :Float64;
       text @3 :Text;
       blob @4 :Data;
       pointer @5 :AnyPointer;
     }
-}
-
-struct TableDef {
-  fields @0 :List(TableField);
 }
 
 interface ROTableRef {}
@@ -61,14 +57,14 @@ struct IndexedColumn {
 struct IndexDef {
 	base @0 :TableRef;
 	cols @1 :List(IndexedColumn); # must be nonempty
-	where @2 :Expr; # may be null
+	sqlWhere @2 :WhereExpr; # may be null
 }
 
 interface Index {
 }
 
 interface AddDB extends(Database)  {
-  createTable @0 (def :TableDef) -> (res :Table);
+  createTable @0 (def :List(TableField)) -> (res :Table);
 	createView @1 (names :List(Text), def :Select) -> (res :ROTableRef);
 
 	createRestrictedTable @2 (base :Table, restriction :List(TableRestriction)) -> (res :Table);
@@ -76,7 +72,7 @@ interface AddDB extends(Database)  {
 	# It will have triggers instead of insert, update, and delete that forward the operations to the base table with the restricted fields set to the specified values.
 	# this can be used to share a subset of a data table in a secure manner.
 
-	createIndex @3 (base :TableRef, cols :List(IndexedColumn), where :Expr) -> (res :Index);
+	createIndex @3 (base :TableRef, cols :List(IndexedColumn), sqlWhere :WhereExpr) -> (res :Index);
 }
 
 interface Database extends(RODatabase) {
@@ -130,10 +126,25 @@ struct Expr {
 
 	union {
 		literal @0 :DBAny;
-		bindparam @1 :UInt16;
+		bindparam @1 :Void;
 		tablereference @2 :TableColumn;
 		functioninvocation @3 :FunctionInvocation;
 	}
+}
+
+struct WhereExpr {
+	enum Operator {
+		is @0;
+		isNot @1;
+		and @2;
+		or @3;
+	}
+	struct OpAndExpr {
+		operator @0 :Operator;
+		expr @1 :Expr;
+	}
+	cols @0 :List(Text);
+	operatorAndExpr @1 :List(OpAndExpr);
 }
 
 
@@ -193,7 +204,7 @@ struct Select {
 struct SelectCore {
  	from @0 :JoinClause; # May be null; if null then the results must be constant expressions and generated select will not have a from clause
   results @1 :List(Expr); # Must be provided
-  where @2 :Expr; # may be null; if null then the generated select will not have a where clause; must be a boolean valued expression
+  sqlWhere @2 :WhereExpr; # may be null; if null then the generated select will not have a where clause; must be a boolean valued expression
 }
 
 
@@ -236,7 +247,7 @@ interface TableFunctionRef {
 
 struct TableOrSubquery {
   struct TableFunctionInvocation {
-    ref @0 :TableFunctionRef;
+    functionref @0 :TableFunctionRef;
 		exprs @1 :List(Expr);
   }
 
@@ -245,6 +256,8 @@ struct TableOrSubquery {
     tablefunctioninvocation @1 :TableFunctionInvocation;
 		select @2 :Select;
 		joinclause @3 :JoinClause;
+		null @4 :Void;
+
   }
 }
 
@@ -286,12 +299,12 @@ struct Update {
 	fallback @0 :ConflictStrategy;
 	assignments @1 :List(Assignment);
 	from @2 :JoinClause;
-	where @3 :Expr;
+	sqlWhere @3 :WhereExpr;
 	returning @4 :List(Expr);
 }
 
 struct Delete {
 	from @0 :TableRef;
-	where @1 :Expr;
+	sqlWhere @1 :WhereExpr;
 	returning @2 :List(Expr);
 }

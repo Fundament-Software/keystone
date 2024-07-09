@@ -113,7 +113,7 @@ where
 
 fn toml_to_capnp(v: &Value, mut builder: toml_capnp::value::Builder) -> Result<()> {
     match v {
-        Value::String(s) => builder.set_str(s.as_str().into()),
+        Value::String(s) => builder.set_toml_string(s.as_str().into()),
         Value::Integer(i) => builder.set_int(*i),
         Value::Float(f) => builder.set_float(*f),
         Value::Boolean(b) => builder.set_boolean(*b),

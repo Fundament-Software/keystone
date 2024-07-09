@@ -13,7 +13,7 @@ struct DateTime {
 
 struct Value {
   union {
-    str @0 :Text;
+    tomlString @0 :Text;
     int @1 :Int64;
     float @2 :Float64;
     boolean @3 :Bool;

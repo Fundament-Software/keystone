@@ -3,7 +3,6 @@ members = [
   "core",
   "core/schema",
   "build",
-  "modules/sqlite-ks",
   "modules/hello-world",
   "modules/indirect-world",
   "modules/stateful",

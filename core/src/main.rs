@@ -14,6 +14,7 @@ mod posix_module;
 mod posix_spawn;
 mod proxy;
 mod spawn;
+mod sqlite;
 
 capnp_import::capnp_import!("/schema/**/*.capnp");
 

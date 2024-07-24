@@ -59,6 +59,7 @@ thiserror = "1.0.61"
 wasmparser = { version = "0.207.0", default-features = false, optional = true }
 keystone-schema.workspace = true
 append-only-vec = "0.1.5"
+rand.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2.139"

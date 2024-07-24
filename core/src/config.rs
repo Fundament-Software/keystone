@@ -35,11 +35,33 @@ fn expr_recurse(val: &Value, exprs: &mut HashMap<*const Value, u32>) {
     }
 }
 
+type SchemaVec = append_only_vec::AppendOnlyVec<(String, DynamicSchema)>;
+
+struct SchemaPool(SchemaVec);
+
+impl SchemaPool {
+    fn new() -> Self {
+        Self(SchemaVec::new())
+    }
+
+    fn get<'a>(&'a self, name: &str) -> Option<&'a DynamicSchema> {
+        self.0
+            .iter()
+            .filter(|(existing_name, _)| name == existing_name)
+            .next()
+            .map(|(_, sc)| sc)
+    }
+
+    fn insert(&self, name: String, schema: DynamicSchema) {
+        self.0.push((name, schema));
+    }
+}
+
 fn value_to_list<F>(
     l: &[Value],
     mut builder: ::capnp::dynamic_list::Builder,
     schema: capnp::schema_capnp::type_::Reader,
-    schemas: &mut HashMap<String, DynamicSchema>,
+    schemas: &SchemaPool,
     callback: &mut F,
 ) -> Result<()>
 where
@@ -158,7 +180,7 @@ fn toml_to_capnp(v: &Value, mut builder: toml_capnp::value::Builder) -> Result<(
 fn toml_to_config<F>(
     v: &Table,
     mut builder: keystone_config::module_config::Builder<capnp::any_pointer::Owned>,
-    schemas: &mut HashMap<String, DynamicSchema>,
+    schemas: &SchemaPool,
     callback: &mut F,
 ) -> Result<()>
 where
@@ -247,7 +269,7 @@ where
 fn value_to_struct<F>(
     t: &Table,
     mut builder: dynamic_struct::Builder,
-    schemas: &mut HashMap<String, DynamicSchema>,
+    schemas: &SchemaPool,
     callback: &mut F,
 ) -> Result<()>
 where
@@ -385,7 +407,7 @@ fn build_cap_field<'a, F>(
     name: &str,
     mut expr: cap_expr::Builder<'a>,
     root: &DynamicSchema,
-    schemas: &mut HashMap<String, DynamicSchema>,
+    schemas: &SchemaPool,
     callback: &mut F,
     list: &[Value],
     s: capnp::schema::StructSchema,
@@ -483,18 +505,18 @@ fn build_cap_method<'a, F>(
     v: &Table,
     interface_reader: capnp::schema_capnp::node::interface::Reader,
     id: u64,
-    mut expr: cap_expr::Builder<'a>,
+    expr: cap_expr::Builder<'a>,
     root: &DynamicSchema,
-    schemas: &mut HashMap<String, DynamicSchema>,
+    schemas: &SchemaPool,
     callback: &mut F,
     list: &[Value],
-) -> Result<Option<cap_expr::Builder<'a>>>
+) -> Result<Result<cap_expr::Builder<'a>, cap_expr::Builder<'a>>>
 where
     F: FnMut(*const Value) -> Option<u32>,
 {
     for (ordinal, method) in interface_reader.get_methods()?.into_iter().enumerate() {
         if method.get_name()? == name {
-            let mut expr = if let TypeVariant::Struct(st) = root
+            let expr = if let TypeVariant::Struct(st) = root
                 .get_type_by_id(method.get_result_struct_type())
                 .ok_or(eyre!(
                     "Couldn't find return values for {} with id {}!",
@@ -522,7 +544,7 @@ where
                     method.get_param_struct_type()
                 ))?;
             if let TypeVariant::Struct(st) = params {
-                let builder = expr.init_args();
+                let builder = expr.reborrow().init_args();
                 let dynobj = builder.init_dynamic((*st).into())?;
                 value_to_struct(v, dynobj, schemas, callback)?;
             } else {
@@ -533,20 +555,20 @@ where
                 .into());
             }
 
-            return Ok(Some(expr.init_subject()));
+            return Ok(Ok(expr.init_subject()));
         }
     }
 
-    Ok(None)
+    Ok(Err(expr))
 }
 
 fn eval_toml_capability<'a, F>(
     k: &str,
     v: &Table,
-    mut expr: cap_expr::Builder<'a>,
+    expr: cap_expr::Builder<'a>,
     schema: CapabilitySchema,
     root: &DynamicSchema,
-    schemas: &mut HashMap<String, DynamicSchema>,
+    schemas: &SchemaPool,
     callback: &mut F,
     list: &[Value],
 ) -> Result<cap_expr::Builder<'a>>
@@ -554,41 +576,43 @@ where
     F: FnMut(*const Value) -> Option<u32>,
 {
     if let capnp::schema_capnp::node::Interface(interface_reader) = schema.get_proto().which()? {
-        if let Some(builder) = build_cap_method(
+        match build_cap_method(
             k,
             v,
             interface_reader,
             schema.get_proto().get_id(),
-            expr.reborrow(),
+            expr,
             root,
             schemas,
             callback,
             list,
         )? {
-            return Ok(builder);
-        } else {
-            let extends = interface_reader.get_superclasses()?;
-            for superclass in extends {
-                if let TypeVariant::Capability(cs) = root
-                    .get_type_by_id(superclass.get_id())
-                    .ok_or(eyre!("Couldn't find superclass {}!", superclass.get_id()))?
-                {
-                    // transform into a reader we can do something with
-                    if let capnp::schema_capnp::node::Interface(interface_reader) =
-                        CapabilitySchema::new(*cs).get_proto().which()?
+            Ok(builder) => return Ok(builder),
+            Err(mut expr) => {
+                let extends = interface_reader.get_superclasses()?;
+                for superclass in extends {
+                    if let TypeVariant::Capability(cs) = root
+                        .get_type_by_id(superclass.get_id())
+                        .ok_or(eyre!("Couldn't find superclass {}!", superclass.get_id()))?
                     {
-                        if let Some(builder) = build_cap_method(
-                            k,
-                            v,
-                            interface_reader,
-                            superclass.get_id(),
-                            expr.reborrow(),
-                            root,
-                            schemas,
-                            callback,
-                            list,
-                        )? {
-                            return Ok(builder);
+                        // transform into a reader we can do something with
+                        if let capnp::schema_capnp::node::Interface(interface_reader) =
+                            CapabilitySchema::new(*cs).get_proto().which()?
+                        {
+                            expr = match build_cap_method(
+                                k,
+                                v,
+                                interface_reader,
+                                superclass.get_id(),
+                                expr,
+                                root,
+                                schemas,
+                                callback,
+                                list,
+                            )? {
+                                Ok(builder) => return Ok(builder),
+                                Err(expr) => expr,
+                            }
                         }
                     }
                 }
@@ -602,7 +626,7 @@ where
 fn compile_toml_expr<F>(
     v: &Value,
     mut expr: cap_expr::Builder,
-    schemas: &mut HashMap<String, DynamicSchema>,
+    schemas: &SchemaPool,
     callback: &mut F,
 ) -> Result<()>
 where
@@ -692,26 +716,23 @@ where
 pub fn to_capnp(config: &Table, mut msg: keystone_config::Builder<'_>) -> Result<()> {
     let dynamic: dynamic_value::Builder = msg.reborrow().into();
     let mut exprs: HashMap<*const Value, u32> = HashMap::new();
-    let mut schemas: HashMap<String, DynamicSchema> = HashMap::new();
+    let schemas: SchemaPool = SchemaPool::new();
     let exprs_ref = &mut exprs;
-    value_to_struct(
-        config,
-        dynamic.downcast(),
-        &mut schemas,
-        &mut |v| -> Option<u32> {
-            if v.is_null() {
-                exprs_ref.insert(v, exprs_ref.len() as u32);
+    value_to_struct(config, dynamic.downcast(), &schemas, &mut |v| -> Option<
+        u32,
+    > {
+        if v.is_null() {
+            exprs_ref.insert(v, exprs_ref.len() as u32);
+            Some(exprs_ref[&v])
+        } else {
+            expr_recurse(unsafe { v.as_ref().unwrap() }, exprs_ref);
+            if exprs_ref.contains_key(&v) {
                 Some(exprs_ref[&v])
             } else {
-                expr_recurse(unsafe { v.as_ref().unwrap() }, exprs_ref);
-                if exprs_ref.contains_key(&v) {
-                    Some(exprs_ref[&v])
-                } else {
-                    None
-                }
+                None
             }
-        },
-    )?;
+        }
+    })?;
 
     // We've already identified all capexprs that need to be rooted in the cap table
     let mut builder = msg.init_cap_table(exprs.len() as u32);
@@ -723,7 +744,7 @@ pub fn to_capnp(config: &Table, mut msg: keystone_config::Builder<'_>) -> Result
             compile_toml_expr(
                 unsafe { k.as_ref().unwrap() },
                 builder.reborrow().get(*v),
-                &mut schemas,
+                &schemas,
                 &mut |v| -> Option<u32> {
                     if exprs.contains_key(&v) {
                         Some(exprs[&v])

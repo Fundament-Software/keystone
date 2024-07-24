@@ -32,9 +32,9 @@ impl cell::Server<any_pointer> for SimpleCellImpl {
     async fn get(&self) {
         self.db
             .borrow_mut()
-            .get_state(self.id, results.get().init_data())
+            .get_state(self.id, results.get().init_data().into())
             .map_err(|e| {
-                //eprintln!("ERROR: {}", e);
+                eprintln!("CELL GET ERROR: {}", e);
                 capnp::Error::failed(
                     "Cell did not exist! did you forget to set it to something first?".into(),
                 )
@@ -43,7 +43,7 @@ impl cell::Server<any_pointer> for SimpleCellImpl {
     }
     async fn set(&self, data: capnp::any_pointer::Reader) {
         self.db.borrow_mut().set_state(self.id, data).map_err(|e| {
-            //eprintln!("ERROR: {}", e);
+            eprintln!("CELL SET ERROR: {}", e);
             capnp::Error::failed("Could not set data for cell!".into())
         })?;
         Ok(())

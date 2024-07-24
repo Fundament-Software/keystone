@@ -122,7 +122,7 @@ fn test_indirect_init() -> eyre::Result<()> {
     source.push_str(&keystone_util::build_module_config(
         "Indirect World",
         "indirect-world-module",
-        r#"{ helloWorld = { "@Hello World" = 0 } }"#,
+        r#"{ helloWorld = [ "@Hello World" ] }"#,
     ));
 
     let pool = tokio::task::LocalSet::new();

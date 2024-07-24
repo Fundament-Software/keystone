@@ -111,7 +111,7 @@ impl r_o_database::Server for SqliteDatabase {
         let statement_and_params = build_select_statement(self, q, StatementAndParams::new(80)).await?;
 
         let mut stmt = self.connection.prepare(statement_and_params.statement.as_str()).map_err(convert_rusqlite_error)?;
-        let mut rows = stmt.query(params_from_iter(statement_and_params.sql_params.iter())).map_err(convert_rusqlite_error)?;
+        let rows = stmt.query(params_from_iter(statement_and_params.sql_params.iter())).map_err(convert_rusqlite_error)?;
         let row_vec = build_results_stream_buffer(rows)?;
         results.get().set_res(capnp_rpc::new_client(PlaceholderResults {
             buffer: row_vec,
@@ -136,7 +136,7 @@ impl r_o_database::Server for SqliteDatabase {
         let mut prepared = self.connection.prepare_cached(statement_and_params.statement.as_str()).map_err(convert_rusqlite_error)?;
         let mut params = statement_and_params.sql_params.clone();
         fill_in_bindparams(&statement_and_params.bindparam_indexes, &mut params, bindings).await?;
-        let mut rows = prepared.query(params_from_iter(params.iter())).map_err(convert_rusqlite_error)?;
+        let rows = prepared.query(params_from_iter(params.iter())).map_err(convert_rusqlite_error)?;
         let row_vec = build_results_stream_buffer(rows)?;
         results.get().set_res(capnp_rpc::new_client(PlaceholderResults {
             buffer: row_vec,
@@ -151,7 +151,7 @@ impl database::Server for SqliteDatabase {
     async fn insert(&self, ins: Insert) {
         let statement_and_params = build_insert_statement(self, ins, StatementAndParams::new(100)).await?;
         let mut stmt = self.connection.prepare(statement_and_params.statement.as_str()).map_err(convert_rusqlite_error)?;
-        let mut rows = stmt.query(params_from_iter(statement_and_params.sql_params.iter())).map_err(convert_rusqlite_error)?;
+        let rows = stmt.query(params_from_iter(statement_and_params.sql_params.iter())).map_err(convert_rusqlite_error)?;
         let row_vec = build_results_stream_buffer(rows)?;
         results.get().set_res(capnp_rpc::new_client(PlaceholderResults {
             buffer: row_vec,
@@ -174,7 +174,7 @@ impl database::Server for SqliteDatabase {
         let mut prepared = self.connection.prepare_cached(statement_and_params.statement.as_str()).map_err(convert_rusqlite_error)?;
         let mut params = statement_and_params.sql_params.clone();
         fill_in_bindparams(&statement_and_params.bindparam_indexes, &mut params, bindings).await?;
-        let mut rows = prepared.query(params_from_iter(params.iter())).map_err(convert_rusqlite_error)?;
+        let rows = prepared.query(params_from_iter(params.iter())).map_err(convert_rusqlite_error)?;
         let row_vec = build_results_stream_buffer(rows)?;
         results.get().set_res(capnp_rpc::new_client(PlaceholderResults {
             buffer: row_vec,
@@ -185,7 +185,7 @@ impl database::Server for SqliteDatabase {
     async fn update(&self, upd: Update) {
         let statement_and_params = build_update_statement(self, upd, StatementAndParams::new(120)).await?;
         let mut stmt = self.connection.prepare(statement_and_params.statement.as_str()).map_err(convert_rusqlite_error)?;
-        let mut rows = stmt.query(params_from_iter(statement_and_params.sql_params.iter())).map_err(convert_rusqlite_error)?;
+        let rows = stmt.query(params_from_iter(statement_and_params.sql_params.iter())).map_err(convert_rusqlite_error)?;
         let row_vec = build_results_stream_buffer(rows)?;
         results.get().set_res(capnp_rpc::new_client(PlaceholderResults {
             buffer: row_vec,
@@ -207,7 +207,7 @@ impl database::Server for SqliteDatabase {
         let mut prepared = self.connection.prepare_cached(statement_and_params.statement.as_str()).map_err(convert_rusqlite_error)?;
         let mut params = statement_and_params.sql_params.clone();
         fill_in_bindparams(&statement_and_params.bindparam_indexes, &mut params, bindings).await?;
-        let mut rows = prepared.query(params_from_iter(params.iter())).map_err(convert_rusqlite_error)?;
+        let rows = prepared.query(params_from_iter(params.iter())).map_err(convert_rusqlite_error)?;
         let row_vec = build_results_stream_buffer(rows)?;
         results.get().set_res(capnp_rpc::new_client(PlaceholderResults {
             buffer: row_vec,
@@ -218,7 +218,7 @@ impl database::Server for SqliteDatabase {
     async fn delete(&self, del: Delete) {
         let statement_and_params = build_delete_statement(self, del, StatementAndParams::new(80)).await?;
         let mut stmt = self.connection.prepare(statement_and_params.statement.as_str()).map_err(convert_rusqlite_error)?;
-        let mut rows = stmt.query(params_from_iter(statement_and_params.sql_params.iter())).map_err(convert_rusqlite_error)?;
+        let rows = stmt.query(params_from_iter(statement_and_params.sql_params.iter())).map_err(convert_rusqlite_error)?;
         let row_vec = build_results_stream_buffer(rows)?;
         results.get().set_res(capnp_rpc::new_client(PlaceholderResults {
             buffer: row_vec,
@@ -240,7 +240,7 @@ impl database::Server for SqliteDatabase {
         let mut prepared = self.connection.prepare_cached(statement_and_params.statement.as_str()).map_err(convert_rusqlite_error)?;
         let mut params = statement_and_params.sql_params.clone();
         fill_in_bindparams(&statement_and_params.bindparam_indexes, &mut params, bindings).await?;
-        let mut rows = prepared.query(params_from_iter(params.iter())).map_err(convert_rusqlite_error)?;
+        let rows = prepared.query(params_from_iter(params.iter())).map_err(convert_rusqlite_error)?;
         let row_vec = build_results_stream_buffer(rows)?;
         results.get().set_res(capnp_rpc::new_client(PlaceholderResults {
             buffer: row_vec,
@@ -394,7 +394,7 @@ impl add_d_b::Server for SqliteDatabase {
             match_where(self, params.get()?.get_sql_where()?, &mut statement_and_params).await?;
         }
         let mut stmt = self.connection.prepare(statement_and_params.statement.as_str()).map_err(convert_rusqlite_error)?;
-        let mut rows = stmt.query(params_from_iter(statement_and_params.sql_params.iter())).map_err(convert_rusqlite_error)?;
+        let rows = stmt.query(params_from_iter(statement_and_params.sql_params.iter())).map_err(convert_rusqlite_error)?;
         results.get().set_res(self.index_set.borrow_mut().new_client(index_name));
         Ok(())
     }
@@ -1017,7 +1017,7 @@ mod tests {
         let db_path = "test_db";
         let (client, connection) = SqliteDatabase::new(db_path, OpenFlags::default())?;
 
-        let mut create_table_request = client.build_create_table_request(vec![
+        let create_table_request = client.build_create_table_request(vec![
             table_field::TableField {
                 _name: "name".to_string(),
                 _base_type: table_field::Type::Text,
@@ -1048,7 +1048,7 @@ mod tests {
 
         let ro_tableref_cap = ra_table_ref_cap.readonly_request().send().promise.await?.get()?.get_res()?;
 
-        let mut insert_request = client.clone().cast_to::<database::Client>().build_insert_request(Some(insert::Insert {
+        let insert_request = client.clone().cast_to::<database::Client>().build_insert_request(Some(insert::Insert {
             _fallback: insert::ConflictStrategy::Fail,
             _target: ra_table_ref_cap.clone(),
             _source: source::Source::_Values(vec![vec![d_b_any::DBAny::_Text("Steven".to_string()), d_b_any::DBAny::_Null(())]]),
@@ -1057,7 +1057,7 @@ mod tests {
         }));
         insert_request.send().promise.await?;
 
-        let mut insert_request = client.clone().cast_to::<database::Client>().build_insert_request(Some(insert::Insert {
+        let insert_request = client.clone().cast_to::<database::Client>().build_insert_request(Some(insert::Insert {
             _fallback: insert::ConflictStrategy::Abort,
             _target: ra_table_ref_cap.clone(),
             _source: source::Source::_Values(vec![vec![d_b_any::DBAny::_Text("ToUpdate".to_string()), d_b_any::DBAny::_Blob(vec![4, 5, 6])]]),
@@ -1066,7 +1066,7 @@ mod tests {
         }));
         insert_request.send().promise.await?;
 
-        let mut update_request = client.clone().cast_to::<database::Client>().build_update_request(Some(update::Update {
+        let update_request = client.clone().cast_to::<database::Client>().build_update_request(Some(update::Update {
             _fallback: update::ConflictStrategy::Fail,
             _assignments: vec![
                 update::assignment::Assignment {
@@ -1093,7 +1093,7 @@ mod tests {
         }));
         update_request.send().promise.await?;
 
-        let mut prepare_insert_request = client.clone().cast_to::<database::Client>().build_prepare_insert_request(Some(insert::Insert {
+        let prepare_insert_request = client.clone().cast_to::<database::Client>().build_prepare_insert_request(Some(insert::Insert {
             _fallback: insert::ConflictStrategy::Ignore,
             _target: ra_table_ref_cap.clone(),
             _cols: vec!["name".to_string(), "data".to_string()],
@@ -1106,7 +1106,7 @@ mod tests {
         run_request.get().init_bindings(1).get(0).set_text("meow".into());
         run_request.send().promise.await?;
 
-        let mut select_request = client.clone().cast_to::<r_o_database::Client>().build_select_request(Some(select::Select {
+        let select_request = client.clone().cast_to::<r_o_database::Client>().build_select_request(Some(select::Select {
             _selectcore: Some(Box::new(select_core::SelectCore {
                 _from: Some(join_clause::JoinClause {
                     _tableorsubquery: Some(table_or_subquery::TableOrSubquery::_Tableref(ro_tableref_cap)),
@@ -1125,7 +1125,7 @@ mod tests {
             _names: Vec::new(),
         }));
 
-        let mut res_stream = select_request.send().promise.await?.get()?.get_res()?;
+        let res_stream = select_request.send().promise.await?.get()?.get_res()?;
         let mut next_request = res_stream.next_request();
         next_request.get().set_size(8);
         let res = next_request.send().promise.await?;

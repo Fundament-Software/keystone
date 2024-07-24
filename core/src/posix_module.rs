@@ -1,6 +1,6 @@
 use crate::byte_stream::ByteStreamBufferImpl;
 use crate::byte_stream_capnp::byte_stream::Owned as ByteStream;
-use crate::keystone::HostImpl;
+use crate::host::HostImpl;
 use crate::module_capnp::module_error;
 use crate::module_capnp::module_start;
 use crate::posix_module_capnp::posix_module;
@@ -19,7 +19,7 @@ use capnp_rpc::twoparty::VatNetwork;
 use capnp_rpc::CapabilityServerSet;
 use capnp_rpc::Disconnector;
 use capnp_rpc::{rpc_twoparty_capnp, RpcSystem};
-use std::cell::RefCell;
+use std::{cell::RefCell, rc::Rc};
 
 pub struct PosixModuleProcessImpl {
     posix_process: process::Client<ByteStream, PosixError>,
@@ -30,13 +30,7 @@ pub struct PosixModuleProcessImpl {
 }
 
 type AnyPointerClient = process::Client<cap_pointer, module_error::Owned<any_pointer>>;
-
-// TODO: For now we have to use a global threadlocal process set until we figure out how to pass in keystone state
-thread_local!(
-    pub static PROCESS_SET: RefCell<
-        CapabilityServerSet<RefCell<PosixModuleProcessImpl>, AnyPointerClient>,
-    > = RefCell::new(CapabilityServerSet::new());
-);
+pub type ProcessCapSet = CapabilityServerSet<RefCell<PosixModuleProcessImpl>, AnyPointerClient>;
 
 impl process::Server<cap_pointer, module_error::Owned<any_pointer>>
     for RefCell<PosixModuleProcessImpl>
@@ -85,6 +79,7 @@ impl process::Server<cap_pointer, module_error::Owned<any_pointer>>
 
 pub struct PosixModuleProgramImpl {
     posix_program: program::Client<PosixArgs, ByteStream, PosixError>,
+    module: PosixModuleImpl,
 }
 
 impl
@@ -135,7 +130,11 @@ impl
                         );
 
                         let keystone_client: crate::keystone_capnp::host::Client<any_pointer> =
-                            capnp_rpc::new_client(HostImpl::new(0));
+                            capnp_rpc::new_client(HostImpl::new(
+                                self.module.id,
+                                self.module.db.clone(),
+                                self.module.cells.clone(),
+                            ));
                         let mut rpc_system =
                             RpcSystem::new(Box::new(network), Some(keystone_client.clone().client));
 
@@ -160,8 +159,11 @@ impl
                             api,
                         };
 
-                        let module_process_client: AnyPointerClient = PROCESS_SET
-                            .with_borrow_mut(|x| x.new_client(RefCell::new(module_process)));
+                        let module_process_client: AnyPointerClient = self
+                            .module
+                            .process_set
+                            .borrow_mut()
+                            .new_client(RefCell::new(module_process));
                         results.get().set_result(module_process_client);
                         Ok(())
                     }
@@ -173,7 +175,13 @@ impl
     }
 }
 
-pub struct PosixModuleImpl {}
+#[derive(Clone)]
+pub struct PosixModuleImpl {
+    pub id: u64,
+    pub db: Rc<RefCell<crate::database::RootDatabase>>,
+    pub cells: Rc<RefCell<crate::keystone::CellCapSet>>,
+    pub process_set: Rc<RefCell<ProcessCapSet>>,
+}
 
 #[capnproto_rpc(posix_module)]
 impl posix_module::Server for PosixModuleImpl {
@@ -181,6 +189,7 @@ impl posix_module::Server for PosixModuleImpl {
     async fn wrap(&self, prog: Client) {
         let program = PosixModuleProgramImpl {
             posix_program: prog,
+            module: self.clone(),
         };
         let program_client: program::Client<
             posix_module_args::Owned<any_pointer>,
@@ -194,18 +203,19 @@ impl posix_module::Server for PosixModuleImpl {
 
 #[cfg(test)]
 mod tests {
-    use super::{any_pointer, PosixModuleImpl, PosixModuleProgramImpl};
+    use super::{any_pointer, PosixModuleImpl};
     use crate::byte_stream::ByteStreamBufferImpl;
     use crate::byte_stream::ByteStreamImpl;
+    use crate::keystone::CellCapSet;
     use crate::spawn::posix_process::PosixProgramImpl;
     use cap_std::io_lifetimes::{FromFilelike, IntoFilelike};
     use std::cell::RefCell;
     use std::fs::File;
     use std::rc::Rc;
+    use tempfile::NamedTempFile;
     use tokio::io::AsyncWriteExt;
     use tokio::task;
     use tokio_util::sync::CancellationToken;
-    use tracing_subscriber::filter::LevelFilter;
 
     #[async_backtrace::framed]
     #[tokio::test]
@@ -215,6 +225,7 @@ mod tests {
                 .unwrap()
                 .into_filelike(),
         );
+        let temp_db = NamedTempFile::new().unwrap().into_temp_path();
 
         let args: Vec<Result<&str, ::capnp::Error>> = Vec::new();
         let mut child =
@@ -255,8 +266,18 @@ mod tests {
             Default::default(),
         );
 
+        let db: crate::database::RootDatabase = crate::database::Manager::open_database(
+            std::path::Path::new(temp_db.as_os_str()),
+            crate::database::OpenOptions::Create,
+        )
+        .unwrap();
+
         let keystone_client: crate::keystone_capnp::host::Client<any_pointer> =
-            capnp_rpc::new_client(super::HostImpl::new(0));
+            capnp_rpc::new_client(super::HostImpl::new(
+                0,
+                Rc::new(RefCell::new(db)),
+                Rc::new(RefCell::new(CellCapSet::new())),
+            ));
         let mut rpc_system =
             super::RpcSystem::new(Box::new(network), Some(keystone_client.clone().client));
 
@@ -306,7 +327,19 @@ mod tests {
         let spawn_process_client: crate::spawn::posix_process::PosixProgramClient =
             capnp_rpc::new_client(spawn_process_server);
 
-        let wrapper_server = PosixModuleImpl {};
+        let temp_db = NamedTempFile::new().unwrap().into_temp_path();
+        let db: crate::database::RootDatabase = crate::database::Manager::open_database(
+            std::path::Path::new(temp_db.as_os_str()),
+            crate::database::OpenOptions::Create,
+        )
+        .unwrap();
+
+        let wrapper_server = PosixModuleImpl {
+            id: 0,
+            db: Rc::new(RefCell::new(db)),
+            cells: Rc::new(RefCell::new(CellCapSet::new())),
+            process_set: Rc::new(RefCell::new(super::ProcessCapSet::new())),
+        };
         let wrapper_client: super::posix_module::Client = capnp_rpc::new_client(wrapper_server);
 
         let mut wrap_request = wrapper_client.wrap_request();

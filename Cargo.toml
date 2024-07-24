@@ -1,5 +1,4 @@
 [workspace]
-resolver = "2"
 members = [
   "core",
   "core/schema",
@@ -8,9 +7,10 @@ members = [
   "modules/hello-world",
   "modules/indirect-world",
   "modules/stateful",
-  "modules/test",
+  "modules/config-test",
   "util",
 ]
+resolver = "2"
 default-members = ["core"]
 
 [workspace.package]
@@ -61,3 +61,13 @@ keystone-schema = { path = "core/schema" }
 keystone-build = { path = "build" }
 keystone-util = { path = "util" }
 tempfile = "3"
+
+[patch."https://github.com/Fundament-Software/capstone-rs"]
+capstone = { path = "../capstone-rs/capnp" }
+capstone-futures = { path = "../capstone-rs/capnp-futures" }
+capstone-import = { path = "../capstone-rs/capnp-import" }
+capstone-rpc = { path = "../capstone-rs/capnp-rpc" }
+capstone-macros = { path = "../capstone-rs/capnp-macros" }
+
+[patch."https://github.com/Fundament-Software/caplog"]
+caplog = { path = "../caplog" }

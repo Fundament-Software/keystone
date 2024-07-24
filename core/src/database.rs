@@ -1,7 +1,7 @@
 use crate::buffer_allocator::BufferAllocator;
 use capnp::message::{ReaderOptions, TypedReader};
 use capnp::traits::SetPointerBuilder;
-use eyre::{eyre, Result};
+use eyre::Result;
 use rusqlite::{params, Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -25,16 +25,18 @@ const ROOT_TABLES: &[&str] = &["states", "sturdyrefs", "objects", "stringmap"];
 
 impl RootDatabase {
     fn expect_change(call: Result<usize, rusqlite::Error>, count: usize) -> Result<()> {
-        if call? != count {
-            Err(rusqlite::Error::StatementChangedRows(count).into())
+        let n = call?;
+        if n != count {
+            Err(rusqlite::Error::StatementChangedRows(n).into())
         } else {
             Ok(())
         }
     }
+
     fn get_generic<const TABLE: usize>(
         &mut self,
         id: i64,
-        mut builder: capnp::any_pointer::Builder<'_>,
+        builder: capnp::dynamic_value::Builder<'_>,
     ) -> Result<()> {
         let mut stmt = self.conn.prepare_cached(
             format!("SELECT data FROM {} WHERE id = ?1", ROOT_TABLES[TABLE]).as_str(),
@@ -53,19 +55,25 @@ impl RootDatabase {
                             nesting_limit: 128,
                         },
                     ));
-                builder
-                    .set_as(
-                        message_reader
-                            .get()
-                            .map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?,
-                    )
-                    .map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))
+                let reader: capnp::any_pointer::Reader = message_reader
+                    .get()
+                    .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+
+                match builder {
+                    capnp::dynamic_value::Builder::Struct(mut s) => s
+                        .copy_from(reader)
+                        .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e))),
+                    capnp::dynamic_value::Builder::AnyPointer(mut b) => b
+                        .set_as(reader)
+                        .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e))),
+                    _ => Err(rusqlite::Error::InvalidQuery),
+                }
             },
         )?;
         Ok(())
     }
 
-    /*fn get_single_segment<'a, R: SetPointerBuilder + Copy>(
+    /*fn get_single_segment<'a, R: SetPointerBuilder + Clone>(
         message: &'a mut capnp::message::Builder<&mut BufferAllocator>,
         data: R,
     ) -> Result<&'a [u8]> {
@@ -88,13 +96,13 @@ impl RootDatabase {
         }
     }*/
 
-    fn set_generic<const TABLE: usize, const UPDATE: bool, R: SetPointerBuilder + Copy>(
+    fn set_generic<const TABLE: usize, const UPDATE: bool, R: SetPointerBuilder + Clone>(
         &mut self,
         string_index: i64,
         data: R,
     ) -> Result<()> {
         let mut message = capnp::message::Builder::new(&mut self.alloc);
-        message.set_root(data)?;
+        message.set_root(data.clone())?;
 
         if let capnp::OutputSegments::MultiSegment(v) = message.get_segments_for_output() {
             let n = v.into_iter().fold(0, |i, v| i + v.len()) * 2;
@@ -115,13 +123,16 @@ impl RootDatabase {
         };
         //let slice = Self::get_single_segment(&mut message, data)?;
 
-        let result = if UPDATE {
-            self.conn.prepare_cached(
-            format!("INSERT INTO {} (id, data) VALUES (?1, ?2) ON CONFLICT(id) DO UPDATE SET data=?2", ROOT_TABLES[TABLE]).as_str())?.execute(
-            params![string_index, slice]
-        )
+        if UPDATE {
+            let call = self.conn.prepare_cached(
+                format!("INSERT INTO {} (id, data) VALUES (?1, ?2) ON CONFLICT(id) DO UPDATE SET data=?2", ROOT_TABLES[TABLE]).as_str())?.execute(
+                params![string_index, slice]
+            );
+
+            Self::expect_change(call, 1)
         } else {
-            self.conn
+            let call = self
+                .conn
                 .prepare_cached(
                     format!(
                         "INSERT OR IGNORE INTO {} (id, data) VALUES (?1, ?2)",
@@ -129,18 +140,22 @@ impl RootDatabase {
                     )
                     .as_str(),
                 )?
-                .execute(params![string_index, slice])
-        };
+                .execute(params![string_index, slice])?;
 
-        Self::expect_change(result, 1)
+            if call > 1 {
+                Err(rusqlite::Error::StatementChangedRows(call).into())
+            } else {
+                Ok(())
+            }
+        }
     }
 
-    fn add_generic<const TABLE: usize, R: SetPointerBuilder + Copy>(
+    fn add_generic<const TABLE: usize, R: SetPointerBuilder + Clone>(
         &mut self,
         data: R,
     ) -> Result<i64> {
         let mut message = capnp::message::Builder::new(&mut self.alloc);
-        message.set_root(data)?;
+        message.set_root(data.clone())?;
 
         if let capnp::OutputSegments::MultiSegment(v) = message.get_segments_for_output() {
             let n = v.into_iter().fold(0, |i, v| i + v.len()) * 2;
@@ -184,12 +199,12 @@ impl RootDatabase {
     pub fn get_state(
         &mut self,
         string_index: i64,
-        builder: capnp::any_pointer::Builder<'_>,
+        builder: capnp::dynamic_value::Builder<'_>,
     ) -> Result<()> {
         self.get_generic::<ROOT_STATES>(string_index, builder)
     }
 
-    pub fn set_state<R: SetPointerBuilder + Copy>(
+    pub fn set_state<R: SetPointerBuilder + Clone>(
         &mut self,
         string_index: i64,
         data: R,
@@ -197,7 +212,7 @@ impl RootDatabase {
         self.set_generic::<ROOT_STATES, true, R>(string_index, data)
     }
 
-    pub fn init_state<R: SetPointerBuilder + Copy>(
+    pub fn init_state<R: SetPointerBuilder + Clone>(
         &mut self,
         string_index: i64,
         data: R,
@@ -208,14 +223,14 @@ impl RootDatabase {
     pub fn get_sturdyref(
         &mut self,
         sturdy_id: i64,
-        builder: capnp::any_pointer::Builder<'_>,
+        builder: capnp::dynamic_value::Builder<'_>,
     ) -> Result<()> {
         self.get_generic::<ROOT_STURDYREFS>(sturdy_id, builder)
     }
-    pub fn add_sturdyref<R: SetPointerBuilder + Copy>(&mut self, data: R) -> Result<i64> {
+    pub fn add_sturdyref<R: SetPointerBuilder + Clone>(&mut self, data: R) -> Result<i64> {
         self.add_generic::<ROOT_STURDYREFS, R>(data)
     }
-    pub fn set_sturdyref<R: SetPointerBuilder + Copy>(
+    pub fn set_sturdyref<R: SetPointerBuilder + Clone>(
         &mut self,
         sturdy_id: i64,
         data: R,
@@ -225,10 +240,14 @@ impl RootDatabase {
     pub fn drop_sturdyref(&mut self, id: i64) -> Result<()> {
         self.drop_generic::<ROOT_STURDYREFS>(id)
     }
-    pub fn add_object<R: SetPointerBuilder + Copy>(&mut self, data: R) -> Result<i64> {
+    pub fn add_object<R: SetPointerBuilder + Clone>(&mut self, data: R) -> Result<i64> {
         self.add_generic::<ROOT_OBJECTS, R>(data)
     }
-    pub fn get_object(&mut self, id: i64, builder: capnp::any_pointer::Builder<'_>) -> Result<()> {
+    pub fn get_object(
+        &mut self,
+        id: i64,
+        builder: capnp::dynamic_value::Builder<'_>,
+    ) -> Result<()> {
         self.get_generic::<ROOT_OBJECTS>(id, builder)
     }
     pub fn drop_object(&mut self, id: i64) -> Result<()> {

@@ -22,8 +22,7 @@ struct MyState {
 
 struct Config {
     echoWord @0 :Text;
-    # The annotation here is supposed to mark this as being automatically filled by keystone, but we can't dynamically
-    # load annotations yet, so instead the fact that it's called "state" is what gets it autofilled by keystone.
+    # The annotation here tells keystone to automatically create a cell with the ID of our module ("stateful") and return it.
     state @1 :Cell(MyState) $autocell;
 }
 

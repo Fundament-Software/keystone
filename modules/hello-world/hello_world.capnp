@@ -14,7 +14,7 @@ interface Root {
 }
 
 # All modules must have a struct named "Config" that keystone can look up when compiling
-# the root configuration file. This is a stateless config - a stateful config is provided in memory-example
+# the root configuration file. This is a stateless config - a stateful config is provided in stateful
 struct Config {
     greeting @0 :Text;
 }

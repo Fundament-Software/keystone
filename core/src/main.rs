@@ -7,6 +7,7 @@ mod cap_std_capnproto;
 mod cell;
 mod config;
 mod database;
+mod host;
 pub mod http;
 pub mod keystone;
 mod posix_module;
@@ -21,6 +22,9 @@ capnp_import::capnp_import!("../modules/hello-world/*.capnp");
 
 #[cfg(test)]
 capnp_import::capnp_import!("../modules/stateful/*.capnp");
+
+#[cfg(test)]
+capnp_import::capnp_import!("../modules/config-test/*.capnp");
 
 use crate::keystone_capnp::keystone_config;
 use clap::{Args, Parser, Subcommand, ValueEnum};
@@ -86,7 +90,7 @@ enum Commands {
         #[arg(short = 'o')]
         out: Option<String>,
     },
-    /// Given either a copmiled schema file or a binary with an embedded schema file, displays the textual output of that file.
+    /// Given either a compiled schema file or a binary with an embedded schema file, displays the textual output of that file.
     Inspect {
         #[arg(short = 's')]
         schema: String,

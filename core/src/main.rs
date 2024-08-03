@@ -7,7 +7,7 @@ mod cap_std_capnproto;
 mod cell;
 mod config;
 mod database;
-mod host;
+pub mod host;
 pub mod http;
 pub mod keystone;
 mod posix_module;
@@ -16,7 +16,7 @@ mod proxy;
 mod spawn;
 mod sqlite;
 
-capnp_import::capnp_import!("/schema/**/*.capnp");
+capnp_import::capnp_import!("schema/**/*.capnp");
 
 #[cfg(test)]
 capnp_import::capnp_import!("../modules/hello-world/*.capnp");
@@ -177,7 +177,6 @@ enum CapNPCommands {
     Eval { schema_file: String, name: String },
 }
 
-#[async_backtrace::framed]
 async fn shutdown_signal() {
     // Wait for the CTRL+C signal
     tokio::signal::ctrl_c()
@@ -186,7 +185,6 @@ async fn shutdown_signal() {
 }
 
 #[allow(unused)]
-#[async_backtrace::framed]
 #[tokio::main]
 async fn main() -> Result<()> {
     // Setup eyre

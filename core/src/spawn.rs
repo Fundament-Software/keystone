@@ -84,12 +84,13 @@ pub mod posix_process {
     use futures_util::lock::Mutex;
     use std::rc::Rc;
     use std::result::Result;
-    use tokio::io::{AsyncRead, AsyncWriteExt};
+    use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
     use tokio::process::Child;
     use tokio::process::ChildStdin;
     use tokio::task::{spawn_local, JoinHandle};
     use tokio_util::sync::CancellationToken;
     pub type PosixProgramClient = program::Client<PosixArgs, ByteStream, PosixError>;
+    use std::io::Write;
 
     pub struct PosixProcessImpl {
         pub cancellation_token: CancellationToken,
@@ -101,7 +102,6 @@ pub mod posix_process {
 
     #[capnproto_rpc(crate::byte_stream_capnp::byte_stream)]
     impl crate::byte_stream_capnp::byte_stream::Server for Rc<Mutex<Option<ChildStdin>>> {
-        #[async_backtrace::framed]
         async fn write(&self, bytes: &[u8]) {
             // TODO: This holds our borrow_mut across an await point, which may deadlock
             if let Some(stdin) = self.lock().await.as_mut() {
@@ -119,7 +119,6 @@ pub mod posix_process {
             }
         }
 
-        #[async_backtrace::framed]
         async fn end(&self) {
             let take = self.lock().await.take();
             if let Some(mut stdin) = take {
@@ -132,7 +131,6 @@ pub mod posix_process {
             }
         }
 
-        #[async_backtrace::framed]
         async fn get_substream(&self) {
             Err(capnp::Error::unimplemented("Not implemented".into()))
         }
@@ -201,11 +199,35 @@ pub mod posix_process {
                 cancellation_token.child_token(),
             );
 
-            let stderr_task = spawn_iostream_task(
+            // TODO: Technically we should be forwarding the child's stderr so it can be redirected,
+            // but we don't use that feature right now, so instead we dump it directly to our stderr.
+            /*let stderr_task = spawn_iostream_task(
                 child.stderr.take().unwrap(),
                 stderr_stream,
                 cancellation_token.child_token(),
-            );
+            );*/
+            let mut stderr = std::io::stderr();
+            let mut child_stderr = child.stderr.take().unwrap();
+            let new_token = cancellation_token.child_token();
+            let stderr_task = spawn_local(async move {
+                tokio::select! {
+                    _ = new_token.cancelled() => Ok(None),
+                    result = async {
+                        let mut count = 0;
+                        let mut buf = [0u8; 1024];
+                        loop {
+                            let len = child_stderr.read(&mut buf).await?;
+
+                            if len == 0 {
+                                break;
+                            }
+                            stderr.write_all(&buf[..len])?;
+                            count = count + len;
+                          }
+                          Ok::<usize, eyre::Report>(count)
+                    } => result.map(Some)
+                }
+            });
 
             eyre::Result::Ok(Self::new(
                 cancellation_token,
@@ -230,7 +252,6 @@ pub mod posix_process {
     impl process::Server<ByteStream, PosixError> for Rc<Mutex<PosixProcessImpl>> {
         /// In this implementation of `spawn`, the functions returns the exit code of the child
         /// process.
-        #[async_backtrace::framed]
         async fn get_error(
             &self,
             _: GetErrorParams,
@@ -253,7 +274,6 @@ pub mod posix_process {
             }
         }
 
-        #[async_backtrace::framed]
         async fn kill(&self, _: KillParams, _: KillResults) -> Result<(), capnp::Error> {
             let mut this = self.lock().await;
             this.cancellation_token.cancel();
@@ -263,7 +283,6 @@ pub mod posix_process {
             }
         }
 
-        #[async_backtrace::framed]
         async fn get_api(
             &self,
             _params: GetApiParams,
@@ -274,7 +293,6 @@ pub mod posix_process {
                 .set_api(capnp_rpc::new_client(self.lock().await.stdin.clone()))
         }
 
-        #[async_backtrace::framed]
         async fn join(&self, _: JoinParams, mut results: JoinResults) -> Result<(), capnp::Error> {
             let results_builder = results.get();
             let mut process_error_builder = results_builder.init_result();
@@ -313,7 +331,6 @@ pub mod posix_process {
     }
 
     impl program::Server<PosixArgs, ByteStream, PosixError> for PosixProgramImpl {
-        #[async_backtrace::framed]
         async fn spawn(
             &self,
             params: SpawnParams<PosixArgs, ByteStream, PosixError>,
@@ -353,7 +370,6 @@ pub mod posix_process {
         use tokio::task;
 
         #[tokio::test]
-        #[async_backtrace::framed]
         async fn test_posix_process_creation() {
             let spawn_process_server = PosixProgramImpl {
                 #[cfg(windows)]
@@ -371,7 +387,7 @@ pub mod posix_process {
                 capnp_rpc::new_client(spawn_process_server);
 
             let e = task::LocalSet::new()
-                .run_until(async_backtrace::location!().frame(async {
+                .run_until(async {
                     // Setting up stuff needed for RPC
                     let stdout_server = ByteStreamImpl::new(|bytes| {
                         println!("remote stdout: {}", std::str::from_utf8(bytes).unwrap());
@@ -416,7 +432,7 @@ pub mod posix_process {
                     assert!(error_message.is_empty() == true);
 
                     Ok::<(), eyre::Error>(())
-                }))
+                })
                 .await;
 
             e.unwrap();

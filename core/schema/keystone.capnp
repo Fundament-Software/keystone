@@ -68,4 +68,5 @@ interface Host(State) {
   getState @0 () -> (state :State);
   setState @1 (state :State) -> ();
   initCell @2 [T] (id :Text) -> (result :Cell(T));
+  log @3 [T] (level :LogLevel, obj :T) -> ();
 }

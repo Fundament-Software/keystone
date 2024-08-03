@@ -12,10 +12,6 @@ homepage.workspace = true
 license.workspace = true
 links = "hello_world"
 
-[features]
-tracing = []
-default = []
-
 [lib]
 doctest = false
 path = "lib.rs"
@@ -34,7 +30,7 @@ tokio.workspace = true
 tokio-util.workspace = true
 tracing-subscriber.workspace = true
 tracing.workspace = true
-keystone-schema.workspace = true
+keystone.workspace = true
 
 [build-dependencies]
 capstone-gen.workspace = true

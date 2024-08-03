@@ -22,13 +22,20 @@ pub struct ModuleImpl {
 #[capnproto_rpc(module_start)]
 impl module_start::Server<config::Owned, root::Owned> for ModuleImpl {
     async fn start(&self, config: Reader) -> Result<(), ::capnp::Error> {
+        tracing::debug!("start()");
         let mut msg = capnp::message::Builder::new_default();
+        tracing::debug!("created msg!");
+
         msg.set_root(config)?;
+        tracing::debug!("set root!");
         let client: root::Client = capnp_rpc::new_client(ConfigTestImpl { msg });
+        tracing::debug!("created client!");
         results.get().set_api(client)?;
+        tracing::debug!("set api!");
         Ok(())
     }
     async fn stop(&self) -> Result<(), ::capnp::Error> {
+        tracing::debug!("stop()");
         let r = self.disconnector.borrow_mut().take();
         if let Some(d) = r {
             d.await?;
@@ -42,16 +49,17 @@ impl module_start::Server<config::Owned, root::Owned> for ModuleImpl {
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _: Vec<String> = ::std::env::args().collect();
-    tracing::info!("server started");
 
     #[cfg(feature = "tracing")]
-    let log_file = File::create("hello_world.log")?;
+    let log_file = File::create("config_test.log")?;
     #[cfg(feature = "tracing")]
     tracing_subscriber::fmt()
         .with_max_level(Level::DEBUG)
         .with_writer(log_file)
         .with_ansi(false)
         .init();
+
+    tracing::info!("server started");
 
     tokio::task::LocalSet::new()
         .run_until(async move {
@@ -87,7 +95,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Some(rpc_system.bootstrap(rpc_twoparty_capnp::Side::Client));
                 *borrow.disconnector.borrow_mut() = Some(rpc_system.get_disconnector());
 
-                tracing::info!("spawned rpc");
+                tracing::debug!("spawned rpc");
                 tokio::task::spawn_local(rpc_system).await.unwrap().unwrap();
             })
             .await

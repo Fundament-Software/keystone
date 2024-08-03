@@ -10,24 +10,24 @@ use capnp::{
     dynamic_struct, dynamic_value, introspect::TypeVariant, schema::DynamicSchema, schema_capnp,
     traits::HasTypeId,
 };
-use eyre::{eyre, Result};
+use eyre::Result;
 use toml::{value::Offset, Table, Value};
 
 fn expr_recurse(val: &Value, exprs: &mut HashMap<*const Value, u32>) {
-    // We recurse through all the tables and arrays, looking for any module references
-    // "@module", then add a reference to that value to our exprs vec
-
     match val {
         Value::Array(a) => {
-            for v in a {
-                expr_recurse(v, exprs)
-            }
-        }
-        Value::Table(t) => {
-            for (k, v) in t {
+            if let Some(Value::String(k)) = a.get(0) {
                 if k.starts_with('@') && !exprs.contains_key(&(val as *const Value)) {
                     exprs.insert(val as *const Value, exprs.len() as u32);
                 }
+            }
+            // Not sure if we need to recurse here (this will always be a no-op on the first array element)
+            //for v in a {
+            //    expr_recurse(v, exprs)
+            //}
+        }
+        Value::Table(t) => {
+            for (k, v) in t {
                 expr_recurse(v, exprs);
             }
         }
@@ -391,21 +391,25 @@ evaluates to my_mod_ref = @indirect.field1.method1(-2, "asdf", false, {another =
 config = { my_mod_ref = [ "@indirect", "field1", "method1", { a = -2, b = "asdf", c = false, d = { another = "struct" },  e = [ "@indirect2", "field1" ] }, "field2", "method2", {}, "field3" ] }
  */
 
-fn toml_as_string<'a>(v: &'a Value) -> Result<&'a String> {
+fn toml_as_string<'a>(v: &'a Value) -> Result<&'a String, Error> {
     let Value::String(name) = v else {
-        return Err(Error::InvalidConfig("Method name must be a string".into()).into());
+        return Err(Error::InvalidConfig("Method name must be a string".into()));
     };
     Ok(name)
 }
 
-fn get_type_by_id<'a>(root: &'a DynamicSchema, id: u64, name: &str) -> Result<&'a TypeVariant> {
+fn get_type_by_id<'a>(
+    root: &'a DynamicSchema,
+    id: u64,
+    name: &str,
+) -> Result<&'a TypeVariant, Error> {
     root.get_type_by_id(id)
-        .ok_or(eyre!("Couldn't find type for {} with id {}!", name, id))
+        .ok_or(Error::MissingType(name.into(), id))
 }
 
 fn build_cap_field<'a, F>(
     name: &str,
-    mut expr: cap_expr::Builder<'a>,
+    expr: cap_expr::Builder<'a>,
     root: &DynamicSchema,
     schemas: &SchemaPool,
     callback: &mut F,
@@ -415,11 +419,13 @@ fn build_cap_field<'a, F>(
 where
     F: FnMut(*const Value) -> Option<u32>,
 {
+    if list.len() == 0 {
+        return Ok(expr);
+    }
     let fname = toml_as_string(&list[0])?;
     if let Some(f) = s.find_field_by_name(fname)? {
         // recurse if and only if we have items left
         let mut builder = if list.len() > 1 {
-            // Note: we cannot use f.get_type() because this will explode for nested dynamic structs
             if let capnp::schema_capnp::field::Slot(x) = f.get_proto().which()? {
                 match x.get_type()?.which()? {
                     schema_capnp::type_::Which::Struct(st) => {
@@ -443,13 +449,16 @@ where
                         }
                     }
                     schema_capnp::type_::Which::Interface(cr) => {
+                        if list.len() < 3 {
+                            Err(Error::MissingMethodParameters(list[1].to_string()))?;
+                        }
                         let variant = root
                             .get_type_by_id(cr.get_type_id())
-                            .ok_or(Error::MissingSchemaField("Root".into(), name.into()))?;
+                            .ok_or(Error::MissingSchemaField(list[1].to_string(), name.into()))?;
 
                         let TypeVariant::Capability(cs) = variant else {
                             return Err(Error::InvalidConfig(
-                                "Root schema was not a capability".into(),
+                                "Schema type was not a capability".into(),
                             )
                             .into());
                         };
@@ -518,10 +527,9 @@ where
         if method.get_name()? == name {
             let expr = if let TypeVariant::Struct(st) = root
                 .get_type_by_id(method.get_result_struct_type())
-                .ok_or(eyre!(
-                    "Couldn't find return values for {} with id {}!",
-                    name,
-                    method.get_result_struct_type()
+                .ok_or(Error::MissingType(
+                    format!("{} return values", name),
+                    method.get_result_struct_type(),
                 ))? {
                 build_cap_field(name, expr, root, schemas, callback, &list[..], (*st).into())?
             } else {
@@ -536,13 +544,12 @@ where
             expr.set_method_id(ordinal as u16);
             expr.set_interface_id(id); // the node::reader::get_id() method is the type id
 
-            let params = root
-                .get_type_by_id(method.get_param_struct_type())
-                .ok_or(eyre!(
-                    "Couldn't find parameters for {} with id {}!",
-                    name,
-                    method.get_param_struct_type()
-                ))?;
+            let params =
+                root.get_type_by_id(method.get_param_struct_type())
+                    .ok_or(Error::MissingType(
+                        format!("{} parameters", name),
+                        method.get_result_struct_type(),
+                    ))?;
             if let TypeVariant::Struct(st) = params {
                 let builder = expr.reborrow().init_args();
                 let dynobj = builder.init_dynamic((*st).into())?;
@@ -593,7 +600,10 @@ where
                 for superclass in extends {
                     if let TypeVariant::Capability(cs) = root
                         .get_type_by_id(superclass.get_id())
-                        .ok_or(eyre!("Couldn't find superclass {}!", superclass.get_id()))?
+                        .ok_or(Error::InvalidConfig(format!(
+                            "Couldn't find superclass {}!",
+                            superclass.get_id()
+                        )))?
                     {
                         // transform into a reader we can do something with
                         if let capnp::schema_capnp::node::Interface(interface_reader) =
@@ -620,7 +630,7 @@ where
         }
     }
 
-    Err(eyre!("Couldn't find method {} in any interface!", k))
+    Err(Error::MissingMethod(k.into()).into())
 }
 
 fn compile_toml_expr<F>(
@@ -648,20 +658,21 @@ where
                     expr.reborrow().set_module_ref(module_name.into());
                     Ok(())
                 }
-                2 => Err(Error::InvalidConfig(
-                    "Method must have an associated parameter list".into(),
-                ))?,
+                2 => Err(Error::MissingMethodParameters(l[1].to_string()))?,
                 _ => {
                     let Some(schema) = schemas.get(module_name) else {
-                        return Err(Error::InvalidConfig(
-                            "Couldn't find schema for ".to_string() + module_name,
-                        )
-                        .into());
+                        return Err(Error::MissingSchema(module_name.into()).into());
                     };
 
-                    let variant = schema
-                        .get_type_by_scope(vec!["Root".to_string()])
-                        .ok_or(Error::MissingSchemaField("Root".into(), module_name.into()))?;
+                    let variant =
+                        if let Some(s) = schema.get_type_by_scope(vec!["Root".to_string()]) {
+                            s
+                        } else {
+                            // Check for "Host" as well, just in case this is the built-in keystone capability
+                            schema.get_type_by_scope(vec!["Host".to_string()]).ok_or(
+                                Error::MissingSchemaField("Root".into(), module_name.into()),
+                            )?
+                        };
 
                     let Value::String(name) = &l[1] else {
                         return Err(
@@ -684,7 +695,6 @@ where
                     };
 
                     let cap = CapabilitySchema::new(*cs);
-                    //let mut builder = expr.init_method();
 
                     // Evaluate the method call
                     let mut builder = eval_toml_capability(
@@ -695,7 +705,7 @@ where
                         schema,
                         schemas,
                         callback,
-                        l,
+                        &l[3..],
                     )?;
 
                     builder.set_module_ref(module_name.into());
@@ -714,9 +724,11 @@ where
 }
 
 pub fn to_capnp(config: &Table, mut msg: keystone_config::Builder<'_>) -> Result<()> {
+    let span = tracing::span!(tracing::Level::DEBUG, "config::to_capnp", config = ?config);
+    let _enter = span.enter();
+    let schemas = builtin_schemas()?;
     let dynamic: dynamic_value::Builder = msg.reborrow().into();
     let mut exprs: HashMap<*const Value, u32> = HashMap::new();
-    let schemas: SchemaPool = SchemaPool::new();
     let exprs_ref = &mut exprs;
     value_to_struct(config, dynamic.downcast(), &schemas, &mut |v| -> Option<
         u32,
@@ -757,6 +769,25 @@ pub fn to_capnp(config: &Table, mut msg: keystone_config::Builder<'_>) -> Result
     }
 
     Ok(())
+}
+
+const SELF_SCHEMA: &'static [u8] = include_bytes!(concat!(env!("OUT_DIR"), "/self.schema"));
+pub const HOST_NAME: &str = "keystone";
+
+fn builtin_schemas() -> capnp::Result<SchemaPool> {
+    let schemas = SchemaPool::new();
+    let bufread = BufReader::new(SELF_SCHEMA);
+
+    let ks = DynamicSchema::new(capnp::serialize::read_message(
+        bufread,
+        capnp::message::ReaderOptions {
+            traversal_limit_in_words: None,
+            nesting_limit: 128,
+        },
+    )?)?;
+
+    schemas.insert(HOST_NAME.into(), ks);
+    Ok(schemas)
 }
 
 #[test]
@@ -882,8 +913,7 @@ defaultLog = "debug"
 [[modules]]
 name = "Config Test"
 path = "{}"
-config = {{ nested = {{ state = {{ "@keystone".createCell = ["myCellName"] }}, moreState = {{ "@keystone".createCell = ["myOtherCell"] }} }} }}
-
+config = {{ nested = {{ state = [ "@keystone", "initCell", {{id = "myCellName"}}, "result" ], moreState = [ "@keystone", "initCell", {{id = "myCellName"}}, "result" ] }} }}
 "#,
         keystone_util::get_binary_path("config-test")
             .as_os_str()
@@ -893,6 +923,8 @@ config = {{ nested = {{ state = {{ "@keystone".createCell = ["myCellName"] }}, m
     );
 
     to_capnp(&source.parse::<toml::Table>()?, msg.reborrow())?;
+    let reader = msg.reborrow_as_reader();
+    assert_eq!(reader.get_cap_table()?.len(), 2);
     //println!("{:#?}", msg.reborrow_as_reader());
 
     Ok(())

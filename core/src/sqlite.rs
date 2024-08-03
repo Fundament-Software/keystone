@@ -3,6 +3,8 @@ use std::cell::Cell;
 use std::collections::HashSet;
 use std::{cell::RefCell, ops::AddAssign, path::Path, rc::Rc};
 
+use capnp_macros::{capnp_let, capnproto_rpc};
+use capnp_rpc::CapabilityServerSet;
 use crate::sqlite_capnp::{add_d_b, database, r_o_database};
 use crate::sqlite_capnp::{
     d_b_any, delete, function_invocation, insert::source, prepared_statement, r_a_table_ref,
@@ -12,8 +14,6 @@ use crate::sqlite_capnp::{
     expr, index, indexed_column, insert, join_clause, select_core, table_field, table_function_ref,
     table_or_subquery,
 };
-use capnp_macros::{capnp_let, capnproto_rpc};
-use capnp_rpc::CapabilityServerSet;
 use rusqlite::{
     params, params_from_iter, types::ToSqlOutput, Connection, OpenFlags, Result, ToSql,
 };

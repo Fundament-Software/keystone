@@ -11,7 +11,7 @@ impl root::Server for ConfigTestImpl {
         params: root::GetConfigParams,
         mut results: root::GetConfigResults,
     ) -> Result<(), ::capnp::Error> {
-        tracing::info!("get_config was called!");
+        tracing::debug!("get_config was called!");
         let reader: config::Reader = self.msg.get_root_as_reader()?;
         results.get().set_reply(reader)?;
         Ok(())

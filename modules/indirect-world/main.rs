@@ -1,25 +1,18 @@
-capnp_import::capnp_import!(
-    "indirect_world.capnp",
-    "/hello_world.capnp",
-    "/schema/**/*.capnp"
-);
+capnp_import::capnp_import!("indirect_world.capnp");
 
 pub mod indirect_world;
 use crate::indirect_world::IndirectWorldImpl;
 use crate::indirect_world_capnp::config;
 use crate::indirect_world_capnp::root;
-use crate::module_capnp::module_start;
 use capnp::any_pointer::Owned as any_pointer;
 use capnp_macros::capnproto_rpc;
 use capnp_rpc::{rpc_twoparty_capnp, twoparty, RpcSystem};
+use keystone::module_capnp::module_start;
 use std::cell::RefCell;
-#[cfg(feature = "tracing")]
-use std::fs::File;
-#[cfg(feature = "tracing")]
 use tracing::Level;
 
 pub struct ModuleImpl {
-    bootstrap: RefCell<Option<keystone_capnp::host::Client<any_pointer>>>,
+    bootstrap: RefCell<Option<keystone::keystone_capnp::host::Client<any_pointer>>>,
     disconnector: RefCell<Option<capnp_rpc::Disconnector<rpc_twoparty_capnp::Side>>>,
 }
 
@@ -46,32 +39,27 @@ impl module_start::Server<config::Owned, root::Owned> for ModuleImpl {
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // let args: Vec<String> = ::std::env::args().collect();
-    tracing::info!("server started");
-
-    #[cfg(feature = "tracing")]
-    let log_file = File::create("indirect-world.log")?;
-    #[cfg(feature = "tracing")]
     tracing_subscriber::fmt()
         .with_max_level(Level::DEBUG)
-        .with_writer(log_file)
-        .with_ansi(false)
+        .with_writer(std::io::stderr)
+        .with_ansi(true)
         .init();
+
+    tracing::info!("Module starting up...");
 
     tokio::task::LocalSet::new()
         .run_until(async move {
             tokio::task::spawn_local(async move {
                 let mut set: capnp_rpc::CapabilityServerSet<
                     ModuleImpl,
-                    module_start::Client<crate::indirect_world_capnp::config::Owned, root::Owned>,
+                    module_start::Client<config::Owned, root::Owned>,
                 > = capnp_rpc::CapabilityServerSet::new();
 
-                let module_client: module_start::Client<
-                    crate::indirect_world_capnp::config::Owned,
-                    root::Owned,
-                > = set.new_client(ModuleImpl {
-                    bootstrap: None.into(),
-                    disconnector: None.into(),
-                });
+                let module_client: module_start::Client<config::Owned, root::Owned> = set
+                    .new_client(ModuleImpl {
+                        bootstrap: None.into(),
+                        disconnector: None.into(),
+                    });
 
                 let reader = tokio::io::stdin();
                 let writer = tokio::io::stdout();
@@ -91,7 +79,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Some(rpc_system.bootstrap(rpc_twoparty_capnp::Side::Client));
                 *borrow.disconnector.borrow_mut() = Some(rpc_system.get_disconnector());
 
-                tracing::info!("spawned rpc");
+                tracing::debug!("spawned rpc");
                 tokio::task::spawn_local(rpc_system).await.unwrap().unwrap();
             })
             .await
@@ -142,7 +130,7 @@ fn test_indirect_init() -> eyre::Result<()> {
                     .get_api()
                     .as_cap();
 
-                let hello_client: crate::hello_world_capnp::root::Client =
+                let hello_client: hello_world::hello_world_capnp::root::Client =
                     capnp::capability::FromClientHook::new(pipe);
 
                 let mut sayhello = hello_client.say_hello_request();

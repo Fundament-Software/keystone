@@ -5,6 +5,7 @@ use eyre::Result;
 use rusqlite::{params, Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
+use tracing::instrument;
 
 pub trait DatabaseInterface {
     fn init(&mut self) -> Result<()>;
@@ -13,7 +14,6 @@ pub trait DatabaseInterface {
 pub struct RootDatabase {
     conn: Connection,
     alloc: BufferAllocator,
-    buf: Vec<u8>,
 }
 
 // Rust's type system does not like enums in generic constants
@@ -269,7 +269,6 @@ impl From<Connection> for RootDatabase {
         Self {
             conn,
             alloc: BufferAllocator::new(),
-            buf: Vec::new(),
         }
     }
 }
@@ -304,6 +303,7 @@ impl DatabaseInterface for RootDatabase {
 }
 pub struct Manager {}
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum OpenOptions {
     Create,
     Truncate,
@@ -313,6 +313,8 @@ pub enum OpenOptions {
 
 impl Manager {
     fn create(path: &Path) -> Result<Connection, rusqlite::Error> {
+        let span = tracing::span!(tracing::Level::DEBUG, "Manager::create", path = ?path);
+        let _enter = span.enter();
         Connection::open_with_flags(
             path,
             OpenFlags::SQLITE_OPEN_CREATE | OpenFlags::SQLITE_OPEN_READ_WRITE,
@@ -323,6 +325,8 @@ impl Manager {
         path: &Path,
         options: OpenOptions,
     ) -> Result<DB> {
+        let span = tracing::span!(tracing::Level::DEBUG, "Manager::open_database", path = ?path, options = ?options);
+        let _enter = span.enter();
         match options {
             OpenOptions::Create => {
                 let create = if let Ok(file) = std::fs::File::open(path) {
@@ -362,7 +366,7 @@ impl Manager {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum KnownEvent {
     Unknown,
     CreateNode,

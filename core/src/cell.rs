@@ -30,6 +30,9 @@ impl SimpleCellImpl {
 #[capnproto_rpc(cell)]
 impl cell::Server<any_pointer> for SimpleCellImpl {
     async fn get(&self) {
+        let span = tracing::debug_span!("cell", id = self.id);
+        let _enter = span.enter();
+        tracing::debug!("get()");
         self.db
             .borrow_mut()
             .get_state(self.id, results.get().init_data().into())
@@ -42,6 +45,9 @@ impl cell::Server<any_pointer> for SimpleCellImpl {
         Ok(())
     }
     async fn set(&self, data: capnp::any_pointer::Reader) {
+        let span = tracing::debug_span!("cell", id = self.id);
+        let _enter = span.enter();
+        tracing::debug!("set()");
         self.db.borrow_mut().set_state(self.id, data).map_err(|e| {
             eprintln!("CELL SET ERROR: {}", e);
             capnp::Error::failed("Could not set data for cell!".into())

@@ -1,7 +1,6 @@
 [workspace]
 members = [
   "core",
-  "core/schema",
   "build",
   "modules/hello-world",
   "modules/indirect-world",
@@ -56,9 +55,9 @@ rusqlite = { version = "0.31", features = [
   "uuid",
   "array",
 ] }
-keystone-schema = { path = "core/schema" }
 keystone-build = { path = "build" }
 keystone-util = { path = "util" }
+keystone = { path = "core" }
 tempfile = "3"
 
 [patch."https://github.com/Fundament-Software/capstone-rs"]

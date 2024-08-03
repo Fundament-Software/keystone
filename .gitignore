@@ -4,6 +4,3 @@
 /*.exe
 /core/schema/*.rs
 /core/schema/std/*.rs
-
-!/core/schema/lib.rs
-!/core/schema/build.rs

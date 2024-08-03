@@ -14,8 +14,9 @@ pub struct LocalNativeProgramImpl<'a> {
 
 #[capnproto_rpc(local_native_program)]
 impl<'a> local_native_program::Server for LocalNativeProgramImpl<'a> {
-    #[async_backtrace::framed]
     async fn file(&self, file: Client) {
+        let span = tracing::span!(tracing::Level::DEBUG, "LocalNativeProgram::file");
+        let _enter = span.enter();
         if let Some(handle) = self.auth_ref.get_file_handle(&file).await {
             let program = PosixProgramImpl::new(handle);
 

@@ -3,23 +3,21 @@ name = "config-test"
 edition.workspace = true
 rust-version.workspace = true
 version = "0.1.0"
-authors = [
-  "Erik McClure <erikm@fundament.software>",
-]
+authors = ["Erik McClure <erikm@fundament.software>"]
 homepage.workspace = true
 license.workspace = true
 links = "config_test"
 
 [features]
 tracing = []
-default = []
+default = ["tracing"]
 
 [lib]
 doctest = false
 path = "lib.rs"
 
 [[bin]]
-name = "config_test"
+name = "config-test-module"
 path = "main.rs"
 
 [dependencies]
@@ -32,7 +30,7 @@ tokio.workspace = true
 tokio-util.workspace = true
 tracing-subscriber.workspace = true
 tracing.workspace = true
-keystone-schema.workspace = true
+keystone.workspace = true
 
 [build-dependencies]
 capstone-gen.workspace = true

@@ -18,9 +18,10 @@ keywords = [
   "distributed",
 ]
 license.workspace = true
+links = "keystone"
 
 [lib]
-path = "src/main.rs"
+path = "src/lib.rs"
 doctest = false
 
 [[bin]]
@@ -51,13 +52,11 @@ tracing-subscriber.workspace = true
 tracing.workspace = true
 time = "0.3.34"
 toml = "0.8.12"
-async-backtrace.workspace = true
 futures-util.workspace = true
 rusqlite.workspace = true
 binfarce = "0.2.1"
 thiserror = "1.0.61"
 wasmparser = { version = "0.207.0", default-features = false, optional = true }
-keystone-schema.workspace = true
 append-only-vec = "0.1.5"
 rand.workspace = true
 
@@ -75,6 +74,14 @@ console-subscriber = "0.2.0"
 tempfile.workspace = true
 serde_json = "1.0"
 keystone-util.workspace = true
+
+[build-dependencies]
+capstone-gen.workspace = true
+capstone-import.workspace = true
+tempfile.workspace = true
+eyre.workspace = true
+keystone-build.workspace = true
+wax = "0.6.0"
 
 [features]
 default = ["wasm"]

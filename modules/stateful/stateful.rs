@@ -1,6 +1,6 @@
 use crate::stateful_capnp::my_state;
 use crate::stateful_capnp::root;
-use crate::storage_capnp::cell;
+use keystone::storage_capnp::cell;
 
 pub struct StatefulImpl {
     pub echo_word: String,
@@ -13,7 +13,7 @@ impl root::Server for StatefulImpl {
         params: root::EchoLastParams,
         mut results: root::EchoLastResults,
     ) -> Result<(), ::capnp::Error> {
-        tracing::info!("echo_last was called!");
+        tracing::debug!("echo_last was called!");
         let request = params.get()?.get_request()?;
         let name = request.get_name()?.to_str()?;
         let prev_request = self.echo_last.get_request().send();

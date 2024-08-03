@@ -1,6 +1,5 @@
 use crate::cap_replacement::CapReplacement;
 use crate::cell::SimpleCellImpl;
-use crate::keystone_capnp::cap_expr;
 use crate::posix_module::ProcessCapSet;
 use crate::proxy::ProxyServer;
 use caplog::{CapLog, MAX_BUFFER_SIZE};
@@ -10,16 +9,18 @@ use capnp::private::capability::ClientHook;
 use capnp_rpc::CapabilityServerSet;
 use eyre::Result;
 use std::time::Duration;
-use std::{cell::RefCell, collections::HashMap, marker::PhantomData, path::Path, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, path::Path, rc::Rc};
 
-use crate::{
-    cap_std_capnproto::AmbientAuthorityImpl,
-    database::RootDatabase,
+use super::{
+    keystone_capnp::cap_expr,
     keystone_capnp::keystone_config,
     module_capnp::module_error,
-    posix_module::PosixModuleImpl,
     posix_module_capnp::{posix_module, posix_module_args},
-    spawn::posix_process::PosixProgramImpl,
+};
+
+use crate::{
+    cap_std_capnproto::AmbientAuthorityImpl, database::RootDatabase, host::HostImpl,
+    posix_module::PosixModuleImpl, spawn::posix_process::PosixProgramImpl,
 };
 type SpawnProgram = crate::spawn_capnp::program::Client<
     posix_module_args::Owned<any_pointer>,
@@ -53,10 +54,18 @@ pub enum Error {
     ModuleNotFound(u64),
     #[error("Module with name {0} couldn't be found.")]
     ModuleNameNotFound(String),
-    #[error("Couldn't find {0} field in {}")]
+    #[error("Couldn't find {0} field")]
     MissingFieldTOML(String),
     #[error("Couldn't find {0} in {1}")]
     MissingSchemaField(String, String),
+    #[error("Couldn't find schema for {0}")]
+    MissingSchema(String),
+    #[error("Couldn't find type for {0} with id {1}!")]
+    MissingType(String, u64),
+    #[error("Couldn't find {0} in any interface!")]
+    MissingMethod(String),
+    #[error("Method {0} did not specify a parameter list! If a method takes no parameters, you must provide an empty parameter list.")]
+    MissingMethodParameters(String),
     #[error("TOML value {0} was not a {1}!")]
     InvalidTypeTOML(String, String),
     #[error("Capnproto value {0} was not a {1}!")]
@@ -73,7 +82,7 @@ pub enum Error {
     InvalidConfig(String),
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ModuleState {
     NotStarted,
     Initialized, // Started but waiting for bootstrap capability to return
@@ -136,17 +145,28 @@ impl Keystone {
     }
 
     pub fn new(config: keystone_config::Reader, check_consistency: bool) -> Result<Self> {
+        let span = tracing::info_span!("Initialization");
+        let _enter = span.enter();
+
+        {
+            let val: capnp::dynamic_value::Reader = config.into();
+            tracing::debug!(config = ?val, check_consistency = check_consistency);
+        }
+
         let caplog_config = config.get_caplog()?;
         let mut db: RootDatabase = crate::database::Manager::open_database(
             Path::new(config.get_database()?.to_str()?),
             crate::database::OpenOptions::Create,
         )?;
+
+        tracing::debug!("Iterating through {} modules", config.get_modules()?.len());
         let modules = config.get_modules().map_or(HashMap::new(), |modules| {
             modules
                 .iter()
                 .map(|s| -> (u64, ModuleInstance) {
                     let name = s.get_name().unwrap().to_str().unwrap();
                     let id = db.get_string_index(name).unwrap() as u64;
+                    tracing::info!("Found {} module with id {}", name, id);
                     (
                         id,
                         ModuleInstance {
@@ -187,15 +207,19 @@ impl Keystone {
         })
     }
 
+    pub fn get_module_name<'a>(&'a self, id: u64) -> Result<&'a str, Error> {
+        Ok(&self.modules.get(&id).ok_or(Error::ModuleNotFound(id))?.name)
+    }
+    pub fn log_capnp_params(params: &capnp::dynamic_value::Reader<'_>) {
+        tracing::event!(tracing::Level::TRACE, parameters = format!("{:?}", params));
+    }
     async fn wrap_posix(
         &self,
-        id: u64,
+        host: crate::keystone_capnp::host::Client<any_pointer>,
         client: crate::spawn::posix_process::PosixProgramClient,
     ) -> Result<SpawnProgram> {
         let wrapper_server = PosixModuleImpl {
-            id,
-            db: self.db.clone(),
-            cells: self.cells.clone(),
+            host,
             process_set: self.process_set.clone(),
         };
         let wrapper_client: posix_module::Client = capnp_rpc::new_client(wrapper_server);
@@ -208,7 +232,7 @@ impl Keystone {
 
     async fn posix_spawn(
         &self,
-        id: u64,
+        host: crate::keystone_capnp::host::Client<any_pointer>,
         config: keystone_config::module_config::Reader<'_, any_pointer>,
     ) -> Result<SpawnProgram> {
         let spawn_process_server =
@@ -217,7 +241,7 @@ impl Keystone {
         let spawn_process_client: crate::spawn::posix_process::PosixProgramClient =
             capnp_rpc::new_client(spawn_process_server);
 
-        self.wrap_posix(id, spawn_process_client).await
+        self.wrap_posix(host, spawn_process_client).await
     }
 
     #[inline]
@@ -240,30 +264,35 @@ impl Keystone {
         &self,
         reader: cap_expr::Reader<'_>,
         cap_table: capnp::struct_list::Reader<'_, cap_expr::Owned>,
+        host: &crate::keystone_capnp::host::Client<any_pointer>,
     ) -> capnp::Result<capnp::any_pointer::Pipeline> {
         Ok(match reader.which()? {
             cap_expr::Which::ModuleRef(r) => {
                 let k = r?.to_string()?;
-                let id = self
-                    .namemap
-                    .get(&k)
-                    .ok_or(capnp::Error::failed("couldn't find module!".into()))?;
                 capnp::any_pointer::Pipeline::new(Box::new(capnp_rpc::rpc::SingleCapPipeline::new(
-                    self.proxy_set
-                        .borrow_mut()
-                        .new_client(ProxyServer::new(
-                            self.modules[id].queue.add_ref(),
-                            self.proxy_set.clone(),
-                        ))
-                        .hook,
+                    if k == crate::config::HOST_NAME {
+                        host.client.hook.add_ref()
+                    } else {
+                        let id = self
+                            .namemap
+                            .get(&k)
+                            .ok_or(capnp::Error::failed("couldn't find module!".into()))?;
+                        self.proxy_set
+                            .borrow_mut()
+                            .new_client(ProxyServer::new(
+                                self.modules[id].queue.add_ref(),
+                                self.proxy_set.clone(),
+                            ))
+                            .hook
+                    },
                 )))
             }
             cap_expr::Which::Field(r) => {
-                let base = self.recurse_cap_expr(r.get_base()?, cap_table)?;
+                let base = self.recurse_cap_expr(r.get_base()?, cap_table, host)?;
                 base.get_pointer_field(r.get_index())
             }
             cap_expr::Which::Method(r) => {
-                let base = self.recurse_cap_expr(r.get_subject()?, cap_table)?;
+                let base = self.recurse_cap_expr(r.get_subject()?, cap_table, host)?;
                 let args = r.get_args();
                 let mut call = base.as_cap().new_call(
                     r.get_interface_id(),
@@ -271,7 +300,7 @@ impl Keystone {
                     Some(args.target_size()?),
                 );
                 let replacement = CapReplacement::new(args, |index, builder| {
-                    self.resolve_cap_expr(cap_table.get(index), cap_table, builder)
+                    self.resolve_cap_expr(cap_table.get(index), cap_table, builder, host)
                 });
                 call.get().set_as(replacement)?;
                 call.send().pipeline
@@ -284,8 +313,9 @@ impl Keystone {
         reader: cap_expr::Reader<'_>,
         cap_table: capnp::struct_list::Reader<'_, cap_expr::Owned>,
         mut builder: capnp::any_pointer::Builder<'_>,
+        host: &crate::keystone_capnp::host::Client<any_pointer>,
     ) -> capnp::Result<()> {
-        builder.set_as_capability(self.recurse_cap_expr(reader, cap_table)?.as_cap());
+        builder.set_as_capability(self.recurse_cap_expr(reader, cap_table, host)?.as_cap());
         Ok(())
     }
 
@@ -297,6 +327,11 @@ impl Keystone {
         let module = modules.get_mut(&id).ok_or(Error::ModuleNotFound(id))?;
         module.state = ModuleState::StartFailure;
         capnp_rpc::queued::ClientInner::resolve(&module.queue.inner, Err(e.clone()));
+        tracing::error!(
+            "Module {} failed to start with error {}",
+            module.name,
+            e.to_string()
+        );
         Err(e.into())
     }
 
@@ -310,7 +345,12 @@ impl Keystone {
             .get_mut(&id)
             .ok_or(Error::ModuleNotFound(id))?
             .state = ModuleState::Initialized;
-        let client = self.posix_spawn(id, config).await.ok();
+
+        tracing::debug_span!("Initializing", name = self.modules.get(&id).unwrap().name);
+
+        let host: crate::keystone_capnp::host::Client<any_pointer> =
+            capnp_rpc::new_client(HostImpl::new(id, self.db.clone(), self.cells.clone()));
+        let client = self.posix_spawn(host.clone(), config).await.ok();
 
         let (conf, workpath) = match Self::extract_config_pair(config) {
             Ok((c, d)) => (c, d),
@@ -338,20 +378,23 @@ impl Keystone {
             let mut spawn_request = client.spawn_request();
             let builder = spawn_request.get();
             let replacement = CapReplacement::new(conf, |index, mut builder| {
-                if !cap_table.get(index).has_module_ref() {
-                    let client = self
-                        .cells
-                        .borrow_mut()
-                        // Very important to use ::init() here so it gets initialized to a default value
-                        .new_client(
-                            SimpleCellImpl::init(id as i64, self.db.clone())
-                                .map_err(|e| capnp::Error::failed(e.to_string()))?,
-                        );
-                    builder.set_as_capability(client.into_client_hook());
-                    Ok(())
-                } else {
-                    self.resolve_cap_expr(cap_table.get(index), cap_table, builder)
+                if let crate::keystone_capnp::cap_expr::Which::ModuleRef(_) =
+                    cap_table.get(index).which()?
+                {
+                    if !cap_table.get(index).has_module_ref() {
+                        let client = self
+                            .cells
+                            .borrow_mut()
+                            // Very important to use ::init() here so it gets initialized to a default value
+                            .new_client(
+                                SimpleCellImpl::init(id as i64, self.db.clone())
+                                    .map_err(|e| capnp::Error::failed(e.to_string()))?,
+                            );
+                        builder.set_as_capability(client.into_client_hook());
+                        return Ok(());
+                    }
                 }
+                self.resolve_cap_expr(cap_table.get(index), cap_table, builder, &host)
             });
 
             let mut pair = builder.init_args();
@@ -361,6 +404,7 @@ impl Keystone {
             }
             pair.set_workdir(dirclient);
 
+            tracing::debug!("Sending spawn request inside {}", workpath.display());
             let response = spawn_request.send().promise.await;
             let process = match Self::process_spawn_request(response) {
                 Ok(x) => x,
@@ -369,6 +413,7 @@ impl Keystone {
                 }
             };
 
+            tracing::debug!("Sending API request");
             let module = self.modules.get_mut(&id).ok_or(Error::ModuleNotFound(id))?;
             let p = process.get_api_request().send();
             capnp_rpc::queued::ClientInner::resolve(
@@ -551,6 +596,16 @@ pub fn test_harness<F: Future<Output = capnp::Result<()>> + 'static>(
     config: &str,
     f: impl FnOnce(Keystone) -> F + 'static,
 ) -> Result<()> {
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::DEBUG)
+        .with_ansi(true)
+        .with_timer(tracing_subscriber::fmt::time::OffsetTime::new(
+            time::UtcOffset::UTC,
+            time::format_description::well_known::Rfc3339,
+        ))
+        .with_writer(std::io::stderr)
+        .init();
+
     let mut message = ::capnp::message::Builder::new_default();
     let mut msg = message.init_root::<keystone_config::Builder>();
 
@@ -619,6 +674,16 @@ fn test_hello_world_init() -> Result<()> {
 
 #[test]
 fn test_stateful() -> Result<()> {
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::DEBUG)
+        .with_ansi(true)
+        .with_timer(tracing_subscriber::fmt::time::OffsetTime::new(
+            time::UtcOffset::UTC,
+            time::format_description::well_known::Rfc3339,
+        ))
+        .with_writer(std::io::stderr)
+        .init();
+
     let mut message = ::capnp::message::Builder::new_default();
     let mut msg = message.init_root::<keystone_config::Builder>();
 
@@ -764,6 +829,30 @@ fn test_hello_world_proxy() -> Result<()> {
             let msg = hello_response.get()?.get_reply()?.get_message()?;
 
             assert_eq!(msg, "Bonjour, Keystone!");
+
+            instance.shutdown().await;
+            Ok(())
+        },
+    )
+}
+
+#[test]
+fn test_complex_config_init() -> Result<()> {
+    test_harness(
+        &keystone_util::build_module_config(
+            "Config Test",
+            "config-test-module",
+            r#"{ nested = { state = [ "@keystone", "initCell", {id = "myCellName"}, "result" ], moreState = [ "@keystone", "initCell", {id = "myCellName"}, "result" ] } }"#,
+        ),
+        |mut instance| async move {
+            let config_client: crate::config_test_capnp::root::Client =
+                instance.get_api_pipe("Config Test").unwrap();
+
+            let get_config = config_client.get_config_request();
+            let get_response = get_config.send().promise.await?;
+
+            let response = get_response.get()?.get_reply()?;
+            println!("{:#?}", response);
 
             instance.shutdown().await;
             Ok(())

@@ -166,6 +166,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "atomic-take"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a8ab6b55fe97976e46f91ddbed8d147d966475dc29b2032757ba47e02376fbc3"
+
+[[package]]
 name = "atomic-waker"
 version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1610,6 +1616,7 @@ version = "0.1.0"
 dependencies = [
  "append-only-vec",
  "assert_fs",
+ "atomic-take",
  "binfarce",
  "bytes",
  "cap-directories",

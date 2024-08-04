@@ -1,4 +1,3 @@
-use std::io::BufRead;
 capnp_import::capnp_extract_bin!();
 
 fn main() {

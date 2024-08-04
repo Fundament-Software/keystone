@@ -30,7 +30,8 @@ pub struct PosixModuleProcessImpl {
 }
 
 type AnyPointerClient = process::Client<cap_pointer, module_error::Owned<any_pointer>>;
-pub type ProcessCapSet = CapabilityServerSet<RefCell<PosixModuleProcessImpl>, AnyPointerClient>;
+pub type ModuleProcessCapSet =
+    CapabilityServerSet<RefCell<PosixModuleProcessImpl>, AnyPointerClient>;
 
 impl process::Server<cap_pointer, module_error::Owned<any_pointer>>
     for RefCell<PosixModuleProcessImpl>
@@ -42,7 +43,7 @@ impl process::Server<cap_pointer, module_error::Owned<any_pointer>>
         _: process::GetErrorParams<cap_pointer, module_error::Owned<any_pointer>>,
         mut results: process::GetErrorResults<cap_pointer, module_error::Owned<any_pointer>>,
     ) -> Result<(), capnp::Error> {
-        let span = tracing::debug_span!("posix_process");
+        let span = tracing::debug_span!("posix_module_process");
         let _enter = span.enter();
         tracing::debug!("get_error()");
         let request = self.borrow_mut().posix_process.get_error_request();
@@ -59,7 +60,7 @@ impl process::Server<cap_pointer, module_error::Owned<any_pointer>>
         _: process::KillParams<cap_pointer, module_error::Owned<any_pointer>>,
         _: process::KillResults<cap_pointer, module_error::Owned<any_pointer>>,
     ) -> Result<(), capnp::Error> {
-        let span = tracing::debug_span!("posix_process");
+        let span = tracing::debug_span!("posix_module_process");
         let _enter = span.enter();
         tracing::debug!("kill()");
         let request = self.borrow_mut().posix_process.kill_request();
@@ -72,7 +73,7 @@ impl process::Server<cap_pointer, module_error::Owned<any_pointer>>
         _: process::GetApiParams<cap_pointer, module_error::Owned<any_pointer>>,
         mut results: process::GetApiResults<cap_pointer, module_error::Owned<any_pointer>>,
     ) -> Result<(), capnp::Error> {
-        let span = tracing::debug_span!("posix_process");
+        let span = tracing::debug_span!("posix_module_process");
         let _enter = span.enter();
         tracing::debug!("get_api()");
         results
@@ -141,6 +142,19 @@ impl
                             Some(self.module.host.clone().client),
                         );
 
+                        let process_impl = self
+                            .module
+                            .process_set
+                            .borrow_mut()
+                            .get_local_server_of_resolved(&process)
+                            .ok_or(capnp::Error::failed(
+                                "Couldn't get process implementation!".into(),
+                            ))?;
+
+                        if let Ok(mut lock) = process_impl.as_ref().disconnector.lock() {
+                            lock.replace(rpc_system.get_disconnector());
+                        }
+
                         let disconnector = rpc_system.get_disconnector();
                         let bootstrap: module_start::Client<any_pointer, cap_pointer> =
                             rpc_system.bootstrap(rpc_twoparty_capnp::Side::Server);
@@ -162,7 +176,7 @@ impl
 
                         let module_process_client: AnyPointerClient = self
                             .module
-                            .process_set
+                            .module_process_set
                             .borrow_mut()
                             .new_client(RefCell::new(module_process));
                         results.get().set_result(module_process_client);
@@ -179,7 +193,8 @@ impl
 #[derive(Clone)]
 pub struct PosixModuleImpl {
     pub host: crate::keystone_capnp::host::Client<any_pointer>,
-    pub process_set: Rc<RefCell<ProcessCapSet>>,
+    pub module_process_set: Rc<RefCell<ModuleProcessCapSet>>,
+    pub process_set: Rc<RefCell<crate::posix_process::ProcessCapSet>>,
 }
 
 #[capnproto_rpc(posix_module)]
@@ -207,7 +222,7 @@ mod tests {
     use crate::byte_stream::ByteStreamBufferImpl;
     use crate::byte_stream::ByteStreamImpl;
     use crate::keystone::CellCapSet;
-    use crate::spawn::posix_process::PosixProgramImpl;
+    use crate::posix_process::PosixProgramImpl;
     use cap_std::io_lifetimes::{FromFilelike, IntoFilelike};
     use std::cell::RefCell;
     use std::fs::File;
@@ -228,7 +243,8 @@ mod tests {
 
         let args: Vec<Result<&str, ::capnp::Error>> = Vec::new();
         let mut child =
-            crate::spawn::spawn_process_native(&spawn_process_server, args.into_iter()).unwrap();
+            crate::posix_process::spawn_process_native(&spawn_process_server, args.into_iter())
+                .unwrap();
 
         let stdinref = Rc::new(RefCell::new(child.stdin.take().unwrap()));
 
@@ -319,10 +335,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_process_creation() {
+        let process_set = Rc::new(RefCell::new(crate::posix_process::ProcessCapSet::new()));
         let spawn_process_server = PosixProgramImpl::new_std(
             File::open(keystone_util::get_binary_path("hello-world-module")).unwrap(),
+            process_set.clone(),
         );
-        let spawn_process_client: crate::spawn::posix_process::PosixProgramClient =
+        let spawn_process_client: crate::posix_process::PosixProgramClient =
             capnp_rpc::new_client(spawn_process_server);
 
         let temp_db = NamedTempFile::new().unwrap().into_temp_path();
@@ -338,7 +356,8 @@ mod tests {
                 Rc::new(RefCell::new(db)),
                 Rc::new(RefCell::new(CellCapSet::new())),
             )),
-            process_set: Rc::new(RefCell::new(super::ProcessCapSet::new())),
+            module_process_set: Rc::new(RefCell::new(super::ModuleProcessCapSet::new())),
+            process_set: process_set,
         };
         let wrapper_client: super::posix_module::Client = capnp_rpc::new_client(wrapper_server);
 

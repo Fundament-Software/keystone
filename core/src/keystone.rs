@@ -1,6 +1,6 @@
 use crate::cap_replacement::CapReplacement;
 use crate::cell::SimpleCellImpl;
-use crate::posix_module::ProcessCapSet;
+use crate::posix_module::ModuleProcessCapSet;
 use crate::proxy::ProxyServer;
 use caplog::{CapLog, MAX_BUFFER_SIZE};
 use capnp::any_pointer::Owned as any_pointer;
@@ -20,7 +20,7 @@ use super::{
 
 use crate::{
     cap_std_capnproto::AmbientAuthorityImpl, database::RootDatabase, host::HostImpl,
-    posix_module::PosixModuleImpl, spawn::posix_process::PosixProgramImpl,
+    posix_module::PosixModuleImpl, posix_process::PosixProgramImpl,
 };
 type SpawnProgram = crate::spawn_capnp::program::Client<
     posix_module_args::Owned<any_pointer>,
@@ -121,7 +121,8 @@ pub struct Keystone {
     pub cells: Rc<RefCell<CellCapSet>>,
     timeout: Duration,
     proxy_set: Rc<RefCell<crate::proxy::CapSet>>, // Set of all untyped proxies
-    process_set: Rc<RefCell<crate::posix_module::ProcessCapSet>>,
+    module_process_set: Rc<RefCell<crate::posix_module::ModuleProcessCapSet>>,
+    process_set: Rc<RefCell<crate::posix_process::ProcessCapSet>>,
 }
 
 impl Keystone {
@@ -202,7 +203,10 @@ impl Keystone {
             timeout: Duration::from_millis(config.get_ms_timeout()),
             cells: Rc::new(RefCell::new(CapabilityServerSet::new())),
             proxy_set: Rc::new(RefCell::new(crate::proxy::CapSet::new())),
-            process_set: Rc::new(RefCell::new(crate::posix_module::ProcessCapSet::new())),
+            module_process_set: Rc::new(RefCell::new(
+                crate::posix_module::ModuleProcessCapSet::new(),
+            )),
+            process_set: Rc::new(RefCell::new(crate::posix_process::ProcessCapSet::new())),
             namemap,
         })
     }
@@ -216,10 +220,11 @@ impl Keystone {
     async fn wrap_posix(
         &self,
         host: crate::keystone_capnp::host::Client<any_pointer>,
-        client: crate::spawn::posix_process::PosixProgramClient,
+        client: crate::posix_process::PosixProgramClient,
     ) -> Result<SpawnProgram> {
         let wrapper_server = PosixModuleImpl {
             host,
+            module_process_set: self.module_process_set.clone(),
             process_set: self.process_set.clone(),
         };
         let wrapper_client: posix_module::Client = capnp_rpc::new_client(wrapper_server);
@@ -235,10 +240,12 @@ impl Keystone {
         host: crate::keystone_capnp::host::Client<any_pointer>,
         config: keystone_config::module_config::Reader<'_, any_pointer>,
     ) -> Result<SpawnProgram> {
-        let spawn_process_server =
-            PosixProgramImpl::new_std(std::fs::File::open(config.get_path()?.to_str()?).unwrap());
+        let spawn_process_server = PosixProgramImpl::new_std(
+            std::fs::File::open(config.get_path()?.to_str()?).unwrap(),
+            self.process_set.clone(),
+        );
 
-        let spawn_process_client: crate::spawn::posix_process::PosixProgramClient =
+        let spawn_process_client: crate::posix_process::PosixProgramClient =
             capnp_rpc::new_client(spawn_process_server);
 
         self.wrap_posix(host, spawn_process_client).await
@@ -504,7 +511,7 @@ impl Keystone {
     }
 
     pub async fn stop_module(
-        process_set: Rc<RefCell<ProcessCapSet>>,
+        module_process_set: Rc<RefCell<ModuleProcessCapSet>>,
         module: &mut ModuleInstance,
         timeout: Duration,
     ) -> Result<()> {
@@ -518,7 +525,7 @@ impl Keystone {
         let process = module
             .process
             .as_ref()
-            .and_then(|p| process_set.borrow().get_local_server_of_resolved(p));
+            .and_then(|p| module_process_set.borrow().get_local_server_of_resolved(p));
 
         let stop_request = if let Some(p) = process {
             let borrow = p.as_ref().server.borrow_mut();
@@ -552,7 +559,7 @@ impl Keystone {
             // TODO: initiate all module closing attempts in parallel before awaiting
             let _ = match v.state {
                 ModuleState::Closing => Ok(()),
-                _ => Self::stop_module(self.process_set.clone(), v, self.timeout).await,
+                _ => Self::stop_module(self.module_process_set.clone(), v, self.timeout).await,
             };
         }
     }
@@ -591,11 +598,7 @@ use std::future::Future;
 #[cfg(test)]
 use tempfile::NamedTempFile;
 
-#[cfg(test)]
-pub fn test_harness<F: Future<Output = capnp::Result<()>> + 'static>(
-    config: &str,
-    f: impl FnOnce(Keystone) -> F + 'static,
-) -> Result<()> {
+pub fn attach_trace() {
     tracing_subscriber::fmt()
         .with_max_level(tracing::Level::DEBUG)
         .with_ansi(true)
@@ -605,7 +608,14 @@ pub fn test_harness<F: Future<Output = capnp::Result<()>> + 'static>(
         ))
         .with_writer(std::io::stderr)
         .init();
+}
 
+#[cfg(test)]
+pub fn test_harness<F: Future<Output = capnp::Result<()>> + 'static>(
+    config: &str,
+    f: impl FnOnce(Keystone) -> F + 'static,
+) -> Result<()> {
+    attach_trace();
     let mut message = ::capnp::message::Builder::new_default();
     let mut msg = message.init_root::<keystone_config::Builder>();
 
@@ -674,15 +684,7 @@ fn test_hello_world_init() -> Result<()> {
 
 #[test]
 fn test_stateful() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::DEBUG)
-        .with_ansi(true)
-        .with_timer(tracing_subscriber::fmt::time::OffsetTime::new(
-            time::UtcOffset::UTC,
-            time::format_description::well_known::Rfc3339,
-        ))
-        .with_writer(std::io::stderr)
-        .init();
+    attach_trace();
 
     let mut message = ::capnp::message::Builder::new_default();
     let mut msg = message.init_root::<keystone_config::Builder>();

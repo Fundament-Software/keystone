@@ -1,7 +1,9 @@
 use crate::cap_std_capnproto::AmbientAuthorityImpl;
+use crate::posix_process::PosixProgramImpl;
 use crate::posix_spawn_capnp::local_native_program;
-use crate::spawn::posix_process::PosixProgramImpl;
 use capnp_macros::capnproto_rpc;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 use crate::posix_spawn_capnp::{posix_args::Owned as PosixArgs, posix_error::Owned as PosixError};
 
@@ -10,6 +12,7 @@ type PosixProcessClient = crate::spawn_capnp::program::Client<PosixArgs, ByteStr
 
 pub struct LocalNativeProgramImpl<'a> {
     auth_ref: &'a AmbientAuthorityImpl,
+    process_set: Rc<RefCell<crate::posix_process::ProcessCapSet>>,
 }
 
 #[capnproto_rpc(local_native_program)]
@@ -18,7 +21,7 @@ impl<'a> local_native_program::Server for LocalNativeProgramImpl<'a> {
         let span = tracing::span!(tracing::Level::DEBUG, "LocalNativeProgram::file");
         let _enter = span.enter();
         if let Some(handle) = self.auth_ref.get_file_handle(&file).await {
-            let program = PosixProgramImpl::new(handle);
+            let program = PosixProgramImpl::new(handle, self.process_set.clone());
 
             let program_client: PosixProcessClient = capnp_rpc::new_client(program);
             results.get().set_result(program_client);

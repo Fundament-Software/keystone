@@ -1,6 +1,8 @@
 mod object_file;
 
+use std::io::BufRead;
 use std::path::PathBuf;
+use std::str::FromStr;
 
 pub fn create_binary_file(
     contents: &[u8],
@@ -11,6 +13,23 @@ pub fn create_binary_file(
         contents,
         symbol_name,
     )
+}
+
+pub fn get_capnp_id(file: &std::path::Path) -> u64 {
+    let f = std::fs::File::open(file).expect("failed to open valid file");
+    let line = std::io::BufReader::new(f).lines().flatten().next().unwrap();
+    let num = line
+        .strip_prefix("@0x")
+        .expect(format!("{} ID missing @0x prefix", file.display()).as_str());
+    let (num, _) = num.split_once('#').unwrap_or((num, ""));
+
+    u64::from_str_radix(
+        num.trim_end()
+            .strip_suffix(';')
+            .expect(format!("{} ID missing ; suffix", file.display()).as_str()),
+        16,
+    )
+    .expect(format!("{} ID not valid u64", file.display()).as_str())
 }
 
 pub fn standard(cmdpath: &PathBuf, capnp_file: &str) {
@@ -26,6 +45,8 @@ pub fn standard(cmdpath: &PathBuf, capnp_file: &str) {
         if key.starts_with("DEP_") && key.ends_with("_SCHEMA_DIR") {
             println!("cargo::rustc-env={key}={value}");
             cmd.import_path(value);
+        } else if key.starts_with("DEP_") && key.ends_with("_SCHEMA_PROVIDES") {
+            println!("cargo::rustc-env={key}={value}");
         }
     }
 
@@ -53,4 +74,9 @@ pub fn standard(cmdpath: &PathBuf, capnp_file: &str) {
 
     let manifest: PathBuf = std::env::var_os("CARGO_MANIFEST_DIR").unwrap().into();
     println!("cargo::metadata=SCHEMA_DIR={}", manifest.display());
+    let capnp_path = std::path::PathBuf::from_str(capnp_file).unwrap();
+    println!(
+        "cargo::metadata=SCHEMA_PROVIDES={}",
+        get_capnp_id(capnp_path.as_path())
+    );
 }

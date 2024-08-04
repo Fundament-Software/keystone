@@ -1,15 +1,14 @@
 [workspace]
-resolver = "2"
 members = [
   "core",
-  "core/schema",
   "build",
-  "modules/sqlite-ks",
   "modules/hello-world",
   "modules/indirect-world",
-  "modules/test",
+  "modules/stateful",
+  "modules/config-test",
   "util",
 ]
+resolver = "2"
 default-members = ["core"]
 
 [workspace.package]
@@ -49,8 +48,24 @@ capstone-rpc = { git = "https://github.com/Fundament-Software/capstone-rs" }
 capstone-macros = { git = "https://github.com/Fundament-Software/capstone-rs" }
 capstone-gen = { git = "https://github.com/Fundament-Software/capstone-rs" }
 uuid = "1.*"
-rusqlite = { version = "0.31", features = ["bundled", "array"] }
-keystone-schema = { path = "core/schema" }
+rusqlite = { version = "0.31", features = [
+  "bundled",
+  "modern_sqlite",
+  "i128_blob",
+  "uuid",
+  "array",
+] }
 keystone-build = { path = "build" }
 keystone-util = { path = "util" }
+keystone = { path = "core" }
 tempfile = "3"
+
+[patch."https://github.com/Fundament-Software/capstone-rs"]
+capstone = { path = "../capstone-rs/capnp" }
+capstone-futures = { path = "../capstone-rs/capnp-futures" }
+capstone-import = { path = "../capstone-rs/capnp-import" }
+capstone-rpc = { path = "../capstone-rs/capnp-rpc" }
+capstone-macros = { path = "../capstone-rs/capnp-macros" }
+
+[patch."https://github.com/Fundament-Software/caplog"]
+caplog = { path = "../caplog" }

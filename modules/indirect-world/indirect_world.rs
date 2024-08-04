@@ -1,7 +1,7 @@
 use crate::indirect_world_capnp::root;
 
 pub struct IndirectWorldImpl {
-    pub hello_client: crate::hello_world_capnp::root::Client,
+    pub hello_client: hello_world::hello_world_capnp::root::Client,
 }
 
 impl root::Server for IndirectWorldImpl {
@@ -10,7 +10,7 @@ impl root::Server for IndirectWorldImpl {
         params: root::SayHelloParams,
         mut results: root::SayHelloResults,
     ) -> Result<(), ::capnp::Error> {
-        tracing::info!("say_hello was called!");
+        tracing::debug!("say_hello was called!");
         let request = params.get()?.get_request()?;
 
         let mut sayhello = self.hello_client.say_hello_request();

@@ -1,5 +1,6 @@
 use tempfile::TempPath;
 
+#[inline]
 pub fn build_temp_config(
     temp_db: &TempPath,
     temp_log: &TempPath,
@@ -18,6 +19,22 @@ pub fn build_temp_config(
     database = "{escaped}"
     defaultLog = "debug"
     caplog = {{ trieFile = "{trie_escaped}", dataPrefix = "{prefix_escaped}" }}"#
+    )
+}
+
+#[inline]
+pub fn build_module_config(name: &str, binary: &str, config: &str) -> String {
+    format!(
+        r#"
+    [[modules]]
+    name = "{name}"
+    path = "{}"
+    config = {config}"#,
+        get_binary_path(binary)
+            .as_os_str()
+            .to_str()
+            .unwrap()
+            .replace('\\', "/"),
     )
 }
 

@@ -1,6 +1,6 @@
 use crate::byte_stream::ByteStreamBufferImpl;
 use crate::byte_stream_capnp::byte_stream::Owned as ByteStream;
-use crate::keystone::HostImpl;
+use crate::host::HostImpl;
 use crate::module_capnp::module_error;
 use crate::module_capnp::module_start;
 use crate::posix_module_capnp::posix_module;
@@ -19,7 +19,7 @@ use capnp_rpc::twoparty::VatNetwork;
 use capnp_rpc::CapabilityServerSet;
 use capnp_rpc::Disconnector;
 use capnp_rpc::{rpc_twoparty_capnp, RpcSystem};
-use std::cell::RefCell;
+use std::{cell::RefCell, rc::Rc};
 
 pub struct PosixModuleProcessImpl {
     posix_process: process::Client<ByteStream, PosixError>,
@@ -30,18 +30,12 @@ pub struct PosixModuleProcessImpl {
 }
 
 type AnyPointerClient = process::Client<cap_pointer, module_error::Owned<any_pointer>>;
-
-// TODO: For now we have to use a global threadlocal process set until we figure out how to pass in keystone state
-thread_local!(
-    pub static PROCESS_SET: RefCell<
-        CapabilityServerSet<RefCell<PosixModuleProcessImpl>, AnyPointerClient>,
-    > = RefCell::new(CapabilityServerSet::new());
-);
+pub type ModuleProcessCapSet =
+    CapabilityServerSet<RefCell<PosixModuleProcessImpl>, AnyPointerClient>;
 
 impl process::Server<cap_pointer, module_error::Owned<any_pointer>>
     for RefCell<PosixModuleProcessImpl>
 {
-    #[async_backtrace::framed]
     /// In this implementation of `spawn`, the functions returns the exit code of the child
     /// process.
     async fn get_error(
@@ -49,6 +43,9 @@ impl process::Server<cap_pointer, module_error::Owned<any_pointer>>
         _: process::GetErrorParams<cap_pointer, module_error::Owned<any_pointer>>,
         mut results: process::GetErrorResults<cap_pointer, module_error::Owned<any_pointer>>,
     ) -> Result<(), capnp::Error> {
+        let span = tracing::debug_span!("posix_module_process");
+        let _enter = span.enter();
+        tracing::debug!("get_error()");
         let request = self.borrow_mut().posix_process.get_error_request();
         let posix_err = request.send().promise.await?;
         let builder = results.get().init_result();
@@ -58,23 +55,27 @@ impl process::Server<cap_pointer, module_error::Owned<any_pointer>>
         Ok(())
     }
 
-    #[async_backtrace::framed]
     async fn kill(
         &self,
         _: process::KillParams<cap_pointer, module_error::Owned<any_pointer>>,
         _: process::KillResults<cap_pointer, module_error::Owned<any_pointer>>,
     ) -> Result<(), capnp::Error> {
+        let span = tracing::debug_span!("posix_module_process");
+        let _enter = span.enter();
+        tracing::debug!("kill()");
         let request = self.borrow_mut().posix_process.kill_request();
         request.send().promise.await?;
         Ok(())
     }
 
-    #[async_backtrace::framed]
     async fn get_api(
         &self,
         _: process::GetApiParams<cap_pointer, module_error::Owned<any_pointer>>,
         mut results: process::GetApiResults<cap_pointer, module_error::Owned<any_pointer>>,
     ) -> Result<(), capnp::Error> {
+        let span = tracing::debug_span!("posix_module_process");
+        let _enter = span.enter();
+        tracing::debug!("get_api()");
         results
             .get()
             .init_api()
@@ -85,6 +86,7 @@ impl process::Server<cap_pointer, module_error::Owned<any_pointer>>
 
 pub struct PosixModuleProgramImpl {
     posix_program: program::Client<PosixArgs, ByteStream, PosixError>,
+    module: PosixModuleImpl,
 }
 
 impl
@@ -94,7 +96,6 @@ impl
         module_error::Owned<any_pointer>,
     > for PosixModuleProgramImpl
 {
-    #[async_backtrace::framed]
     async fn spawn(
         &self,
         params: SpawnParams<
@@ -108,6 +109,8 @@ impl
             module_error::Owned<any_pointer>,
         >,
     ) -> Result<(), ::capnp::Error> {
+        let span = tracing::span!(tracing::Level::DEBUG, "posix_program::spawn");
+        let _enter = span.enter();
         let mut request = self.posix_program.spawn_request();
         let mut args = request.get().init_args();
         args.reborrow().init_args(0);
@@ -134,10 +137,23 @@ impl
                             Default::default(),
                         );
 
-                        let keystone_client: crate::keystone_capnp::host::Client<any_pointer> =
-                            capnp_rpc::new_client(HostImpl::new(0));
-                        let mut rpc_system =
-                            RpcSystem::new(Box::new(network), Some(keystone_client.clone().client));
+                        let mut rpc_system = RpcSystem::new(
+                            Box::new(network),
+                            Some(self.module.host.clone().client),
+                        );
+
+                        let process_impl = self
+                            .module
+                            .process_set
+                            .borrow_mut()
+                            .get_local_server_of_resolved(&process)
+                            .ok_or(capnp::Error::failed(
+                                "Couldn't get process implementation!".into(),
+                            ))?;
+
+                        if let Ok(mut lock) = process_impl.as_ref().disconnector.lock() {
+                            lock.replace(rpc_system.get_disconnector());
+                        }
 
                         let disconnector = rpc_system.get_disconnector();
                         let bootstrap: module_start::Client<any_pointer, cap_pointer> =
@@ -152,16 +168,17 @@ impl
 
                         let module_process = PosixModuleProcessImpl {
                             posix_process: process,
-                            handle: tokio::task::spawn_local(
-                                async_backtrace::location!().frame(rpc_system),
-                            ),
+                            handle: tokio::task::spawn_local(rpc_system),
                             disconnector,
                             bootstrap,
                             api,
                         };
 
-                        let module_process_client: AnyPointerClient = PROCESS_SET
-                            .with_borrow_mut(|x| x.new_client(RefCell::new(module_process)));
+                        let module_process_client: AnyPointerClient = self
+                            .module
+                            .module_process_set
+                            .borrow_mut()
+                            .new_client(RefCell::new(module_process));
                         results.get().set_result(module_process_client);
                         Ok(())
                     }
@@ -173,14 +190,21 @@ impl
     }
 }
 
-pub struct PosixModuleImpl {}
+#[derive(Clone)]
+pub struct PosixModuleImpl {
+    pub host: crate::keystone_capnp::host::Client<any_pointer>,
+    pub module_process_set: Rc<RefCell<ModuleProcessCapSet>>,
+    pub process_set: Rc<RefCell<crate::posix_process::ProcessCapSet>>,
+}
 
 #[capnproto_rpc(posix_module)]
 impl posix_module::Server for PosixModuleImpl {
-    #[async_backtrace::framed]
     async fn wrap(&self, prog: Client) {
+        let span = tracing::span!(tracing::Level::DEBUG, "posix_module::wrap");
+        let _enter = span.enter();
         let program = PosixModuleProgramImpl {
             posix_program: prog,
+            module: self.clone(),
         };
         let program_client: program::Client<
             posix_module_args::Owned<any_pointer>,
@@ -194,20 +218,20 @@ impl posix_module::Server for PosixModuleImpl {
 
 #[cfg(test)]
 mod tests {
-    use super::{any_pointer, PosixModuleImpl, PosixModuleProgramImpl};
+    use super::{any_pointer, PosixModuleImpl};
     use crate::byte_stream::ByteStreamBufferImpl;
     use crate::byte_stream::ByteStreamImpl;
-    use crate::spawn::posix_process::PosixProgramImpl;
+    use crate::keystone::CellCapSet;
+    use crate::posix_process::PosixProgramImpl;
     use cap_std::io_lifetimes::{FromFilelike, IntoFilelike};
     use std::cell::RefCell;
     use std::fs::File;
     use std::rc::Rc;
+    use tempfile::NamedTempFile;
     use tokio::io::AsyncWriteExt;
     use tokio::task;
     use tokio_util::sync::CancellationToken;
-    use tracing_subscriber::filter::LevelFilter;
 
-    #[async_backtrace::framed]
     #[tokio::test]
     async fn test_raw_pipes() {
         let spawn_process_server = cap_std::fs::File::from_filelike(
@@ -215,10 +239,12 @@ mod tests {
                 .unwrap()
                 .into_filelike(),
         );
+        let temp_db = NamedTempFile::new().unwrap().into_temp_path();
 
         let args: Vec<Result<&str, ::capnp::Error>> = Vec::new();
         let mut child =
-            crate::spawn::spawn_process_native(&spawn_process_server, args.into_iter()).unwrap();
+            crate::posix_process::spawn_process_native(&spawn_process_server, args.into_iter())
+                .unwrap();
 
         let stdinref = Rc::new(RefCell::new(child.stdin.take().unwrap()));
 
@@ -255,15 +281,25 @@ mod tests {
             Default::default(),
         );
 
+        let db: crate::database::RootDatabase = crate::database::Manager::open_database(
+            std::path::Path::new(temp_db.as_os_str()),
+            crate::database::OpenOptions::Create,
+        )
+        .unwrap();
+
         let keystone_client: crate::keystone_capnp::host::Client<any_pointer> =
-            capnp_rpc::new_client(super::HostImpl::new(0));
+            capnp_rpc::new_client(super::HostImpl::new(
+                0,
+                Rc::new(RefCell::new(db)),
+                Rc::new(RefCell::new(CellCapSet::new())),
+            ));
         let mut rpc_system =
             super::RpcSystem::new(Box::new(network), Some(keystone_client.clone().client));
 
         let _ = rpc_system.get_disconnector();
 
         task::LocalSet::new()
-            .run_until(async_backtrace::location!().frame(async {
+            .run_until(async {
                 let bootstrap: crate::module_capnp::module_start::Client<
                     crate::hello_world_capnp::config::Owned,
                     crate::hello_world_capnp::root::Owned,
@@ -292,21 +328,37 @@ mod tests {
                 println!("Got reply! {}", msg.to_string()?);
 
                 Ok::<(), eyre::Error>(())
-            }))
+            })
             .await
             .unwrap();
     }
 
-    #[async_backtrace::framed]
     #[tokio::test]
     async fn test_process_creation() {
+        let process_set = Rc::new(RefCell::new(crate::posix_process::ProcessCapSet::new()));
         let spawn_process_server = PosixProgramImpl::new_std(
             File::open(keystone_util::get_binary_path("hello-world-module")).unwrap(),
+            process_set.clone(),
         );
-        let spawn_process_client: crate::spawn::posix_process::PosixProgramClient =
+        let spawn_process_client: crate::posix_process::PosixProgramClient =
             capnp_rpc::new_client(spawn_process_server);
 
-        let wrapper_server = PosixModuleImpl {};
+        let temp_db = NamedTempFile::new().unwrap().into_temp_path();
+        let db: crate::database::RootDatabase = crate::database::Manager::open_database(
+            std::path::Path::new(temp_db.as_os_str()),
+            crate::database::OpenOptions::Create,
+        )
+        .unwrap();
+
+        let wrapper_server = PosixModuleImpl {
+            host: capnp_rpc::new_client(super::HostImpl::new(
+                0,
+                Rc::new(RefCell::new(db)),
+                Rc::new(RefCell::new(CellCapSet::new())),
+            )),
+            module_process_set: Rc::new(RefCell::new(super::ModuleProcessCapSet::new())),
+            process_set: process_set,
+        };
         let wrapper_client: super::posix_module::Client = capnp_rpc::new_client(wrapper_server);
 
         let mut wrap_request = wrapper_client.wrap_request();
@@ -315,7 +367,7 @@ mod tests {
         let wrapped_client = wrap_response.get().unwrap().get_result().unwrap();
 
         let e = task::LocalSet::new()
-            .run_until(async_backtrace::location!().frame(async {
+            .run_until(async {
                 let mut spawn_request = wrapped_client.spawn_request();
                 let builder = spawn_request.get();
                 let posix_args = builder.init_args();
@@ -359,7 +411,7 @@ mod tests {
                 assert!(error_message.is_empty() == true);
 
                 Ok::<(), eyre::Error>(())
-            }))
+            })
             .await;
 
         e.unwrap();

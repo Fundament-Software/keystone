@@ -5,7 +5,6 @@ use eyre::Result;
 use rusqlite::{params, Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
-use tracing::instrument;
 
 pub trait DatabaseInterface {
     fn init(&mut self) -> Result<()>;
@@ -312,8 +311,8 @@ pub enum OpenOptions {
 }
 
 impl Manager {
-    fn create(path: &Path) -> Result<Connection, rusqlite::Error> {
-        let span = tracing::span!(tracing::Level::DEBUG, "Manager::create", path = ?path);
+    fn create(path: impl AsRef<Path>) -> Result<Connection, rusqlite::Error> {
+        let span = tracing::span!(tracing::Level::DEBUG, "Manager::create", path = ?path.as_ref());
         let _enter = span.enter();
         Connection::open_with_flags(
             path,
@@ -322,14 +321,14 @@ impl Manager {
     }
 
     pub fn open_database<DB: From<Connection> + DatabaseInterface>(
-        path: &Path,
+        path: impl AsRef<Path>,
         options: OpenOptions,
     ) -> Result<DB> {
-        let span = tracing::span!(tracing::Level::DEBUG, "Manager::open_database", path = ?path, options = ?options);
+        let span = tracing::span!(tracing::Level::DEBUG, "Manager::open_database", path = ?path.as_ref(), options = ?options);
         let _enter = span.enter();
         match options {
             OpenOptions::Create => {
-                let create = if let Ok(file) = std::fs::File::open(path) {
+                let create = if let Ok(file) = std::fs::File::open(path.as_ref()) {
                     file.metadata()?.len() == 0
                 } else {
                     true
@@ -349,7 +348,7 @@ impl Manager {
             }
             OpenOptions::Truncate => {
                 // If the file already exists, we truncate it instead of deleting it to support temp file situations.
-                if let Ok(file) = std::fs::File::open(path) {
+                if let Ok(file) = std::fs::File::open(path.as_ref()) {
                     file.set_len(0)?;
                 }
                 let mut r: DB = Self::create(path)?.into();

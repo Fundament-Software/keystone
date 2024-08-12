@@ -4,7 +4,7 @@ mod byte_stream;
 mod cap_replacement;
 mod cap_std_capnproto;
 mod cell;
-mod config;
+pub mod config;
 mod database;
 pub mod host;
 pub mod http;
@@ -15,16 +15,7 @@ mod posix_spawn;
 mod proxy;
 mod sqlite;
 
-capnp_import::capnp_import!("schema/**/*.capnp");
-
-#[cfg(test)]
-capnp_import::capnp_import!("../modules/hello-world/*.capnp");
-
-#[cfg(test)]
-capnp_import::capnp_import!("../modules/stateful/*.capnp");
-
-#[cfg(test)]
-capnp_import::capnp_import!("../modules/config-test/*.capnp");
+include!(concat!(env!("OUT_DIR"), "/capnproto.rs"));
 
 impl From<keystone_capnp::LogLevel> for tracing::Level {
     fn from(val: keystone_capnp::LogLevel) -> Self {

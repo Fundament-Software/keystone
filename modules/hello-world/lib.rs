@@ -1,1 +1,1 @@
-capnp_import::capnp_import!("hello_world.capnp");
+include!(concat!(env!("OUT_DIR"), "/capnproto.rs"));

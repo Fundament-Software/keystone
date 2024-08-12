@@ -1,12 +1,16 @@
 [package]
-name = "stateful-module"
+name = "stateful"
 edition.workspace = true
 rust-version.workspace = true
 version = "0.1.0"
 authors = ["Erik McClure <erikm@fundament.software>"]
 homepage.workspace = true
 license.workspace = true
-links = "stateful_module"
+links = "stateful"
+
+[lib]
+doctest = false
+path = "lib.rs"
 
 [[bin]]
 name = "stateful-module"

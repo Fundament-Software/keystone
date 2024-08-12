@@ -1,21 +1,19 @@
-capnp_import::capnp_import!("config_test.capnp", "/schema/**/*.capnp");
+include!(concat!(env!("OUT_DIR"), "/capnproto.rs"));
 
 pub mod config_test;
 use crate::config_test::ConfigTestImpl;
 use crate::config_test_capnp::config;
 use crate::config_test_capnp::root;
-use crate::module_capnp::module_start;
 use capnp::any_pointer::Owned as any_pointer;
+use capnp::traits::ImbueMut;
 use capnp_macros::capnproto_rpc;
 use capnp_rpc::{rpc_twoparty_capnp, twoparty, RpcSystem};
+use keystone::module_capnp::module_start;
 use std::cell::RefCell;
-#[cfg(feature = "tracing")]
-use std::fs::File;
-#[cfg(feature = "tracing")]
 use tracing::Level;
 
 pub struct ModuleImpl {
-    bootstrap: RefCell<Option<keystone_capnp::host::Client<any_pointer>>>,
+    bootstrap: RefCell<Option<keystone::keystone_capnp::host::Client<any_pointer>>>,
     disconnector: RefCell<Option<capnp_rpc::Disconnector<rpc_twoparty_capnp::Side>>>,
 }
 
@@ -24,14 +22,12 @@ impl module_start::Server<config::Owned, root::Owned> for ModuleImpl {
     async fn start(&self, config: Reader) -> Result<(), ::capnp::Error> {
         tracing::debug!("start()");
         let mut msg = capnp::message::Builder::new_default();
-        tracing::debug!("created msg!");
-
-        msg.set_root(config)?;
-        tracing::debug!("set root!");
-        let client: root::Client = capnp_rpc::new_client(ConfigTestImpl { msg });
-        tracing::debug!("created client!");
+        let mut caps = Vec::new();
+        let mut builder: capnp::any_pointer::Builder = msg.init_root();
+        builder.imbue_mut(&mut caps);
+        builder.set_as(config)?;
+        let client: root::Client = capnp_rpc::new_client(ConfigTestImpl { msg, caps });
         results.get().set_api(client)?;
-        tracing::debug!("set api!");
         Ok(())
     }
     async fn stop(&self) -> Result<(), ::capnp::Error> {
@@ -46,20 +42,20 @@ impl module_start::Server<config::Owned, root::Owned> for ModuleImpl {
     }
 }
 
-#[tokio::main(flavor = "current_thread")]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let _: Vec<String> = ::std::env::args().collect();
-
-    #[cfg(feature = "tracing")]
-    let log_file = File::create("config_test.log")?;
-    #[cfg(feature = "tracing")]
+async fn init<
+    T: tokio::io::AsyncRead + 'static + Unpin,
+    U: tokio::io::AsyncWrite + 'static + Unpin,
+>(
+    reader: T,
+    writer: U,
+) -> capnp::Result<()> {
     tracing_subscriber::fmt()
         .with_max_level(Level::DEBUG)
-        .with_writer(log_file)
-        .with_ansi(false)
+        .with_writer(std::io::stderr)
+        .with_ansi(true)
         .init();
 
-    tracing::info!("server started");
+    tracing::info!("Module starting up...");
 
     tokio::task::LocalSet::new()
         .run_until(async move {
@@ -100,9 +96,77 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             })
             .await
         })
-        .await?;
+        .await
+        .map_err(|e| capnp::Error::failed(e.to_string()))?;
 
     tracing::info!("RPC gracefully terminated");
+
+    Ok(())
+}
+#[tokio::main(flavor = "current_thread")]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let _: Vec<String> = ::std::env::args().collect();
+
+    init(tokio::io::stdin(), tokio::io::stdout()).await?;
+    Ok(())
+}
+
+#[cfg(test)]
+use tempfile::NamedTempFile;
+
+#[test]
+fn test_complex_config_init() -> eyre::Result<()> {
+    let temp_db = NamedTempFile::new().unwrap().into_temp_path();
+    let temp_log = NamedTempFile::new().unwrap().into_temp_path();
+    let temp_prefix = NamedTempFile::new().unwrap().into_temp_path();
+    let mut source = keystone_util::build_temp_config(&temp_db, &temp_log, &temp_prefix);
+
+    source.push_str(&keystone_util::build_module_config(
+        "Config Test",
+        "config-test-module",
+        r#"{ nested = { state = [ "@keystone", "initCell", {id = "myCellName"}, "result" ], moreState = [ "@keystone", "initCell", {id = "myCellName"}, "result" ] } }"#,
+    ));
+
+    let (client_writer, server_reader) = async_byte_channel::channel();
+    let (server_writer, client_reader) = async_byte_channel::channel();
+
+    let pool = tokio::task::LocalSet::new();
+    let fut = pool.run_until(async move {
+        tokio::task::spawn_local(async move {
+            let (mut instance, rpc, disconnect, api) =
+                keystone::keystone::Keystone::init_single_module(
+                    &source,
+                    "Config Test",
+                    server_reader,
+                    server_writer,
+                )
+                .await
+                .unwrap();
+
+            {
+                init(client_reader, client_writer).await?;
+
+                let config_client: crate::config_test_capnp::root::Client = api;
+
+                println!("got api");
+                let get_config = config_client.get_config_request();
+                let get_response = get_config.send().promise.await?;
+                println!("got response");
+
+                let response = get_response.get()?.get_reply()?;
+                println!("got reply");
+                println!("{:#?}", response);
+            }
+            instance.shutdown().await;
+            Ok::<(), capnp::Error>(())
+        })
+        .await
+    });
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    let result = runtime.block_on(fut);
+    runtime.shutdown_timeout(std::time::Duration::from_millis(1));
+    result.unwrap().unwrap();
 
     Ok(())
 }

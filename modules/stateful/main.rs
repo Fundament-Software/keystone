@@ -1,6 +1,6 @@
-capnp_import::capnp_import!("stateful.capnp");
+include!(concat!(env!("OUT_DIR"), "/capnproto.rs"));
 
-mod stateful;
+pub mod stateful;
 use crate::stateful::StatefulImpl;
 use crate::stateful_capnp::config;
 use crate::stateful_capnp::root;

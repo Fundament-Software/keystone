@@ -244,9 +244,7 @@ where
 
         let anyconfig: capnp::any_pointer::Builder = builder.init_config();
         let schema = DynamicSchema::new(msg)?;
-        let configtype = schema.get_type_by_scope(vec!["Config".to_string()]).ok_or(
-            Error::MissingSchemaField("Config type".into(), path.display().to_string()),
-        )?;
+        let configtype = schema.get_type_by_scope(&["Config"], None)?;
 
         if let TypeVariant::Struct(st) = configtype {
             let dynobj: capnp::dynamic_struct::Builder = anyconfig.init_dynamic((*st).into())?;
@@ -664,15 +662,12 @@ where
                         return Err(Error::MissingSchema(module_name.into()).into());
                     };
 
-                    let variant =
-                        if let Some(s) = schema.get_type_by_scope(vec!["Root".to_string()]) {
-                            s
-                        } else {
-                            // Check for "Host" as well, just in case this is the built-in keystone capability
-                            schema.get_type_by_scope(vec!["Host".to_string()]).ok_or(
-                                Error::MissingSchemaField("Root".into(), module_name.into()),
-                            )?
-                        };
+                    let variant = if let Ok(s) = schema.get_type_by_scope(&["Root"], None) {
+                        s
+                    } else {
+                        // Check for "Host" as well, just in case this is the built-in keystone capability
+                        schema.get_type_by_scope(&["Host"], Some("schema/keystone.capnp"))?
+                    };
 
                     let Value::String(name) = &l[1] else {
                         return Err(
@@ -915,7 +910,7 @@ name = "Config Test"
 path = "{}"
 config = {{ nested = {{ state = [ "@keystone", "initCell", {{id = "myCellName"}}, "result" ], moreState = [ "@keystone", "initCell", {{id = "myCellName"}}, "result" ] }} }}
 "#,
-        keystone_util::get_binary_path("config-test")
+        keystone_util::get_binary_path("config-test-module")
             .as_os_str()
             .to_str()
             .unwrap()

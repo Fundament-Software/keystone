@@ -4,9 +4,8 @@ use std::{cell::RefCell, io::Write, rc::Rc};
 use crate::{
     byte_stream::ByteStreamImpl,
     cap_std_capnp::{
-        ambient_authority, dir, dir_entry, duration, file, instant, metadata, monotonic_clock,
-        open_options, permissions, project_dirs, read_dir, system_clock, system_time, temp_dir,
-        temp_file, user_dirs, FileType,
+        ambient_authority, dir, dir_entry, file, instant, metadata, monotonic_clock, permissions,
+        project_dirs, read_dir, system_clock, system_time, temp_dir, temp_file, FileType,
     },
 };
 use cap_directories::{self, ProjectDirs, UserDirs};
@@ -1337,13 +1336,10 @@ impl project_dirs::Server for ProjectDirsImpl {
 
 #[cfg(test)]
 pub mod tests {
-    use std::fs::File;
-
     use crate::{
         cap_std_capnp::{ambient_authority, dir_entry, metadata, permissions, system_time},
         cap_std_capnproto::AmbientAuthorityImpl,
     };
-    use cap_directories::{self, ProjectDirs, UserDirs};
     use std::cell::RefCell;
     use std::rc::Rc;
 

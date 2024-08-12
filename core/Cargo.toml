@@ -75,6 +75,10 @@ console-subscriber = "0.2.0"
 tempfile.workspace = true
 serde_json = "1.0"
 keystone-util.workspace = true
+hello-world.workspace = true
+indirect-world.workspace = true
+stateful.workspace = true
+config-test.workspace = true
 
 [build-dependencies]
 capstone-gen.workspace = true

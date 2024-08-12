@@ -1,5 +1,5 @@
 [package]
-name = "indirect-world-module"
+name = "indirect-world"
 edition.workspace = true
 rust-version.workspace = true
 version = "0.1.0"
@@ -7,6 +7,10 @@ authors = ["Erik McClure <erikm@fundament.software>"]
 homepage.workspace = true
 license.workspace = true
 links = "indirect_world"
+
+[lib]
+doctest = false
+path = "lib.rs"
 
 [[bin]]
 name = "indirect-world-module"
@@ -23,7 +27,7 @@ tokio-util.workspace = true
 tracing-subscriber.workspace = true
 tracing.workspace = true
 keystone.workspace = true
-hello-world = { path = "../hello-world" }
+hello-world.workspace = true
 
 [build-dependencies]
 capstone-gen.workspace = true

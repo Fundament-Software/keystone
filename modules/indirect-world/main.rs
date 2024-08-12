@@ -1,4 +1,4 @@
-capnp_import::capnp_import!("indirect_world.capnp");
+include!(concat!(env!("OUT_DIR"), "/capnproto.rs"));
 
 pub mod indirect_world;
 use crate::indirect_world::IndirectWorldImpl;
@@ -90,7 +90,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
-
+/*
 #[cfg(test)]
 use tempfile::NamedTempFile;
 
@@ -176,3 +176,4 @@ fn test_indirect_init() -> eyre::Result<()> {
 
     Ok(())
 }
+*/

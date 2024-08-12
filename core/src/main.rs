@@ -16,16 +16,7 @@ mod posix_spawn;
 mod proxy;
 mod sqlite;
 
-capnp_import::capnp_import!("schema/**/*.capnp");
-
-#[cfg(test)]
-capnp_import::capnp_import!("../modules/hello-world/*.capnp");
-
-#[cfg(test)]
-capnp_import::capnp_import!("../modules/stateful/*.capnp");
-
-#[cfg(test)]
-capnp_import::capnp_import!("../modules/config-test/*.capnp");
+include!(concat!(env!("OUT_DIR"), "/capnproto.rs"));
 
 use crate::keystone_capnp::keystone_config;
 use clap::{Args, Parser, Subcommand, ValueEnum};

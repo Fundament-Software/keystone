@@ -1,6 +1,5 @@
 use crate::byte_stream::ByteStreamBufferImpl;
 use crate::byte_stream_capnp::byte_stream::Owned as ByteStream;
-use crate::host::HostImpl;
 use crate::module_capnp::module_error;
 use crate::module_capnp::module_start;
 use crate::posix_module_capnp::posix_module;
@@ -15,10 +14,9 @@ use capnp::any_pointer::Owned as any_pointer;
 use capnp::any_pointer::Owned as cap_pointer;
 use capnp::capability::RemotePromise;
 use capnp_macros::capnproto_rpc;
-use capnp_rpc::twoparty::VatNetwork;
+use capnp_rpc::rpc_twoparty_capnp;
 use capnp_rpc::CapabilityServerSet;
 use capnp_rpc::Disconnector;
-use capnp_rpc::{rpc_twoparty_capnp, RpcSystem};
 use std::{cell::RefCell, rc::Rc};
 
 pub struct PosixModuleProcessImpl {
@@ -130,41 +128,33 @@ impl
                     Ok(s) => {
                         let stdin = crate::byte_stream::ClientWriter::new(s.get()?.get_api()?);
 
-                        let network = VatNetwork::new(
-                            stdout.clone(), // read from the output stream of the process
-                            stdin,          // write into the input stream of the process
-                            rpc_twoparty_capnp::Side::Client,
-                            Default::default(),
-                        );
-
-                        let mut rpc_system = RpcSystem::new(
-                            Box::new(network),
-                            Some(self.module.host.clone().client),
-                        );
-
-                        let process_impl = self
-                            .module
-                            .process_set
-                            .borrow_mut()
-                            .get_local_server_of_resolved(&process)
-                            .ok_or(capnp::Error::failed(
-                                "Couldn't get process implementation!".into(),
-                            ))?;
-
-                        if let Ok(mut lock) = process_impl.as_ref().disconnector.lock() {
-                            lock.replace(rpc_system.get_disconnector());
-                        }
-
-                        let disconnector = rpc_system.get_disconnector();
-                        let bootstrap: module_start::Client<any_pointer, cap_pointer> =
-                            rpc_system.bootstrap(rpc_twoparty_capnp::Side::Server);
-
-                        let mut api_request = bootstrap.start_request();
-                        let mut builder = api_request.get();
                         let pair = params.get()?.get_args()?;
-                        builder.set_config(pair.get_config()?)?;
 
-                        let api = api_request.send();
+                        // read from the output stream of the process
+                        // write into the input stream of the process
+                        let (rpc_system, bootstrap, disconnector, api) =
+                            crate::keystone::init_rpc_system(
+                                stdout.clone(),
+                                stdin,
+                                self.module.host.clone().client,
+                                pair.get_config()?,
+                                |rpc_system| -> capnp::Result<()> {
+                                    let process_impl = self
+                                        .module
+                                        .process_set
+                                        .borrow_mut()
+                                        .get_local_server_of_resolved(&process)
+                                        .ok_or(capnp::Error::failed(
+                                            "Couldn't get process implementation!".into(),
+                                        ))?;
+
+                                    if let Ok(mut lock) = process_impl.as_ref().disconnector.lock()
+                                    {
+                                        lock.replace(rpc_system.get_disconnector());
+                                    }
+                                    Ok(())
+                                },
+                            )?;
 
                         let module_process = PosixModuleProcessImpl {
                             posix_process: process,
@@ -288,22 +278,22 @@ mod tests {
         .unwrap();
 
         let keystone_client: crate::keystone_capnp::host::Client<any_pointer> =
-            capnp_rpc::new_client(super::HostImpl::new(
+            capnp_rpc::new_client(crate::host::HostImpl::new(
                 0,
                 Rc::new(RefCell::new(db)),
                 Rc::new(RefCell::new(CellCapSet::new())),
             ));
         let mut rpc_system =
-            super::RpcSystem::new(Box::new(network), Some(keystone_client.clone().client));
+            capnp_rpc::RpcSystem::new(Box::new(network), Some(keystone_client.clone().client));
 
         let _ = rpc_system.get_disconnector();
 
         task::LocalSet::new()
             .run_until(async {
                 let bootstrap: crate::module_capnp::module_start::Client<
-                    crate::hello_world_capnp::config::Owned,
-                    crate::hello_world_capnp::root::Owned,
-                > = rpc_system.bootstrap(super::rpc_twoparty_capnp::Side::Server);
+                    hello_world::hello_world_capnp::config::Owned,
+                    hello_world::hello_world_capnp::root::Owned,
+                > = rpc_system.bootstrap(capnp_rpc::rpc_twoparty_capnp::Side::Server);
 
                 tokio::task::spawn_local(async move {
                     tokio::select! {
@@ -351,7 +341,7 @@ mod tests {
         .unwrap();
 
         let wrapper_server = PosixModuleImpl {
-            host: capnp_rpc::new_client(super::HostImpl::new(
+            host: capnp_rpc::new_client(crate::host::HostImpl::new(
                 0,
                 Rc::new(RefCell::new(db)),
                 Rc::new(RefCell::new(CellCapSet::new())),
@@ -372,7 +362,7 @@ mod tests {
                 let builder = spawn_request.get();
                 let posix_args = builder.init_args();
                 let args = posix_args.init_config();
-                let mut config: crate::hello_world_capnp::config::Builder = args.init_as();
+                let mut config: hello_world::hello_world_capnp::config::Builder = args.init_as();
                 config.set_greeting("Hello".into());
 
                 // TODO: Pass in the hello_world structural config parameters
@@ -382,7 +372,7 @@ mod tests {
                 let process_client = response.get()?.get_result()?;
 
                 let api_response = process_client.get_api_request().send().promise.await?;
-                let hello_client: crate::hello_world_capnp::root::Client =
+                let hello_client: hello_world::hello_world_capnp::root::Client =
                     api_response.get()?.get_api()?.get_as_capability()?;
 
                 let mut sayhello = hello_client.say_hello_request();

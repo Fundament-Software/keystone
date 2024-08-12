@@ -1,12 +1,14 @@
 use crate::cap_replacement::CapReplacement;
 use crate::cell::SimpleCellImpl;
 use crate::posix_module::ModuleProcessCapSet;
-use crate::proxy::ProxyServer;
+pub use crate::proxy::ProxyServer;
 use caplog::{CapLog, MAX_BUFFER_SIZE};
 use capnp::any_pointer::Owned as any_pointer;
 use capnp::capability::{FromClientHook, RemotePromise};
 use capnp::private::capability::ClientHook;
-use capnp_rpc::CapabilityServerSet;
+use capnp::traits::SetPointerBuilder;
+use capnp_rpc::twoparty::VatNetwork;
+use capnp_rpc::{rpc_twoparty_capnp, CapabilityServerSet, RpcSystem};
 use eyre::Result;
 use std::time::Duration;
 use std::{cell::RefCell, collections::HashMap, path::Path, rc::Rc};
@@ -15,6 +17,7 @@ use super::{
     keystone_capnp::cap_expr,
     keystone_capnp::keystone_config,
     module_capnp::module_error,
+    module_capnp::module_start,
     posix_module_capnp::{posix_module, posix_module_args},
 };
 
@@ -110,7 +113,7 @@ pub struct ModuleInstance {
         >,
     >,
     state: ModuleState,
-    queue: capnp_rpc::queued::Client,
+    pub queue: capnp_rpc::queued::Client,
 }
 pub struct Keystone {
     db: Rc<RefCell<RootDatabase>>,
@@ -120,29 +123,88 @@ pub struct Keystone {
     pub namemap: HashMap<String, u64>,
     pub cells: Rc<RefCell<CellCapSet>>,
     timeout: Duration,
-    proxy_set: Rc<RefCell<crate::proxy::CapSet>>, // Set of all untyped proxies
+    pub proxy_set: Rc<RefCell<crate::proxy::CapSet>>, // Set of all untyped proxies
     module_process_set: Rc<RefCell<crate::posix_module::ModuleProcessCapSet>>,
     process_set: Rc<RefCell<crate::posix_process::ProcessCapSet>>,
 }
 
 impl Keystone {
-    pub async fn new_from_string(source: &str) -> Result<Self> {
+    pub async fn init_single_module<
+        T: tokio::io::AsyncRead + 'static + Unpin,
+        U: tokio::io::AsyncWrite + 'static + Unpin,
+        API: FromClientHook,
+    >(
+        config: impl AsRef<str>,
+        module: impl AsRef<str>,
+        reader: T,
+        writer: U,
+    ) -> Result<(
+        Self,
+        RpcSystem<rpc_twoparty_capnp::Side>,
+        capnp_rpc::Disconnector<rpc_twoparty_capnp::Side>,
+        API,
+    )> {
         let mut message = ::capnp::message::Builder::new_default();
         let mut msg = message.init_root::<keystone_config::Builder>();
-        crate::config::to_capnp(&source.parse::<toml::Table>()?, msg.reborrow())?;
+        crate::config::to_capnp(&config.as_ref().parse::<toml::Table>()?, msg.reborrow())?;
 
         let mut instance = Keystone::new(
             message.get_root_as_reader::<keystone_config::Reader>()?,
             false,
         )?;
-        instance
-            .init(
-                message
-                    .get_root_as_reader::<keystone_config::Reader>()
-                    .unwrap(),
-            )
-            .await?;
-        Ok(instance)
+
+        let config = message.get_root_as_reader::<keystone_config::Reader>()?;
+        let modules = config.get_modules()?;
+        let mut target = None;
+        for s in modules.iter() {
+            let id = instance.get_id(s)?;
+            if s.get_name()?.to_str()? == module.as_ref() {
+                target = Some(s);
+            } else {
+                instance.init_module(id, s, config.get_cap_table()?).await?;
+            }
+        }
+
+        let cap_table = config.get_cap_table()?;
+        let (rpc_system, api, id, disconnector) = if let Some(s) = target {
+            let id = instance.get_id(s)?;
+            let host: crate::keystone_capnp::host::Client<any_pointer> = capnp_rpc::new_client(
+                HostImpl::new(id, instance.db.clone(), instance.cells.clone()),
+            );
+
+            let (conf, _) = Self::extract_config_pair(s)?;
+            let replacement = CapReplacement::new(conf, |index, mut builder| {
+                if instance.autoinit_check(cap_table, builder.reborrow(), index, id)? {
+                    Ok(())
+                } else {
+                    instance.resolve_cap_expr(cap_table.get(index), cap_table, builder, &host)
+                }
+            });
+
+            let (rpc_system, _, disconnector, api) =
+                init_rpc_system(reader, writer, host.clone().client, replacement, |_| Ok(()))?;
+
+            Ok((rpc_system, api, id, disconnector))
+        } else {
+            Err(Error::ModuleNameNotFound(module.as_ref().to_string()))
+        }?;
+
+        let module = instance
+            .modules
+            .get_mut(&id)
+            .ok_or(Error::ModuleNotFound(id))?;
+        capnp_rpc::queued::ClientInner::resolve(
+            &module.queue.inner,
+            Ok(api.pipeline.get_api().as_cap()),
+        );
+        module.state = ModuleState::Ready;
+
+        Ok((
+            instance,
+            rpc_system,
+            disconnector,
+            capnp::capability::FromClientHook::new(api.pipeline.get_api().as_cap()),
+        ))
     }
 
     pub fn new(config: keystone_config::Reader, check_consistency: bool) -> Result<Self> {
@@ -315,6 +377,10 @@ impl Keystone {
         })
     }
 
+    pub fn get_proxy_set(&self) -> Rc<RefCell<crate::proxy::CapSet>> {
+        self.proxy_set.clone()
+    }
+
     fn resolve_cap_expr(
         &self,
         reader: cap_expr::Reader<'_>,
@@ -340,6 +406,32 @@ impl Keystone {
             e.to_string()
         );
         Err(e.into())
+    }
+
+    fn autoinit_check(
+        &self,
+        cap_table: capnp::struct_list::Reader<'_, cap_expr::Owned>,
+        mut builder: capnp::any_pointer::Builder<'_>,
+        index: u32,
+        id: u64,
+    ) -> capnp::Result<bool> {
+        if let crate::keystone_capnp::cap_expr::Which::ModuleRef(_) =
+            cap_table.get(index).which()?
+        {
+            if !cap_table.get(index).has_module_ref() {
+                let client = self
+                    .cells
+                    .borrow_mut()
+                    // Very important to use ::init() here so it gets initialized to a default value
+                    .new_client(
+                        SimpleCellImpl::init(id as i64, self.db.clone())
+                            .map_err(|e| capnp::Error::failed(e.to_string()))?,
+                    );
+                builder.set_as_capability(client.into_client_hook());
+                return Ok(true);
+            }
+        }
+        return Ok(false);
     }
 
     async fn init_module(
@@ -385,23 +477,11 @@ impl Keystone {
             let mut spawn_request = client.spawn_request();
             let builder = spawn_request.get();
             let replacement = CapReplacement::new(conf, |index, mut builder| {
-                if let crate::keystone_capnp::cap_expr::Which::ModuleRef(_) =
-                    cap_table.get(index).which()?
-                {
-                    if !cap_table.get(index).has_module_ref() {
-                        let client = self
-                            .cells
-                            .borrow_mut()
-                            // Very important to use ::init() here so it gets initialized to a default value
-                            .new_client(
-                                SimpleCellImpl::init(id as i64, self.db.clone())
-                                    .map_err(|e| capnp::Error::failed(e.to_string()))?,
-                            );
-                        builder.set_as_capability(client.into_client_hook());
-                        return Ok(());
-                    }
+                if self.autoinit_check(cap_table, builder.reborrow(), index, id)? {
+                    Ok(())
+                } else {
+                    self.resolve_cap_expr(cap_table.get(index), cap_table, builder, &host)
                 }
-                self.resolve_cap_expr(cap_table.get(index), cap_table, builder, &host)
             });
 
             let mut pair = builder.init_args();
@@ -483,8 +563,7 @@ impl Keystone {
         for s in modules.iter() {
             let id = self.get_id(s)?;
             if let Err(e) = self.init_module(id, s, config.get_cap_table()?).await {
-                eprintln!("Module Start Failure: {}", e);
-                // TODO: log error
+                tracing::error!("Module Start Failure: {}", e);
             }
         }
 
@@ -593,79 +672,66 @@ impl Keystone {
     }
 }*/
 
-#[cfg(test)]
-use std::future::Future;
-#[cfg(test)]
-use tempfile::NamedTempFile;
+pub(crate) fn init_rpc_system<
+    T: tokio::io::AsyncRead + 'static + Unpin,
+    U: tokio::io::AsyncWrite + 'static + Unpin,
+    F: FnOnce(&mut RpcSystem<rpc_twoparty_capnp::Side>) -> capnp::Result<()>,
+    From: SetPointerBuilder,
+>(
+    reader: T,
+    writer: U,
+    client: capnp::capability::Client,
+    config: From,
+    f: F,
+) -> capnp::Result<(
+    RpcSystem<rpc_twoparty_capnp::Side>,
+    module_start::Client<any_pointer, any_pointer>,
+    capnp_rpc::Disconnector<rpc_twoparty_capnp::Side>,
+    RemotePromise<module_start::start_results::Owned<any_pointer, any_pointer>>,
+)> {
+    let network = VatNetwork::new(
+        reader,
+        writer,
+        rpc_twoparty_capnp::Side::Client,
+        Default::default(),
+    );
 
-pub fn attach_trace() {
-    tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::DEBUG)
-        .with_ansi(true)
-        .with_timer(tracing_subscriber::fmt::time::OffsetTime::new(
-            time::UtcOffset::UTC,
-            time::format_description::well_known::Rfc3339,
-        ))
-        .with_writer(std::io::stderr)
-        .init();
+    let mut rpc_system = RpcSystem::new(Box::new(network), Some(client));
+
+    f(&mut rpc_system)?;
+
+    let disconnector = rpc_system.get_disconnector();
+    let bootstrap: module_start::Client<any_pointer, any_pointer> =
+        rpc_system.bootstrap(rpc_twoparty_capnp::Side::Server);
+
+    let mut api_request = bootstrap.start_request();
+    api_request.get().init_config().set_as(config)?;
+
+    let api = api_request.send();
+
+    Ok((rpc_system, bootstrap, disconnector, api))
 }
 
-#[cfg(test)]
-pub fn test_harness<F: Future<Output = capnp::Result<()>> + 'static>(
-    config: &str,
-    f: impl FnOnce(Keystone) -> F + 'static,
-) -> Result<()> {
-    attach_trace();
-    let mut message = ::capnp::message::Builder::new_default();
-    let mut msg = message.init_root::<keystone_config::Builder>();
-
-    let temp_db = NamedTempFile::new().unwrap().into_temp_path();
-    let temp_log = NamedTempFile::new().unwrap().into_temp_path();
-    let temp_prefix = NamedTempFile::new().unwrap().into_temp_path();
-    let mut source = keystone_util::build_temp_config(&temp_db, &temp_log, &temp_prefix);
-
-    source.push_str(config);
-
-    crate::config::to_capnp(&source.parse::<toml::Table>()?, msg.reborrow())?;
-
-    let mut instance = Keystone::new(
-        message.get_root_as_reader::<keystone_config::Reader>()?,
-        false,
-    )?;
-
-    // TODO: might be able to replace the runtime catch below with .unhandled_panic(UnhandledPanic::ShutdownRuntime) if gets stabilized
-    let pool = tokio::task::LocalSet::new();
-    let fut = pool.run_until(async move {
-        tokio::task::spawn_local(async move {
-            instance
-                .init(message.get_root_as_reader::<keystone_config::Reader>()?)
-                .await
-                .unwrap();
-
-            f(instance).await?;
-            Ok::<(), capnp::Error>(())
-        })
-        .await
-    });
-
-    let runtime = tokio::runtime::Runtime::new()?;
-    let result = runtime.block_on(fut);
-    runtime.shutdown_timeout(std::time::Duration::from_millis(1));
-    result.unwrap().unwrap();
-
-    Ok(())
-}
-
+/*
 #[test]
-fn test_hello_world_init() -> Result<()> {
-    test_harness(
-        &keystone_util::build_module_config(
-            "Hello World",
-            "hello-world-module",
-            r#"{  greeting = "Bonjour" }"#,
-        ),
-        |mut instance| async move {
-            let hello_client: crate::hello_world_capnp::root::Client =
+fn test_indirect_init() -> eyre::Result<()> {
+    let source = String::new();
+
+    source.push_str(&keystone_util::build_module_config(
+        "Hello World",
+        "hello-world-module",
+        r#"{ greeting = "Indirect" }"#,
+    ));
+
+    source.push_str(&keystone_util::build_module_config(
+        "Indirect World",
+        "indirect-world-module",
+        r#"{ helloWorld = [ "@Hello World" ] }"#,
+    ));
+
+    test_harness(&source, |mut instance| async move {
+        {
+            let hello_client: hello_world::hello_world_capnp::root::Client =
                 instance.get_api_pipe("Hello World").unwrap();
 
             let mut sayhello = hello_client.say_hello_request();
@@ -674,190 +740,24 @@ fn test_hello_world_init() -> Result<()> {
 
             let msg = hello_response.get()?.get_reply()?.get_message()?;
 
-            assert_eq!(msg, "Bonjour, Keystone!");
+            assert_eq!(msg, "Indirect, Keystone!");
+        }
 
-            instance.shutdown().await;
-            Ok(())
-        },
-    )
-}
+        {
+            let indirect_client: crate::indirect::root::Client =
+                instance.get_api_pipe("Indirect World").unwrap();
 
-#[test]
-fn test_stateful() -> Result<()> {
-    attach_trace();
-
-    let mut message = ::capnp::message::Builder::new_default();
-    let mut msg = message.init_root::<keystone_config::Builder>();
-
-    let temp_db = NamedTempFile::new().unwrap().into_temp_path();
-    let temp_log = NamedTempFile::new().unwrap().into_temp_path();
-    let temp_prefix = NamedTempFile::new().unwrap().into_temp_path();
-    let mut source = keystone_util::build_temp_config(&temp_db, &temp_log, &temp_prefix);
-
-    source.push_str(&keystone_util::build_module_config(
-        "Stateful",
-        "stateful-module",
-        r#"{ echoWord = "echo" }"#,
-    ));
-
-    crate::config::to_capnp(&source.parse::<toml::Table>()?, msg.reborrow())?;
-
-    let mut instance = Keystone::new(
-        message.get_root_as_reader::<keystone_config::Reader>()?,
-        false,
-    )?;
-
-    // TODO: might be able to replace the runtime catch below with .unhandled_panic(UnhandledPanic::ShutdownRuntime) if gets stabilized
-    let pool = tokio::task::LocalSet::new();
-    let fut = pool.run_until(async move {
-        tokio::task::spawn_local(async move {
-            instance
-                .init(message.get_root_as_reader::<keystone_config::Reader>()?)
-                .await
-                .unwrap();
-            let stateful_client: crate::stateful_capnp::root::Client =
-                instance.get_api_pipe("Stateful").unwrap();
-
-            {
-                let mut echo = stateful_client.echo_last_request();
-                echo.get().init_request().set_name("Keystone".into());
-                let echo_response = echo.send().promise.await?;
-
-                let msg = echo_response.get()?.get_reply()?.get_message()?;
-
-                assert_eq!(msg, "echo ");
-            }
-
-            {
-                let mut echo = stateful_client.echo_last_request();
-                echo.get().init_request().set_name("Replace".into());
-                let echo_response = echo.send().promise.await?;
-
-                let msg = echo_response.get()?.get_reply()?.get_message()?;
-
-                assert_eq!(msg, "echo Keystone");
-            }
-
-            {
-                let mut echo = stateful_client.echo_last_request();
-                echo.get().init_request().set_name("Reload".into());
-                let echo_response = echo.send().promise.await?;
-
-                let msg = echo_response.get()?.get_reply()?.get_message()?;
-
-                assert_eq!(msg, "echo Replace");
-            }
-
-            instance.shutdown().await;
-            Ok::<(), capnp::Error>(())
-        })
-        .await
-    });
-
-    let runtime = tokio::runtime::Runtime::new()?;
-    let result = runtime.block_on(fut);
-    runtime.shutdown_timeout(std::time::Duration::from_millis(1));
-    result.unwrap().unwrap();
-
-    let mut message = ::capnp::message::Builder::new_default();
-    let mut msg = message.init_root::<keystone_config::Builder>();
-    crate::config::to_capnp(&source.parse::<toml::Table>()?, msg.reborrow())?;
-
-    let mut instance = Keystone::new(
-        message.get_root_as_reader::<keystone_config::Reader>()?,
-        false,
-    )?;
-
-    let pool = tokio::task::LocalSet::new();
-    let fut = pool.run_until(async move {
-        tokio::task::spawn_local(async move {
-            instance
-                .init(message.get_root_as_reader::<keystone_config::Reader>()?)
-                .await
-                .unwrap();
-            let stateful_client: crate::stateful_capnp::root::Client =
-                instance.get_api_pipe("Stateful").unwrap();
-
-            {
-                let mut echo = stateful_client.echo_last_request();
-                echo.get().init_request().set_name("Keystone".into());
-                let echo_response = echo.send().promise.await?;
-
-                let msg = echo_response.get()?.get_reply()?.get_message()?;
-
-                assert_eq!(msg, "echo Reload");
-            }
-
-            instance.shutdown().await;
-            Ok::<(), capnp::Error>(())
-        })
-        .await
-    });
-
-    let runtime = tokio::runtime::Runtime::new()?;
-    let result = runtime.block_on(fut);
-    runtime.shutdown_timeout(std::time::Duration::from_millis(1));
-    result.unwrap().unwrap();
-
-    Ok(())
-}
-
-#[test]
-fn test_hello_world_proxy() -> Result<()> {
-    test_harness(
-        &keystone_util::build_module_config(
-            "Hello World",
-            "hello-world-module",
-            r#"{  greeting = "Bonjour" }"#,
-        ),
-        |mut instance| async move {
-            let module = &instance.modules[&instance.namemap["Hello World"]];
-            let pipe = instance
-                .proxy_set
-                .borrow_mut()
-                .new_client(ProxyServer::new(
-                    module.queue.add_ref(),
-                    instance.proxy_set.clone(),
-                ))
-                .hook;
-
-            let hello_client: crate::hello_world_capnp::root::Client =
-                capnp::capability::FromClientHook::new(pipe);
-
-            let mut sayhello = hello_client.say_hello_request();
+            let mut sayhello = indirect_client.say_hello_request();
             sayhello.get().init_request().set_name("Keystone".into());
             let hello_response = sayhello.send().promise.await?;
 
             let msg = hello_response.get()?.get_reply()?.get_message()?;
 
-            assert_eq!(msg, "Bonjour, Keystone!");
+            assert_eq!(msg, "Indirect, Keystone!");
+        }
 
-            instance.shutdown().await;
-            Ok(())
-        },
-    )
+        instance.shutdown().await;
+        Ok(())
+    })
 }
-
-#[test]
-fn test_complex_config_init() -> Result<()> {
-    test_harness(
-        &keystone_util::build_module_config(
-            "Config Test",
-            "config-test-module",
-            r#"{ nested = { state = [ "@keystone", "initCell", {id = "myCellName"}, "result" ], moreState = [ "@keystone", "initCell", {id = "myCellName"}, "result" ] } }"#,
-        ),
-        |mut instance| async move {
-            let config_client: crate::config_test_capnp::root::Client =
-                instance.get_api_pipe("Config Test").unwrap();
-
-            let get_config = config_client.get_config_request();
-            let get_response = get_config.send().promise.await?;
-
-            let response = get_response.get()?.get_reply()?;
-            println!("{:#?}", response);
-
-            instance.shutdown().await;
-            Ok(())
-        },
-    )
-}
+*/

@@ -12,6 +12,9 @@ homepage.workspace = true
 license.workspace = true
 links = "hello_world"
 
+[features]
+tracing = []
+
 [lib]
 doctest = false
 path = "lib.rs"

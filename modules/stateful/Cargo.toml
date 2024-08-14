@@ -8,6 +8,9 @@ homepage.workspace = true
 license.workspace = true
 links = "stateful"
 
+[features]
+tracing = []
+
 [lib]
 doctest = false
 path = "lib.rs"

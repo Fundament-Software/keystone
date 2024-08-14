@@ -239,7 +239,7 @@ impl PosixProcessImpl {
                             break;
                         }
                         stderr.write_all(&buf[..len])?;
-                        count = count + len;
+                        count += len;
                       }
                       Ok::<usize, eyre::Report>(count)
                 } => result.map(Some)

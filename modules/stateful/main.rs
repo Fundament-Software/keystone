@@ -42,6 +42,8 @@ impl module_start::Server<config::Owned, root::Owned> for ModuleImpl {
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // let args: Vec<String> = ::std::env::args().collect();
+
+    #[cfg(feature = "tracing")]
     tracing_subscriber::fmt()
         .with_max_level(Level::DEBUG)
         .with_writer(std::io::stderr)
@@ -83,7 +85,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 *borrow.disconnector.borrow_mut() = Some(rpc_system.get_disconnector());
 
                 tracing::debug!("spawned rpc");
-                tokio::task::spawn_local(rpc_system).await.unwrap().unwrap();
+                rpc_system.await.unwrap();
             })
             .await
         })

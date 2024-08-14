@@ -5,16 +5,15 @@ use harness::test_harness;
 
 #[test]
 fn test_complex_config_init() -> Result<()> {
-    attach_trace();
     test_harness(
         &keystone_util::build_module_config(
-            "Config Test",
-            "config-test-module",
+            "Complex Config",
+            "complex-config-module",
             r#"{ nested = { state = [ "@keystone", "initCell", {id = "myCellName"}, "result" ], moreState = [ "@keystone", "initCell", {id = "myCellName"}, "result" ] } }"#,
         ),
         |mut instance| async move {
-            let config_client: config_test::config_test_capnp::root::Client =
-                instance.get_api_pipe("Config Test").unwrap();
+            let config_client: complex_config::complex_config_capnp::root::Client =
+                instance.get_api_pipe("Complex Config").unwrap();
 
             println!("got api");
             let get_config = config_client.get_config_request();

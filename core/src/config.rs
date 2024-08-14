@@ -16,7 +16,7 @@ use toml::{value::Offset, Table, Value};
 fn expr_recurse(val: &Value, exprs: &mut HashMap<*const Value, u32>) {
     match val {
         Value::Array(a) => {
-            if let Some(Value::String(k)) = a.get(0) {
+            if let Some(Value::String(k)) = a.first() {
                 if k.starts_with('@') && !exprs.contains_key(&(val as *const Value)) {
                     exprs.insert(val as *const Value, exprs.len() as u32);
                 }
@@ -47,8 +47,7 @@ impl SchemaPool {
     fn get<'a>(&'a self, name: &str) -> Option<&'a DynamicSchema> {
         self.0
             .iter()
-            .filter(|(existing_name, _)| name == existing_name)
-            .next()
+            .find(|(existing_name, _)| name == existing_name)
             .map(|(_, sc)| sc)
     }
 
@@ -389,7 +388,7 @@ evaluates to my_mod_ref = @indirect.field1.method1(-2, "asdf", false, {another =
 config = { my_mod_ref = [ "@indirect", "field1", "method1", { a = -2, b = "asdf", c = false, d = { another = "struct" },  e = [ "@indirect2", "field1" ] }, "field2", "method2", {}, "field3" ] }
  */
 
-fn toml_as_string<'a>(v: &'a Value) -> Result<&'a String, Error> {
+fn toml_as_string(v: &Value) -> Result<&String, Error> {
     let Value::String(name) = v else {
         return Err(Error::InvalidConfig("Method name must be a string".into()));
     };
@@ -417,7 +416,7 @@ fn build_cap_field<'a, F>(
 where
     F: FnMut(*const Value) -> Option<u32>,
 {
-    if list.len() == 0 {
+    if list.is_empty() {
         return Ok(expr);
     }
     let fname = toml_as_string(&list[0])?;
@@ -502,7 +501,7 @@ where
         builder.set_index(f.get_index());
         Ok(builder.init_base())
     } else {
-        return Err(Error::MissingSchemaField(fname.to_string(), name.to_string()).into());
+        Err(Error::MissingSchemaField(fname.to_string(), name.to_string()).into())
     }
 }
 
@@ -529,7 +528,7 @@ where
                     format!("{} return values", name),
                     method.get_result_struct_type(),
                 ))? {
-                build_cap_field(name, expr, root, schemas, callback, &list[..], (*st).into())?
+                build_cap_field(name, expr, root, schemas, callback, list, (*st).into())?
             } else {
                 return Err(Error::TypeMismatchCapstone(
                     format!("Results for {}", name),
@@ -642,14 +641,14 @@ where
 {
     // The root expr must always be a cap, because all expressions must begin with cap name of some kind
     if let Value::Array(l) = v {
-        if l.len() == 0 {
+        if l.is_empty() {
             Err(Error::InvalidConfig(
                 "Capability reference cannot be an empty array".into(),
             ))?;
         }
 
         if let Value::String(k) = &l[0] {
-            let module_name = k.strip_prefix('@').unwrap_or(&k);
+            let module_name = k.strip_prefix('@').unwrap_or(k);
 
             match l.len() {
                 1 => {
@@ -766,7 +765,7 @@ pub fn to_capnp(config: &Table, mut msg: keystone_config::Builder<'_>) -> Result
     Ok(())
 }
 
-const SELF_SCHEMA: &'static [u8] = include_bytes!(concat!(env!("OUT_DIR"), "/self.schema"));
+const SELF_SCHEMA: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/self.schema"));
 pub const HOST_NAME: &str = "keystone";
 
 fn builtin_schemas() -> capnp::Result<SchemaPool> {
@@ -910,7 +909,7 @@ name = "Config Test"
 path = "{}"
 config = {{ nested = {{ state = [ "@keystone", "initCell", {{id = "myCellName"}}, "result" ], moreState = [ "@keystone", "initCell", {{id = "myCellName"}}, "result" ] }} }}
 "#,
-        keystone_util::get_binary_path("config-test-module")
+        keystone_util::get_binary_path("complex-config-module")
             .as_os_str()
             .to_str()
             .unwrap()

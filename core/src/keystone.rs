@@ -165,8 +165,12 @@ impl Keystone {
             }
         }
 
+        let span = tracing::debug_span!("Module", module = module.as_ref());
+        let _enter = span.enter();
+
         let cap_table = config.get_cap_table()?;
         let (rpc_system, api, id, disconnector) = if let Some(s) = target {
+            tracing::debug!("Found target module, initializing in current thread");
             let id = instance.get_id(s)?;
             let host: crate::keystone_capnp::host::Client<any_pointer> = capnp_rpc::new_client(
                 HostImpl::new(id, instance.db.clone(), instance.cells.clone()),
@@ -181,6 +185,7 @@ impl Keystone {
                 }
             });
 
+            tracing::debug!("Initializing RPC system");
             let (rpc_system, _, disconnector, api) =
                 init_rpc_system(reader, writer, host.clone().client, replacement, |_| Ok(()))?;
 
@@ -189,6 +194,7 @@ impl Keystone {
             Err(Error::ModuleNameNotFound(module.as_ref().to_string()))
         }?;
 
+        tracing::debug!("Resolving API proxy");
         let module = instance
             .modules
             .get_mut(&id)
@@ -273,7 +279,7 @@ impl Keystone {
         })
     }
 
-    pub fn get_module_name<'a>(&'a self, id: u64) -> Result<&'a str, Error> {
+    pub fn get_module_name(&self, id: u64) -> Result<&str, Error> {
         Ok(&self.modules.get(&id).ok_or(Error::ModuleNotFound(id))?.name)
     }
     pub fn log_capnp_params(params: &capnp::dynamic_value::Reader<'_>) {
@@ -431,7 +437,7 @@ impl Keystone {
                 return Ok(true);
             }
         }
-        return Ok(false);
+        Ok(false)
     }
 
     async fn init_module(
@@ -445,7 +451,9 @@ impl Keystone {
             .ok_or(Error::ModuleNotFound(id))?
             .state = ModuleState::Initialized;
 
-        tracing::debug_span!("Initializing", name = self.modules.get(&id).unwrap().name);
+        let span = tracing::debug_span!("Initializing", name = self.modules.get(&id).unwrap().name);
+        let _enter = span.enter();
+        tracing::debug!("Set Initialized flag");
 
         let host: crate::keystone_capnp::host::Client<any_pointer> =
             capnp_rpc::new_client(HostImpl::new(id, self.db.clone(), self.cells.clone()));

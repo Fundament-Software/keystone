@@ -78,7 +78,7 @@ keystone-util.workspace = true
 hello-world.workspace = true
 indirect-world.workspace = true
 stateful.workspace = true
-config-test.workspace = true
+complex-config.workspace = true
 
 [build-dependencies]
 capstone-gen.workspace = true

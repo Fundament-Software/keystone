@@ -31,11 +31,11 @@ where
 macro_rules! dyn_event {
     ($lvl:ident, $($arg:tt)+) => {
         match $lvl {
-            crate::keystone_capnp::LogLevel::Trace => ::tracing::trace!($($arg)+),
-            crate::keystone_capnp::LogLevel::Debug => ::tracing::debug!($($arg)+),
-            crate::keystone_capnp::LogLevel::Info => ::tracing::info!($($arg)+),
-            crate::keystone_capnp::LogLevel::Warning => ::tracing::warn!($($arg)+),
-            crate::keystone_capnp::LogLevel::Error => ::tracing::error!($($arg)+),
+            $crate::keystone_capnp::LogLevel::Trace => ::tracing::trace!($($arg)+),
+            $crate::keystone_capnp::LogLevel::Debug => ::tracing::debug!($($arg)+),
+            $crate::keystone_capnp::LogLevel::Info => ::tracing::info!($($arg)+),
+            $crate::keystone_capnp::LogLevel::Warning => ::tracing::warn!($($arg)+),
+            $crate::keystone_capnp::LogLevel::Error => ::tracing::error!($($arg)+),
         }
     };
 }
@@ -44,11 +44,11 @@ macro_rules! dyn_event {
 macro_rules! dyn_span {
     ($lvl:ident, $($arg:tt)+) => {
         match $lvl {
-            crate::keystone_capnp::LogLevel::Trace => ::tracing::trace_span!($($arg)+),
-            crate::keystone_capnp::LogLevel::Debug => ::tracing::debug_span!($($arg)+),
-            crate::keystone_capnp::LogLevel::Info => ::tracing::info_span!($($arg)+),
-            crate::keystone_capnp::LogLevel::Warning => ::tracing::warn_span!($($arg)+),
-            crate::keystone_capnp::LogLevel::Error => ::tracing::error_span!($($arg)+),
+            $crate::keystone_capnp::LogLevel::Trace => ::tracing::trace_span!($($arg)+),
+            $crate::keystone_capnp::LogLevel::Debug => ::tracing::debug_span!($($arg)+),
+            $crate::keystone_capnp::LogLevel::Info => ::tracing::info_span!($($arg)+),
+            $crate::keystone_capnp::LogLevel::Warning => ::tracing::warn_span!($($arg)+),
+            $crate::keystone_capnp::LogLevel::Error => ::tracing::error_span!($($arg)+),
         }
     };
 }
@@ -175,7 +175,7 @@ impl<'a> tracing_subscriber::fmt::writer::MakeWriter<'a>
     }
 }
 
-impl<'a> std::io::Write for HostWriter<capnp::any_pointer::Owned> {
+impl std::io::Write for HostWriter<capnp::any_pointer::Owned> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         self.buf.extend_from_slice(buf);
         Ok(buf.len())

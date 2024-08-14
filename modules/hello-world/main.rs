@@ -9,7 +9,6 @@ use capnp_rpc::{rpc_twoparty_capnp, twoparty, RpcSystem};
 use hello_world::HelloWorldImpl;
 use keystone::module_capnp::module_start;
 use std::cell::RefCell;
-use tracing::instrument::WithSubscriber;
 use tracing::Level;
 
 pub struct ModuleImpl {
@@ -41,6 +40,7 @@ impl module_start::Server<config::Owned, root::Owned> for ModuleImpl {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _: Vec<String> = ::std::env::args().collect();
 
+    #[cfg(feature = "tracing")]
     tracing_subscriber::fmt()
         .with_max_level(Level::DEBUG)
         .with_writer(std::io::stderr)
@@ -82,7 +82,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 *borrow.disconnector.borrow_mut() = Some(rpc_system.get_disconnector());
 
                 tracing::debug!("spawned rpc");
-                tokio::task::spawn_local(rpc_system).await.unwrap().unwrap();
+                rpc_system.await.unwrap();
             })
             .await
         })

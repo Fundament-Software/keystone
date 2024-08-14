@@ -5,7 +5,7 @@ members = [
   "modules/hello-world",
   "modules/indirect-world",
   "modules/stateful",
-  "modules/config-test",
+  "modules/complex-config",
   "util",
 ]
 resolver = "2"
@@ -62,17 +62,5 @@ keystone = { path = "core" }
 hello-world = { path = "modules/hello-world" }
 indirect-world = { path = "modules/indirect-world" }
 stateful = { path = "modules/stateful" }
-config-test = { path = "modules/config-test" }
+complex-config = { path = "modules/complex-config" }
 tempfile = "3"
-
-[patch."https://github.com/Fundament-Software/capstone-rs"]
-capstone = { path = "../capstone-rs/capnp" }
-capstone-futures = { path = "../capstone-rs/capnp-futures" }
-capstone-import = { path = "../capstone-rs/capnp-import" }
-capstone-rpc = { path = "../capstone-rs/capnp-rpc" }
-capstone-macros = { path = "../capstone-rs/capnp-macros" }
-capstone-gen = { path = "../capstone-rs/capnpc" }
-async-byte-channel = { path = "../capstone-rs/async-byte-channel" }
-
-[patch."https://github.com/Fundament-Software/caplog"]
-caplog = { path = "../caplog" }

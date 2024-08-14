@@ -3,7 +3,6 @@ use eyre::Result;
 //use harness::test_harness;
 use keystone::keystone::Keystone;
 use keystone::keystone_capnp::keystone_config;
-use std::future::Future;
 use tempfile::NamedTempFile;
 
 #[test]

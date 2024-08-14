@@ -8,6 +8,9 @@ homepage.workspace = true
 license.workspace = true
 links = "indirect_world"
 
+[features]
+tracing = []
+
 [lib]
 doctest = false
 path = "lib.rs"
@@ -40,3 +43,4 @@ keystone-build.workspace = true
 eyre.workspace = true
 tempfile.workspace = true
 keystone-util.workspace = true
+async-byte-channel.workspace = true

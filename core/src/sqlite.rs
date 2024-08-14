@@ -14,19 +14,20 @@ use crate::sqlite_capnp::{
 };
 use capnp_macros::{capnp_let, capnproto_rpc};
 use capnp_rpc::CapabilityServerSet;
+use d_b_any::DBAny;
 use rusqlite::{
     params, params_from_iter, types::ToSqlOutput, Connection, OpenFlags, Result, ToSql,
 };
 
 use crate::sturdyref_capnp::{restorer, saveable};
 
-enum dbany {
+enum SqlDBAny {
     None,
-    int(i64),
-    real(f64),
-    str(String),
-    blob(Vec<u8>),
-    pointer(Vec<u8>),
+    Int(i64),
+    Real(f64),
+    Str(String),
+    Blob(Vec<u8>),
+    Pointer(Vec<u8>),
 }
 fn get_restorer() -> restorer::Client {
     //get the restorer module cap from somewhere
@@ -34,7 +35,7 @@ fn get_restorer() -> restorer::Client {
 }
 //TODO make a real result stream
 struct PlaceholderResults {
-    buffer: Vec<Vec<dbany>>,
+    buffer: Vec<Vec<SqlDBAny>>,
     last_id: Cell<usize>,
 }
 #[capnproto_rpc(result_stream)]
@@ -54,15 +55,15 @@ impl result_stream::Server for PlaceholderResults {
                 .init(i as u32, self.buffer[i].len() as u32);
             for j in 0..self.buffer[i].len() {
                 match &self.buffer[i][j] {
-                    dbany::None => dbany_builder.reborrow().get(j as u32).set_null(()),
-                    dbany::int(int) => dbany_builder.reborrow().get(j as u32).set_integer(*int),
-                    dbany::real(r) => dbany_builder.reborrow().get(j as u32).set_real(*r),
-                    dbany::str(str) => dbany_builder
+                    SqlDBAny::None => dbany_builder.reborrow().get(j as u32).set_null(()),
+                    SqlDBAny::Int(int) => dbany_builder.reborrow().get(j as u32).set_integer(*int),
+                    SqlDBAny::Real(r) => dbany_builder.reborrow().get(j as u32).set_real(*r),
+                    SqlDBAny::Str(str) => dbany_builder
                         .reborrow()
                         .get(j as u32)
                         .set_text(str.as_str().into()),
-                    dbany::blob(blob) => dbany_builder.reborrow().get(j as u32).set_blob(blob),
-                    dbany::pointer(key) => {
+                    SqlDBAny::Blob(blob) => dbany_builder.reborrow().get(j as u32).set_blob(blob),
+                    SqlDBAny::Pointer(key) => {
                         let mut request = get_restorer().restore_request();
                         request.get().init_value().set_as(key.as_slice())?;
                         let response = request.send().promise.await?;
@@ -111,7 +112,7 @@ impl SqliteDatabase {
         path: P,
         flags: OpenFlags,
     ) -> eyre::Result<(add_d_b::Client, Connection)> {
-        let connection = Connection::open_with_flags(path.clone(), flags.clone())?;
+        let connection = Connection::open_with_flags(path.clone(), flags)?;
         let server = SqliteDatabase {
             connection: connection,
             column_set: RefCell::new(HashSet::new()),
@@ -488,10 +489,10 @@ impl add_d_b::Server for SqliteDatabase {
         statement.push_str("CREATE VIEW ");
         let view_name = create_view_name();
         statement.push_str(view_name.table_name.as_str());
-        statement.push_str(" ");
+        statement.push(' ');
 
         if !names.is_empty() {
-            statement.push_str("(");
+            statement.push('(');
             for name in names.iter() {
                 let name = name?.to_string()?;
                 statement.push_str(name.as_str());
@@ -1260,20 +1261,20 @@ async fn build_join_clause<'a>(
     }
     Ok(statement_and_params)
 }
-fn build_results_stream_buffer(mut rows: rusqlite::Rows<'_>) -> capnp::Result<Vec<Vec<dbany>>> {
+fn build_results_stream_buffer(mut rows: rusqlite::Rows<'_>) -> capnp::Result<Vec<Vec<SqlDBAny>>> {
     let mut row_vec = Vec::new();
     while let Ok(Some(row)) = rows.next() {
         let mut value_vec = Vec::new();
         let mut i = 0;
         while let Ok(value) = row.get_ref(i) {
             match value {
-                rusqlite::types::ValueRef::Null => value_vec.push(dbany::None),
-                rusqlite::types::ValueRef::Integer(int) => value_vec.push(dbany::int(int)),
-                rusqlite::types::ValueRef::Real(r) => value_vec.push(dbany::real(r)),
+                rusqlite::types::ValueRef::Null => value_vec.push(SqlDBAny::None),
+                rusqlite::types::ValueRef::Integer(int) => value_vec.push(SqlDBAny::Int(int)),
+                rusqlite::types::ValueRef::Real(r) => value_vec.push(SqlDBAny::Real(r)),
                 rusqlite::types::ValueRef::Text(t) => {
-                    value_vec.push(dbany::str(std::str::from_utf8(t)?.to_string()))
+                    value_vec.push(SqlDBAny::Str(std::str::from_utf8(t)?.to_string()))
                 }
-                rusqlite::types::ValueRef::Blob(b) => value_vec.push(dbany::blob(b.to_vec())),
+                rusqlite::types::ValueRef::Blob(b) => value_vec.push(SqlDBAny::Blob(b.to_vec())),
             }
             i += 1;
         }
@@ -1437,7 +1438,7 @@ async fn match_where<'a>(
 }
 async fn fill_in_bindparams<'a>(
     bindparam_indexes: &Vec<usize>,
-    params: &mut Vec<rusqlite::types::Value>,
+    params: &mut [rusqlite::types::Value],
     bindings_reader: capnp::struct_list::Reader<'a, d_b_any::Owned>,
 ) -> capnp::Result<()> {
     let mut bindings_iter = bindings_reader.iter();
@@ -1534,8 +1535,8 @@ mod tests {
                 _fallback: insert::ConflictStrategy::Fail,
                 _target: ra_table_ref_cap.clone(),
                 _source: source::Source::_Values(vec![vec![
-                    d_b_any::DBAny::_Text("Steven".to_string()),
-                    d_b_any::DBAny::_Null(()),
+                    DBAny::_Text("Steven".to_string()),
+                    DBAny::_Null(()),
                 ]]),
                 _cols: vec!["name".to_string(), "data".to_string()],
                 _returning: Vec::new(),
@@ -1549,8 +1550,8 @@ mod tests {
                 _fallback: insert::ConflictStrategy::Abort,
                 _target: ra_table_ref_cap.clone(),
                 _source: source::Source::_Values(vec![vec![
-                    d_b_any::DBAny::_Text("ToUpdate".to_string()),
-                    d_b_any::DBAny::_Blob(vec![4, 5, 6]),
+                    DBAny::_Text("ToUpdate".to_string()),
+                    DBAny::_Blob(vec![4, 5, 6]),
                 ]]),
                 _cols: vec!["name".to_string(), "data".to_string()],
                 _returning: Vec::new(),
@@ -1565,13 +1566,11 @@ mod tests {
                 _assignments: vec![
                     update::assignment::Assignment {
                         _name: "name".to_string(),
-                        _expr: Some(expr::Expr::_Literal(d_b_any::DBAny::_Text(
-                            "Updated".to_string(),
-                        ))),
+                        _expr: Some(expr::Expr::_Literal(DBAny::_Text("Updated".to_string()))),
                     },
                     update::assignment::Assignment {
                         _name: "data".to_string(),
-                        _expr: Some(expr::Expr::_Literal(d_b_any::DBAny::_Null(()))),
+                        _expr: Some(expr::Expr::_Literal(DBAny::_Null(()))),
                     },
                 ],
                 _from: Some(join_clause::JoinClause {
@@ -1584,9 +1583,7 @@ mod tests {
                     _cols: vec!["name".to_string()],
                     _operator_and_expr: vec![where_expr::op_and_expr::OpAndExpr {
                         _operator: where_expr::Operator::Is,
-                        _expr: Some(expr::Expr::_Literal(d_b_any::DBAny::_Text(
-                            "ToUpdate".to_string(),
-                        ))),
+                        _expr: Some(expr::Expr::_Literal(DBAny::_Text("ToUpdate".to_string()))),
                     }],
                 }),
                 _returning: Vec::new(),
@@ -1601,8 +1598,8 @@ mod tests {
                 _target: ra_table_ref_cap.clone(),
                 _cols: vec!["name".to_string(), "data".to_string()],
                 _source: insert::source::Source::_Values(vec![vec![
-                    d_b_any::DBAny::_Text("Mike".to_string()),
-                    d_b_any::DBAny::_Blob(vec![1, 2, 3]),
+                    DBAny::_Text("Mike".to_string()),
+                    DBAny::_Blob(vec![1, 2, 3]),
                 ]]),
                 _returning: vec![expr::Expr::_Bindparam(())],
             }));
@@ -1636,9 +1633,9 @@ mod tests {
                         _joinoperations: Vec::new(),
                     }),
                     _results: vec![
-                        expr::Expr::_Literal(d_b_any::DBAny::_Text("id".to_string())),
-                        expr::Expr::_Literal(d_b_any::DBAny::_Text("name".to_string())),
-                        expr::Expr::_Literal(d_b_any::DBAny::_Text("data".to_string())),
+                        expr::Expr::_Literal(DBAny::_Text("id".to_string())),
+                        expr::Expr::_Literal(DBAny::_Text("name".to_string())),
+                        expr::Expr::_Literal(DBAny::_Text("data".to_string())),
                     ],
                     _sql_where: None,
                 })),

@@ -627,7 +627,14 @@ where
         }
     }
 
-    Err(Error::MissingMethod(k.into()).into())
+    Err(Error::MissingMethod(
+        k.into(),
+        match schema.get_proto().get_display_name().map(|r| r.to_string()) {
+            Ok(Ok(s)) => s,
+            _ => format!("interface ID: {}", schema.get_proto().get_id()),
+        },
+    )
+    .into())
 }
 
 fn compile_toml_expr<F>(
@@ -664,8 +671,8 @@ where
                     let variant = if let Ok(s) = schema.get_type_by_scope(&["Root"], None) {
                         s
                     } else {
-                        // Check for "Host" as well, just in case this is the built-in keystone capability
-                        schema.get_type_by_scope(&["Host"], Some("schema/keystone.capnp"))?
+                        // Check inside schema/keystone.capnp for Root, just in case this is the built-in keystone capability
+                        schema.get_type_by_scope(&["Root"], Some("schema/keystone.capnp"))?
                     };
 
                     let Value::String(name) = &l[1] else {

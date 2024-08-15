@@ -1479,12 +1479,14 @@ async fn fill_in_bindparams<'a>(
 #[cfg(test)]
 mod tests {
     use capnp::capability::FromClientHook;
+    use tempfile::NamedTempFile;
 
     use super::*;
     #[tokio::test]
     async fn test_test() -> eyre::Result<()> {
-        let db_path = "test_db";
-        let (client, _connection) = SqliteDatabase::new(db_path, OpenFlags::default())?;
+        let db_path = NamedTempFile::new().unwrap().into_temp_path();
+        let (client, _connection) =
+            SqliteDatabase::new(db_path.to_path_buf(), OpenFlags::default())?;
 
         let create_table_request = client.build_create_table_request(vec![
             table_field::TableField {

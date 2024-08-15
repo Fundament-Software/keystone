@@ -65,8 +65,8 @@ pub enum Error {
     MissingSchema(String),
     #[error("Couldn't find type for {0} with id {1}!")]
     MissingType(String, u64),
-    #[error("Couldn't find {0} in any interface!")]
-    MissingMethod(String),
+    #[error("Couldn't find {0} in {1}!")]
+    MissingMethod(String, String),
     #[error("Method {0} did not specify a parameter list! If a method takes no parameters, you must provide an empty parameter list.")]
     MissingMethodParameters(String),
     #[error("TOML value {0} was not a {1}!")]
@@ -115,6 +115,7 @@ pub struct ModuleInstance {
     state: ModuleState,
     pub queue: capnp_rpc::queued::Client,
 }
+
 pub struct Keystone {
     db: Rc<RefCell<RootDatabase>>,
     log: CapLog<MAX_BUFFER_SIZE>,
@@ -172,22 +173,23 @@ impl Keystone {
         let (rpc_system, api, id, disconnector) = if let Some(s) = target {
             tracing::debug!("Found target module, initializing in current thread");
             let id = instance.get_id(s)?;
-            let host: crate::keystone_capnp::host::Client<any_pointer> = capnp_rpc::new_client(
-                HostImpl::new(id, instance.db.clone(), instance.cells.clone()),
-            );
 
             let (conf, _) = Self::extract_config_pair(s)?;
             let replacement = CapReplacement::new(conf, |index, mut builder| {
                 if instance.autoinit_check(cap_table, builder.reborrow(), index, id)? {
                     Ok(())
                 } else {
-                    instance.resolve_cap_expr(cap_table.get(index), cap_table, builder, &host)
+                    instance.resolve_cap_expr(cap_table.get(index), cap_table, builder)
                 }
             });
 
+            let host: crate::keystone_capnp::host::Client<any_pointer> = capnp_rpc::new_client(
+                HostImpl::new(id, instance.db.clone(), instance.cells.clone()),
+            );
+
             tracing::debug!("Initializing RPC system");
             let (rpc_system, _, disconnector, api) =
-                init_rpc_system(reader, writer, host.clone().client, replacement, |_| Ok(()))?;
+                init_rpc_system(reader, writer, host.client, replacement, |_| Ok(()))?;
 
             Ok((rpc_system, api, id, disconnector))
         } else {
@@ -339,14 +341,17 @@ impl Keystone {
         &self,
         reader: cap_expr::Reader<'_>,
         cap_table: capnp::struct_list::Reader<'_, cap_expr::Owned>,
-        host: &crate::keystone_capnp::host::Client<any_pointer>,
     ) -> capnp::Result<capnp::any_pointer::Pipeline> {
         Ok(match reader.which()? {
             cap_expr::Which::ModuleRef(r) => {
                 let k = r?.to_string()?;
                 capnp::any_pointer::Pipeline::new(Box::new(capnp_rpc::rpc::SingleCapPipeline::new(
                     if k == crate::config::HOST_NAME {
-                        host.client.hook.add_ref()
+                        capnp_rpc::new_client::<crate::keystone_capnp::root::Client, KeystoneRoot>(
+                            KeystoneRoot::new(self),
+                        )
+                        .client
+                        .hook
                     } else {
                         let id = self
                             .namemap
@@ -363,11 +368,11 @@ impl Keystone {
                 )))
             }
             cap_expr::Which::Field(r) => {
-                let base = self.recurse_cap_expr(r.get_base()?, cap_table, host)?;
+                let base = self.recurse_cap_expr(r.get_base()?, cap_table)?;
                 base.get_pointer_field(r.get_index())
             }
             cap_expr::Which::Method(r) => {
-                let base = self.recurse_cap_expr(r.get_subject()?, cap_table, host)?;
+                let base = self.recurse_cap_expr(r.get_subject()?, cap_table)?;
                 let args = r.get_args();
                 let mut call = base.as_cap().new_call(
                     r.get_interface_id(),
@@ -375,7 +380,7 @@ impl Keystone {
                     Some(args.target_size()?),
                 );
                 let replacement = CapReplacement::new(args, |index, builder| {
-                    self.resolve_cap_expr(cap_table.get(index), cap_table, builder, host)
+                    self.resolve_cap_expr(cap_table.get(index), cap_table, builder)
                 });
                 call.get().set_as(replacement)?;
                 call.send().pipeline
@@ -392,9 +397,8 @@ impl Keystone {
         reader: cap_expr::Reader<'_>,
         cap_table: capnp::struct_list::Reader<'_, cap_expr::Owned>,
         mut builder: capnp::any_pointer::Builder<'_>,
-        host: &crate::keystone_capnp::host::Client<any_pointer>,
     ) -> capnp::Result<()> {
-        builder.set_as_capability(self.recurse_cap_expr(reader, cap_table, host)?.as_cap());
+        builder.set_as_capability(self.recurse_cap_expr(reader, cap_table)?.as_cap());
         Ok(())
     }
 
@@ -488,7 +492,7 @@ impl Keystone {
                 if self.autoinit_check(cap_table, builder.reborrow(), index, id)? {
                     Ok(())
                 } else {
-                    self.resolve_cap_expr(cap_table.get(index), cap_table, builder, &host)
+                    self.resolve_cap_expr(cap_table.get(index), cap_table, builder)
                 }
             });
 
@@ -680,6 +684,49 @@ impl Keystone {
     }
 }*/
 
+pub struct KeystoneRoot {
+    db: Rc<RefCell<RootDatabase>>,
+    cells: Rc<RefCell<CellCapSet>>,
+}
+
+impl KeystoneRoot {
+    pub fn new(from: &Keystone) -> Self {
+        Self {
+            db: from.db.clone(),
+            cells: from.cells.clone(),
+        }
+    }
+}
+
+impl crate::keystone_capnp::root::Server for KeystoneRoot {
+    async fn init_cell(
+        &self,
+        params: crate::keystone_capnp::root::InitCellParams,
+        mut results: crate::keystone_capnp::root::InitCellResults,
+    ) -> Result<(), ::capnp::Error> {
+        let span = tracing::debug_span!("host", id = "keystone");
+        let _enter = span.enter();
+        tracing::debug!("init_cell()");
+        let id = self
+            .db
+            .borrow_mut()
+            .get_string_index(params.get()?.get_id()?.to_str()?)
+            .map_err(|e| capnp::Error::failed(e.to_string()))?;
+
+        let client = self
+            .cells
+            .borrow_mut()
+            // Very important to use ::init() here so it gets initialized to a default value
+            .new_client(
+                SimpleCellImpl::init(id, self.db.clone())
+                    .map_err(|e| capnp::Error::failed(e.to_string()))?,
+            );
+
+        results.get().set_result(client);
+        Ok(())
+    }
+}
+
 pub(crate) fn init_rpc_system<
     T: tokio::io::AsyncRead + 'static + Unpin,
     U: tokio::io::AsyncWrite + 'static + Unpin,
@@ -688,7 +735,7 @@ pub(crate) fn init_rpc_system<
 >(
     reader: T,
     writer: U,
-    client: capnp::capability::Client,
+    bootstrap: capnp::capability::Client,
     config: From,
     f: F,
 ) -> capnp::Result<(
@@ -704,7 +751,7 @@ pub(crate) fn init_rpc_system<
         Default::default(),
     );
 
-    let mut rpc_system = RpcSystem::new(Box::new(network), Some(client));
+    let mut rpc_system = RpcSystem::new(Box::new(network), Some(bootstrap));
 
     f(&mut rpc_system)?;
 

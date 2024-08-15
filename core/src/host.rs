@@ -89,33 +89,6 @@ where
         Ok(())
     }
 
-    async fn init_cell(
-        &self,
-        params: host::InitCellParams<State>,
-        mut results: host::InitCellResults<State>,
-    ) -> Result<(), ::capnp::Error> {
-        let span = tracing::debug_span!("host", id = self.instance_id);
-        let _enter = span.enter();
-        tracing::debug!("init_cell()");
-        let id = self
-            .db
-            .borrow_mut()
-            .get_string_index(params.get()?.get_id()?.to_str()?)
-            .map_err(|e| capnp::Error::failed(e.to_string()))?;
-
-        let client = self
-            .cells
-            .borrow_mut()
-            // Very important to use ::init() here so it gets initialized to a default value
-            .new_client(
-                SimpleCellImpl::init(id, self.db.clone())
-                    .map_err(|e| capnp::Error::failed(e.to_string()))?,
-            );
-
-        results.get().set_result(client);
-        Ok(())
-    }
-
     async fn log(
         &self,
         params: host::LogParams<State>,

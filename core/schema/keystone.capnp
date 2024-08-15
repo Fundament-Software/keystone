@@ -64,9 +64,14 @@ struct KeystoneConfig {
   capTable @9 :List(CapExpr);
 }
 
+# Root keystone interface, which is what the config has access to
+interface Root {
+  initCell @0 [T] (id :Text) -> (result :Cell(T));
+}
+
+# Per-module keystone interface, used as the bootstrap interface for each module's RPC system.
 interface Host(State) {
   getState @0 () -> (state :State);
   setState @1 (state :State) -> ();
-  initCell @2 [T] (id :Text) -> (result :Cell(T));
-  log @3 [T] (level :LogLevel, obj :T) -> ();
+  log @2 [T] (level :LogLevel, obj :T) -> ();
 }

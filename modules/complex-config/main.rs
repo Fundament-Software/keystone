@@ -1,10 +1,11 @@
 include!(concat!(env!("OUT_DIR"), "/capnproto.rs"));
 
-pub mod indirect_world;
-use crate::indirect_world::IndirectWorldImpl;
-use crate::indirect_world_capnp::config;
-use crate::indirect_world_capnp::root;
+pub mod complex_config;
+use crate::complex_config::ComplexConfigImpl;
+use crate::complex_config_capnp::config;
+use crate::complex_config_capnp::root;
 use capnp::any_pointer::Owned as any_pointer;
+use capnp::traits::ImbueMut;
 use capnp_macros::capnproto_rpc;
 use capnp_rpc::{rpc_twoparty_capnp, twoparty, RpcSystem};
 use keystone::module_capnp::module_start;
@@ -19,13 +20,18 @@ pub struct ModuleImpl {
 #[capnproto_rpc(module_start)]
 impl module_start::Server<config::Owned, root::Owned> for ModuleImpl {
     async fn start(&self, config: Reader) -> Result<(), ::capnp::Error> {
-        let client: root::Client = capnp_rpc::new_client(IndirectWorldImpl {
-            hello_client: config.get_hello_world()?,
-        });
+        tracing::debug!("start()");
+        let mut msg = capnp::message::Builder::new_default();
+        let mut caps = Vec::new();
+        let mut builder: capnp::any_pointer::Builder = msg.init_root();
+        builder.imbue_mut(&mut caps);
+        builder.set_as(config)?;
+        let client: root::Client = capnp_rpc::new_client(ComplexConfigImpl { msg, caps });
         results.get().set_api(client)?;
         Ok(())
     }
     async fn stop(&self) -> Result<(), ::capnp::Error> {
+        tracing::debug!("stop()");
         let r = self.disconnector.borrow_mut().take();
         if let Some(d) = r {
             d.await?;
@@ -45,11 +51,11 @@ async fn init<
 ) -> capnp::Result<()> {
     let mut set: capnp_rpc::CapabilityServerSet<
         ModuleImpl,
-        module_start::Client<crate::indirect_world_capnp::config::Owned, root::Owned>,
+        module_start::Client<crate::complex_config_capnp::config::Owned, root::Owned>,
     > = capnp_rpc::CapabilityServerSet::new();
 
     let module_client: module_start::Client<
-        crate::indirect_world_capnp::config::Owned,
+        crate::complex_config_capnp::config::Owned,
         root::Owned,
     > = set.new_client(ModuleImpl {
         bootstrap: None.into(),
@@ -105,7 +111,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 use tempfile::NamedTempFile;
 
 #[test]
-fn test_indirect_init() -> eyre::Result<()> {
+fn test_complex_config_init() -> eyre::Result<()> {
+    //console_subscriber::init();
+
     #[cfg(feature = "tracing")]
     tracing_subscriber::fmt()
         .with_max_level(Level::DEBUG)
@@ -119,15 +127,9 @@ fn test_indirect_init() -> eyre::Result<()> {
     let mut source = keystone_util::build_temp_config(&temp_db, &temp_log, &temp_prefix);
 
     source.push_str(&keystone_util::build_module_config(
-        "Hello World",
-        "hello-world-module",
-        r#"{ greeting = "Indirect" }"#,
-    ));
-
-    source.push_str(&keystone_util::build_module_config(
-        "Indirect World",
-        "indirect-world-module",
-        r#"{ helloWorld = [ "@Hello World" ] }"#,
+        "Complex Config",
+        "complex-config-module",
+        r#"{ nested = { state = [ "@keystone", "initCell", {id = "myCellName"}, "result" ], moreState = [ "@keystone", "initCell", {id = "myCellName"}, "result" ] } }"#,
     ));
 
     let (client_writer, server_reader) = async_byte_channel::channel();
@@ -140,7 +142,7 @@ fn test_indirect_init() -> eyre::Result<()> {
         let (mut instance, rpc, _disconnect, api) =
             keystone::keystone::Keystone::init_single_module(
                 &source,
-                "Indirect World",
+                "Complex Config",
                 server_reader,
                 server_writer,
             )
@@ -148,17 +150,16 @@ fn test_indirect_init() -> eyre::Result<()> {
             .unwrap();
 
         let handle = tokio::task::spawn_local(rpc);
-        let indirect_client: crate::indirect_world_capnp::root::Client = api;
+        let config_client: crate::complex_config_capnp::root::Client = api;
 
-        {
-            let mut sayhello = indirect_client.say_hello_request();
-            sayhello.get().init_request().set_name("Keystone".into());
-            let hello_response = sayhello.send().promise.await?;
+        tracing::debug!("Got API");
+        let get_config = config_client.get_config_request();
+        let get_response = get_config.send().promise.await?;
+        tracing::debug!("Got Response");
 
-            let msg = hello_response.get()?.get_reply()?.get_message()?;
-
-            assert_eq!(msg, "Indirect, Keystone!");
-        }
+        let response = get_response.get()?.get_reply()?;
+        tracing::debug!("Got Reply");
+        println!("{:#?}", response);
 
         tokio::select! {
             r = handle => r,
@@ -166,7 +167,6 @@ fn test_indirect_init() -> eyre::Result<()> {
         }
         .unwrap()
         .unwrap();
-
         Ok::<(), capnp::Error>(())
     }));
 
@@ -177,7 +177,18 @@ fn test_indirect_init() -> eyre::Result<()> {
         tokio::select! {
             r = a => r,
             r = b => r,
-            r = tokio::signal::ctrl_c() => Ok(Ok(r.expect("failed to capture ctrl-c"))),
+            r = tokio::signal::ctrl_c() => {
+                    /*let handle = tokio::runtime::Handle::current();
+                    if let Ok(dump) = tokio::time::timeout(tokio::time::Duration::from_secs(2), handle.dump()).await {
+                        for (i, task) in dump.tasks().iter().enumerate() {
+                            let trace = task.trace();
+                            println!("TASK {i}:");
+                            println!("{trace}\n");
+                        }
+                }*/
+                eprintln!("Ctrl-C detected, aborting!");
+                Ok(Ok(r.expect("failed to capture ctrl-c")))
+            },
         }
     });
 

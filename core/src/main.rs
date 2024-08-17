@@ -7,17 +7,16 @@ mod cap_std_capnproto;
 mod cell;
 mod config;
 mod database;
+pub mod host;
 pub mod http;
 pub mod keystone;
 mod posix_module;
+mod posix_process;
 mod posix_spawn;
 pub mod proxy;
-mod spawn;
+mod sqlite;
 
-capnp_import::capnp_import!("/schema/**/*.capnp");
-
-#[cfg(test)]
-capnp_import::capnp_import!("../modules/hello-world/*.capnp");
+include!(concat!(env!("OUT_DIR"), "/capnproto.rs"));
 
 use crate::keystone_capnp::keystone_config;
 use clap::{Args, Parser, Subcommand, ValueEnum};
@@ -83,7 +82,7 @@ enum Commands {
         #[arg(short = 'o')]
         out: Option<String>,
     },
-    /// Given either a copmiled schema file or a binary with an embedded schema file, displays the textual output of that file.
+    /// Given either a compiled schema file or a binary with an embedded schema file, displays the textual output of that file.
     Inspect {
         #[arg(short = 's')]
         schema: String,
@@ -169,7 +168,6 @@ enum CapNPCommands {
     Eval { schema_file: String, name: String },
 }
 
-#[async_backtrace::framed]
 async fn shutdown_signal() {
     // Wait for the CTRL+C signal
     tokio::signal::ctrl_c()
@@ -178,7 +176,6 @@ async fn shutdown_signal() {
 }
 
 #[allow(unused)]
-#[async_backtrace::framed]
 #[tokio::main]
 async fn main() -> Result<()> {
     // Setup eyre

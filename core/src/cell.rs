@@ -10,20 +10,48 @@ pub struct SimpleCellImpl {
     db: Rc<RefCell<RootDatabase>>,
 }
 
+impl SimpleCellImpl {
+    pub fn new(id: i64, db: Rc<RefCell<RootDatabase>>) -> Self {
+        Self { id, db }
+    }
+
+    pub fn init(id: i64, db: Rc<RefCell<RootDatabase>>) -> eyre::Result<Self> {
+        let empty_struct: u64 = 0b0000000000000000000000000000000011111111111111111111111111111100;
+        let segments: &[&[u8]] = &[&empty_struct.to_le_bytes()];
+        let segment_array = capnp::message::SegmentArray::new(segments);
+        let message = capnp::message::Reader::new(segment_array, Default::default());
+        let anypointer: capnp::any_pointer::Reader = message.get_root()?;
+
+        db.borrow_mut().init_state(id, anypointer)?;
+        Ok(Self { id, db })
+    }
+}
+
 #[capnproto_rpc(cell)]
 impl cell::Server<any_pointer> for SimpleCellImpl {
     async fn get(&self) {
+        let span = tracing::debug_span!("cell", id = self.id);
+        let _enter = span.enter();
+        tracing::debug!("get()");
         self.db
             .borrow_mut()
-            .get_state(self.id, results.get().init_data())
-            .map_err(|_| capnp::Error::from_kind(capnp::ErrorKind::Failed))?;
+            .get_state(self.id, results.get().init_data().into())
+            .map_err(|e| {
+                eprintln!("CELL GET ERROR: {}", e);
+                capnp::Error::failed(
+                    "Cell did not exist! did you forget to set it to something first?".into(),
+                )
+            })?;
         Ok(())
     }
     async fn set(&self, data: capnp::any_pointer::Reader) {
-        self.db
-            .borrow_mut()
-            .set_state(self.id, data)
-            .map_err(|_| capnp::Error::from_kind(capnp::ErrorKind::Failed))?;
+        let span = tracing::debug_span!("cell", id = self.id);
+        let _enter = span.enter();
+        tracing::debug!("set()");
+        self.db.borrow_mut().set_state(self.id, data).map_err(|e| {
+            eprintln!("CELL SET ERROR: {}", e);
+            capnp::Error::failed("Could not set data for cell!".into())
+        })?;
         Ok(())
     }
 }

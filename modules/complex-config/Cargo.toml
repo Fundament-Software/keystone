@@ -1,12 +1,12 @@
 [package]
-name = "stateful"
+name = "complex-config"
 edition.workspace = true
 rust-version.workspace = true
 version = "0.1.0"
 authors = ["Erik McClure <erikm@fundament.software>"]
 homepage.workspace = true
 license.workspace = true
-links = "stateful"
+links = "complex_config"
 
 [features]
 tracing = []
@@ -16,7 +16,7 @@ doctest = false
 path = "lib.rs"
 
 [[bin]]
-name = "stateful-module"
+name = "complex-config-module"
 path = "main.rs"
 
 [dependencies]
@@ -42,3 +42,5 @@ keystone-build.workspace = true
 eyre.workspace = true
 tempfile.workspace = true
 keystone-util.workspace = true
+async-byte-channel.workspace = true
+#console-subscriber = "0.4"

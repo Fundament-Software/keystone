@@ -1,36 +1,36 @@
-capnp_import::capnp_import!("hello_world.capnp", "../../core/schema/**/*.capnp");
+include!(concat!(env!("OUT_DIR"), "/capnproto.rs"));
 
-pub mod hello_world;
-use crate::hello_world::HelloWorldImpl;
-use crate::hello_world_capnp::config;
-use crate::hello_world_capnp::root;
-use crate::module_capnp::module_start;
+pub mod stateful;
+use crate::stateful::StatefulImpl;
+use crate::stateful_capnp::config;
+use crate::stateful_capnp::root;
 use capnp::any_pointer::Owned as any_pointer;
 use capnp_macros::capnproto_rpc;
 use capnp_rpc::{rpc_twoparty_capnp, twoparty, RpcSystem};
-use std::borrow::BorrowMut;
+use keystone::module_capnp::module_start;
 use std::cell::RefCell;
-use std::fs::File;
-use tokio::sync::Mutex;
-use tokio::time::{sleep, Duration};
 use tracing::Level;
 
 pub struct ModuleImpl {
-    bootstrap: RefCell<Option<keystone_capnp::host::Client<any_pointer>>>,
+    bootstrap: RefCell<Option<keystone::keystone_capnp::host::Client<any_pointer>>>,
     disconnector: RefCell<Option<capnp_rpc::Disconnector<rpc_twoparty_capnp::Side>>>,
 }
 
 #[capnproto_rpc(module_start)]
 impl module_start::Server<config::Owned, root::Owned> for ModuleImpl {
     async fn start(&self, config: Reader) -> Result<(), ::capnp::Error> {
-        let client: root::Client = capnp_rpc::new_client(IndirectWorldImpl {
-            greeting: config.get_greeting()?.to_string()?,
+        tracing::debug!("start()");
+        let client: root::Client = capnp_rpc::new_client(StatefulImpl {
+            echo_word: config.get_echo_word()?.to_string()?,
+            echo_last: config.get_state()?,
         });
         results.get().set_api(client)?;
         Ok(())
     }
     async fn stop(&self) -> Result<(), ::capnp::Error> {
-        if let Some(d) = self.disconnector.borrow_mut().take() {
+        tracing::debug!("stop()");
+        let r = self.disconnector.borrow_mut().take();
+        if let Some(d) = r {
             d.await?;
             Ok(())
         } else {
@@ -41,55 +41,57 @@ impl module_start::Server<config::Owned, root::Owned> for ModuleImpl {
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let args: Vec<String> = ::std::env::args().collect();
-    tracing::info!("server started");
+    // let args: Vec<String> = ::std::env::args().collect();
 
-    let log_file = File::create("my_cool_trace.log")?;
+    #[cfg(feature = "tracing")]
     tracing_subscriber::fmt()
         .with_max_level(Level::DEBUG)
-        .with_writer(log_file)
-        .with_ansi(false)
+        .with_writer(std::io::stderr)
+        .with_ansi(true)
         .init();
+
+    tracing::info!("Module starting up...");
 
     tokio::task::LocalSet::new()
         .run_until(async move {
-            let mut set: capnp_rpc::CapabilityServerSet<
-                ModuleImpl,
-                module_start::Client<crate::hello_world_capnp::config::Owned, root::Owned>,
-            > = capnp_rpc::CapabilityServerSet::new();
+            tokio::task::spawn_local(async move {
+                let mut set: capnp_rpc::CapabilityServerSet<
+                    ModuleImpl,
+                    module_start::Client<config::Owned, root::Owned>,
+                > = capnp_rpc::CapabilityServerSet::new();
 
-            let module_client: module_start::Client<
-                crate::hello_world_capnp::config::Owned,
-                root::Owned,
-            > = set.new_client(ModuleImpl {
-                bootstrap: None.into(),
-                disconnector: None.into(),
-            });
+                let module_client: module_start::Client<config::Owned, root::Owned> = set
+                    .new_client(ModuleImpl {
+                        bootstrap: None.into(),
+                        disconnector: None.into(),
+                    });
 
-            let reader = tokio::io::stdin();
-            let writer = tokio::io::stdout();
+                let reader = tokio::io::stdin();
+                let writer = tokio::io::stdout();
 
-            let network = twoparty::VatNetwork::new(
-                reader,
-                writer,
-                rpc_twoparty_capnp::Side::Server,
-                Default::default(),
-            );
-            let mut rpc_system =
-                RpcSystem::new(Box::new(network), Some(module_client.clone().client));
+                let network = twoparty::VatNetwork::new(
+                    reader,
+                    writer,
+                    rpc_twoparty_capnp::Side::Server,
+                    Default::default(),
+                );
+                let mut rpc_system =
+                    RpcSystem::new(Box::new(network), Some(module_client.clone().client));
 
-            let server = set.get_local_server_of_resolved(&module_client).unwrap();
-            let borrow = server.as_ref();
-            *borrow.bootstrap.borrow_mut() =
-                Some(rpc_system.bootstrap(rpc_twoparty_capnp::Side::Client));
-            *borrow.disconnector.borrow_mut() = Some(rpc_system.get_disconnector());
+                let server = set.get_local_server_of_resolved(&module_client).unwrap();
+                let borrow = server.as_ref();
+                *borrow.bootstrap.borrow_mut() =
+                    Some(rpc_system.bootstrap(rpc_twoparty_capnp::Side::Client));
+                *borrow.disconnector.borrow_mut() = Some(rpc_system.get_disconnector());
 
-            tracing::info!("spawned rpc");
-            tokio::task::spawn_local(rpc_system).await.unwrap().unwrap();
+                tracing::debug!("spawned rpc");
+                rpc_system.await.unwrap();
+            })
+            .await
         })
-        .await;
+        .await?;
 
-        tracing::info!("RPC gracefully terminated");
+    tracing::info!("RPC gracefully terminated");
 
     Ok(())
 }

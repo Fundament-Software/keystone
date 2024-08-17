@@ -2,6 +2,5 @@ capnp_import::capnp_extract_bin!();
 
 fn main() {
     let output_dir = commandhandle().unwrap();
-    let cmdpath = output_dir.path().join("capnp");
-    keystone_build::standard(&cmdpath, "indirect_world.capnp")
+    keystone_build::standard(output_dir.path().join("capnp"), &["indirect_world.capnp"]).unwrap();
 }

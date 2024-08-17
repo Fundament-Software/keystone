@@ -1,6 +1,7 @@
 @0xeef7e45ab0218bda;
 
 using TOML = import "std/toml.capnp";
+using Cell = import "storage.capnp".Cell;
 
 enum LogLevel {
   trace @0;
@@ -63,7 +64,14 @@ struct KeystoneConfig {
   capTable @9 :List(CapExpr);
 }
 
+# Root keystone interface, which is what the config has access to
+interface Root {
+  initCell @0 [T] (id :Text) -> (result :Cell(T));
+}
+
+# Per-module keystone interface, used as the bootstrap interface for each module's RPC system.
 interface Host(State) {
   getState @0 () -> (state :State);
   setState @1 (state :State) -> ();
+  log @2 [T] (level :LogLevel, obj :T) -> ();
 }

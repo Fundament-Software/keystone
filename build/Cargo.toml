@@ -21,3 +21,4 @@ platforms = "3.4.0"
 wasm-gen = "0.1.4"
 capstone-gen.workspace = true
 current_platform = "0.2.0"
+eyre.workspace = true

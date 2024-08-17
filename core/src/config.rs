@@ -1,6 +1,7 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::{fs::File, io::BufReader, path::Path};
 
+use crate::keystone::Error;
 use crate::keystone_capnp::cap_expr;
 use crate::keystone_capnp::keystone_config;
 use crate::toml_capnp;
@@ -9,24 +10,24 @@ use capnp::{
     dynamic_struct, dynamic_value, introspect::TypeVariant, schema::DynamicSchema, schema_capnp,
     traits::HasTypeId,
 };
-use eyre::{eyre, Result};
+use eyre::Result;
 use toml::{value::Offset, Table, Value};
 
 fn expr_recurse(val: &Value, exprs: &mut HashMap<*const Value, u32>) {
-    // We recurse through all the tables and arrays, looking for any module references
-    // "@module", then add a reference to that value to our exprs vec
-
     match val {
         Value::Array(a) => {
-            for v in a {
-                expr_recurse(v, exprs)
-            }
-        }
-        Value::Table(t) => {
-            for (k, v) in t {
+            if let Some(Value::String(k)) = a.first() {
                 if k.starts_with('@') && !exprs.contains_key(&(val as *const Value)) {
                     exprs.insert(val as *const Value, exprs.len() as u32);
                 }
+            }
+            // Not sure if we need to recurse here (this will always be a no-op on the first array element)
+            //for v in a {
+            //    expr_recurse(v, exprs)
+            //}
+        }
+        Value::Table(t) => {
+            for (k, v) in t {
                 expr_recurse(v, exprs);
             }
         }
@@ -34,11 +35,32 @@ fn expr_recurse(val: &Value, exprs: &mut HashMap<*const Value, u32>) {
     }
 }
 
+type SchemaVec = append_only_vec::AppendOnlyVec<(String, DynamicSchema)>;
+
+struct SchemaPool(SchemaVec);
+
+impl SchemaPool {
+    fn new() -> Self {
+        Self(SchemaVec::new())
+    }
+
+    fn get<'a>(&'a self, name: &str) -> Option<&'a DynamicSchema> {
+        self.0
+            .iter()
+            .find(|(existing_name, _)| name == existing_name)
+            .map(|(_, sc)| sc)
+    }
+
+    fn insert(&self, name: String, schema: DynamicSchema) {
+        self.0.push((name, schema));
+    }
+}
+
 fn value_to_list<F>(
     l: &[Value],
     mut builder: ::capnp::dynamic_list::Builder,
     schema: capnp::schema_capnp::type_::Reader,
-    schemas: &mut HashMap<String, DynamicSchema>,
+    schemas: &SchemaPool,
     callback: &mut F,
 ) -> Result<()>
 where
@@ -56,7 +78,11 @@ where
                     if let Value::Table(t) = &l[idx as usize] {
                         toml_to_config(t, dynamic.downcast()?, schemas, callback)?;
                     } else {
-                        return Err(eyre!("Config value must be a table!"));
+                        return Err(Error::InvalidTypeTOML(
+                            "ModuleConfig List Element".into(),
+                            "table".to_string(),
+                        )
+                        .into());
                     }
                 }
                 return Ok(());
@@ -80,7 +106,7 @@ where
                             continue 'outer;
                         }
                     }
-                    return Err(eyre!("{:?} is not a valid enumeration value!", s));
+                    return Err(Error::InvalidEnumValue(s.into()).into());
                 } else {
                     builder.set(idx, s.as_str().into())?
                 }
@@ -153,19 +179,24 @@ fn toml_to_capnp(v: &Value, mut builder: toml_capnp::value::Builder) -> Result<(
 fn toml_to_config<F>(
     v: &Table,
     mut builder: keystone_config::module_config::Builder<capnp::any_pointer::Owned>,
-    schemas: &mut HashMap<String, DynamicSchema>,
+    schemas: &SchemaPool,
     callback: &mut F,
 ) -> Result<()>
 where
     F: FnMut(*const Value) -> Option<u32>,
 {
-    let path = v.get("path").ok_or(eyre!("Can't find path!"))?;
+    let path = v
+        .get("path")
+        .ok_or(Error::MissingFieldTOML("path".into()))?;
 
     if let Some(str) = path.as_str() {
         builder.set_path(str.into());
     }
 
-    let path = Path::new(path.as_str().ok_or(eyre!("Path isn't a string?!"))?);
+    let path = Path::new(
+        path.as_str()
+            .ok_or(Error::InvalidTypeTOML("path".into(), "string".into()))?,
+    );
     let mut name = None;
 
     if let Some(n) = v.get("name") {
@@ -181,10 +212,11 @@ where
                 builder.set_schema(str.into());
             }
 
-            let schemafile = path
-                .parent()
-                .unwrap_or(Path::new(""))
-                .join(schema.as_str().ok_or(eyre!("Schema isn't a string?!"))?);
+            let schemafile = path.parent().unwrap_or(Path::new("")).join(
+                schema
+                    .as_str()
+                    .ok_or(Error::InvalidTypeTOML("schema".into(), "string".into()))?,
+            );
 
             let f = File::open(schemafile)?;
             let bufread = BufReader::new(f);
@@ -196,7 +228,6 @@ where
                 },
             )?
         } else {
-            println!("path: {}", path.display());
             let file_contents = std::fs::read(path)?;
 
             let binary = crate::binary_embed::load_deps_from_binary(&file_contents)?;
@@ -212,9 +243,7 @@ where
 
         let anyconfig: capnp::any_pointer::Builder = builder.init_config();
         let schema = DynamicSchema::new(msg)?;
-        let configtype = schema
-            .get_type_by_scope(vec!["Config".to_string()])
-            .ok_or(eyre::eyre!("Can't find 'Config' type in schema!"))?;
+        let configtype = schema.get_type_by_scope(&["Config"], None)?;
 
         if let TypeVariant::Struct(st) = configtype {
             let dynobj: capnp::dynamic_struct::Builder = anyconfig.init_dynamic((*st).into())?;
@@ -224,10 +253,10 @@ where
                 }
                 value_to_struct(t, dynobj, schemas, callback)
             } else {
-                Err(eyre::eyre!("Config value must be a table!"))
+                Err(Error::InvalidTypeTOML("Config".into(), "table".into()).into())
             }
         } else {
-            Err(eyre::eyre!("Config type must be a struct!"))
+            Err(Error::TypeMismatchCapstone("Config".into(), "struct".into()).into())
         }
     } else {
         Ok(())
@@ -237,12 +266,14 @@ where
 fn value_to_struct<F>(
     t: &Table,
     mut builder: dynamic_struct::Builder,
-    schemas: &mut HashMap<String, DynamicSchema>,
+    schemas: &SchemaPool,
     callback: &mut F,
 ) -> Result<()>
 where
     F: FnMut(*const Value) -> Option<u32>,
 {
+    let mut bypass = HashSet::new();
+
     'outer: for (k, v) in t.iter() {
         let mut builder = builder.reborrow();
         let field = builder.get_schema().get_field_by_name(k)?;
@@ -253,20 +284,22 @@ where
                 if s.get_type_id() == toml_capnp::value::Builder::TYPE_ID {
                     let dynamic: dynamic_struct::Builder = builder.init(field)?.downcast();
                     toml_to_capnp(v, dynamic.downcast()?)?;
-                    return Ok(());
+                    continue 'outer;
                 }
             }
 
             // If we've reached a capability, halt TOML parsing and make sure all nested capabilities are registered
             if let schema_capnp::type_::Which::Interface(_) = x.get_type()?.which()? {
-                // TODO: refactor capnproto-rust so we don't have to do this
+                // Register that we set this field so we don't autofill it
+                bypass.insert(field.get_index());
 
+                // TODO: refactor capnproto-rust so we don't have to do this
                 unsafe {
                     if let Some(capid) = callback(v as *const Value) {
                         builder.set_capability_to_int(field, capid)?;
                     }
                 }
-                return Ok(());
+                continue 'outer;
             }
         }
 
@@ -283,7 +316,7 @@ where
                             continue 'outer;
                         }
                     }
-                    return Err(eyre!("{:?} is not a valid enumeration value!", s));
+                    return Err(Error::InvalidEnumValue(s.clone()).into());
                 } else {
                     builder.set(field, s.as_str().into())?
                 }
@@ -302,7 +335,7 @@ where
                         callback,
                     )?
                 } else {
-                    return Err(eyre!("{:?} is a group, no groups allowed in configs!", k));
+                    return Err(Error::UnsupportedType(k.into(), "group".into()).into());
                 }
             }
             Value::Table(t) => {
@@ -311,6 +344,21 @@ where
         }
     }
 
+    // Check if this struct has an autofill cell, but only if it wasn't already set
+    for field in builder.get_schema().get_fields()? {
+        if !bypass.contains(&field.get_index()) {
+            for annotation in field.get_annotations()?.iter() {
+                if annotation.get_id() == crate::module_capnp::autocell::ID {
+                    // Add this as a null value pointer (or None if the unsafe pointer is ever turned into an optional reference)
+                    unsafe {
+                        builder
+                            .set_capability_to_int(field, callback(std::ptr::null()).unwrap())?;
+                    }
+                    break;
+                }
+            }
+        }
+    }
     Ok(())
 }
 
@@ -333,218 +381,414 @@ struct CapExpr {
 }
 
 Simple TOML example:
-config = { my_mod_ref = { "@indirect" = 0 } }
+config = { my_mod_ref = [ "@indirect" ] }
 
 Complex TOML example:
-config = { my_mod_ref = { "@indirect".field1.method1 = [-2, "asdf", false, { another = "struct" }, { "@indirect2".field1 }, { "#field2.method2" = [ "#field3" ] } ] } } }
+evaluates to my_mod_ref = @indirect.field1.method1(-2, "asdf", false, {another = "struct"}, @indirect2.field1).field2.method2().field3
+config = { my_mod_ref = [ "@indirect", "field1", "method1", { a = -2, b = "asdf", c = false, d = { another = "struct" },  e = [ "@indirect2", "field1" ] }, "field2", "method2", {}, "field3" ] }
  */
 
-fn eval_toml_schema<F>(
-    v: &Value,
-    expr: cap_expr::Builder,
-    schema: &TypeVariant,
-    base: F,
-) -> Result<()>
-where
-    F: FnOnce(cap_expr::Builder),
-{
-    // base(expr.init_subject());
-    // If it's a method call, we have to look through the method table of the interface
+fn toml_as_string(v: &Value) -> Result<&String, Error> {
+    let Value::String(name) = v else {
+        return Err(Error::InvalidConfig("Method name must be a string".into()));
+    };
+    Ok(name)
+}
 
-    todo!();
-    Ok(())
+fn get_type_by_id<'a>(
+    root: &'a DynamicSchema,
+    id: u64,
+    name: &str,
+) -> Result<&'a TypeVariant, Error> {
+    root.get_type_by_id(id)
+        .ok_or(Error::MissingType(name.into(), id))
+}
+
+fn build_cap_field<'a, F>(
+    name: &str,
+    expr: cap_expr::Builder<'a>,
+    root: &DynamicSchema,
+    schemas: &SchemaPool,
+    callback: &mut F,
+    list: &[Value],
+    s: capnp::schema::StructSchema,
+) -> Result<cap_expr::Builder<'a>>
+where
+    F: FnMut(*const Value) -> Option<u32>,
+{
+    if list.is_empty() {
+        return Ok(expr);
+    }
+    let fname = toml_as_string(&list[0])?;
+    if let Some(f) = s.find_field_by_name(fname)? {
+        // recurse if and only if we have items left
+        let mut builder = if list.len() > 1 {
+            if let capnp::schema_capnp::field::Slot(x) = f.get_proto().which()? {
+                match x.get_type()?.which()? {
+                    schema_capnp::type_::Which::Struct(st) => {
+                        let dyntype = get_type_by_id(root, st.get_type_id(), fname)?;
+                        if let TypeVariant::Struct(st) = dyntype {
+                            build_cap_field(
+                                fname,
+                                expr,
+                                root,
+                                schemas,
+                                callback,
+                                &list[1..],
+                                (*st).into(),
+                            )?
+                            .init_field()
+                        } else {
+                            return Err(Error::InvalidConfig(
+                                "Tried to access subfield of something that isn't a struct".into(),
+                            )
+                            .into());
+                        }
+                    }
+                    schema_capnp::type_::Which::Interface(cr) => {
+                        if list.len() < 3 {
+                            Err(Error::MissingMethodParameters(list[1].to_string()))?;
+                        }
+                        let variant = root
+                            .get_type_by_id(cr.get_type_id())
+                            .ok_or(Error::MissingSchemaField(list[1].to_string(), name.into()))?;
+
+                        let TypeVariant::Capability(cs) = variant else {
+                            return Err(Error::InvalidConfig(
+                                "Schema type was not a capability".into(),
+                            )
+                            .into());
+                        };
+
+                        let cap = CapabilitySchema::new(*cs);
+
+                        let Value::Table(t) = &list[2] else {
+                            return Err(Error::InvalidConfig(
+                                "Method parameters must be a table, and parameter names must be included (position parameters are not allowed)"
+                                    .into(),
+                            ).into());
+                        };
+
+                        // Evaluate the method call
+                        eval_toml_capability(
+                            name,
+                            t,
+                            expr,
+                            cap,
+                            root,
+                            schemas,
+                            callback,
+                            &list[3..],
+                        )?
+                        .init_field()
+                    }
+                    _ => {
+                        return Err(Error::InvalidConfig(
+                            "Tried to access subfield of something that isn't a struct".into(),
+                        )
+                        .into());
+                    }
+                }
+            } else {
+                return Err(
+                    Error::InvalidConfig("Tried to access subfield of group".into()).into(),
+                );
+            }
+        } else {
+            expr.init_field()
+        };
+
+        builder.set_index(f.get_index());
+        Ok(builder.init_base())
+    } else {
+        Err(Error::MissingSchemaField(fname.to_string(), name.to_string()).into())
+    }
 }
 
 #[inline]
-fn build_cap_method<F>(
+fn build_cap_method<'a, F>(
     name: &str,
     v: &Table,
     interface_reader: capnp::schema_capnp::node::interface::Reader,
     id: u64,
-    mut expr: cap_expr::method::Builder,
+    expr: cap_expr::Builder<'a>,
     root: &DynamicSchema,
-    schemas: &mut HashMap<String, DynamicSchema>,
+    schemas: &SchemaPool,
     callback: &mut F,
-) -> Result<bool>
+    list: &[Value],
+) -> Result<Result<cap_expr::Builder<'a>, cap_expr::Builder<'a>>>
 where
     F: FnMut(*const Value) -> Option<u32>,
 {
     for (ordinal, method) in interface_reader.get_methods()?.into_iter().enumerate() {
         if method.get_name()? == name {
+            let expr = if let TypeVariant::Struct(st) = root
+                .get_type_by_id(method.get_result_struct_type())
+                .ok_or(Error::MissingType(
+                    format!("{} return values", name),
+                    method.get_result_struct_type(),
+                ))? {
+                build_cap_field(name, expr, root, schemas, callback, list, (*st).into())?
+            } else {
+                return Err(Error::TypeMismatchCapstone(
+                    format!("Results for {}", name),
+                    "struct".into(),
+                )
+                .into());
+            };
+
+            let mut expr = expr.init_method();
             expr.set_method_id(ordinal as u16);
             expr.set_interface_id(id); // the node::reader::get_id() method is the type id
-            let params = root
-                .get_type_by_id(method.get_param_struct_type())
-                .ok_or(eyre!(
-                    "Couldn't find parameters for {} with id {}!",
-                    name,
-                    method.get_param_struct_type()
-                ))?;
-            let builder = expr.init_args();
+
+            let params =
+                root.get_type_by_id(method.get_param_struct_type())
+                    .ok_or(Error::MissingType(
+                        format!("{} parameters", name),
+                        method.get_result_struct_type(),
+                    ))?;
             if let TypeVariant::Struct(st) = params {
+                let builder = expr.reborrow().init_args();
                 let dynobj = builder.init_dynamic((*st).into())?;
                 value_to_struct(v, dynobj, schemas, callback)?;
             } else {
-                return Err(eyre!("Params for {} weren't a struct?!", name));
+                return Err(Error::TypeMismatchCapstone(
+                    format!("Params for {}", name),
+                    "struct".into(),
+                )
+                .into());
             }
-            return Ok(true);
+
+            return Ok(Ok(expr.init_subject()));
         }
     }
 
-    Ok(false)
+    Ok(Err(expr))
 }
 
-fn eval_toml_capability<F>(
+fn eval_toml_capability<'a, F>(
     k: &str,
     v: &Table,
-    mut expr: cap_expr::method::Builder,
+    expr: cap_expr::Builder<'a>,
     schema: CapabilitySchema,
     root: &DynamicSchema,
-    schemas: &mut HashMap<String, DynamicSchema>,
+    schemas: &SchemaPool,
     callback: &mut F,
-) -> Result<()>
+    list: &[Value],
+) -> Result<cap_expr::Builder<'a>>
 where
     F: FnMut(*const Value) -> Option<u32>,
 {
     if let capnp::schema_capnp::node::Interface(interface_reader) = schema.get_proto().which()? {
-        if !build_cap_method(
+        match build_cap_method(
             k,
             v,
             interface_reader,
             schema.get_proto().get_id(),
-            expr.reborrow(),
+            expr,
             root,
             schemas,
             callback,
+            list,
         )? {
-            let extends = interface_reader.get_superclasses()?;
-            for superclass in extends {
-                if let TypeVariant::Capability(cs) = root
-                    .get_type_by_id(superclass.get_id())
-                    .ok_or(eyre!("Couldn't find superclass {}!", superclass.get_id()))?
-                {
-                    // transform into a reader we can do something with
-                    if let capnp::schema_capnp::node::Interface(interface_reader) =
-                        CapabilitySchema::new(*cs).get_proto().which()?
+            Ok(builder) => return Ok(builder),
+            Err(mut expr) => {
+                let extends = interface_reader.get_superclasses()?;
+                for superclass in extends {
+                    if let TypeVariant::Capability(cs) = root
+                        .get_type_by_id(superclass.get_id())
+                        .ok_or(Error::InvalidConfig(format!(
+                            "Couldn't find superclass {}!",
+                            superclass.get_id()
+                        )))?
                     {
-                        if build_cap_method(
-                            k,
-                            v,
-                            interface_reader,
-                            superclass.get_id(),
-                            expr.reborrow(),
-                            root,
-                            schemas,
-                            callback,
-                        )? {
-                            return Ok(());
+                        // transform into a reader we can do something with
+                        if let capnp::schema_capnp::node::Interface(interface_reader) =
+                            CapabilitySchema::new(*cs).get_proto().which()?
+                        {
+                            expr = match build_cap_method(
+                                k,
+                                v,
+                                interface_reader,
+                                superclass.get_id(),
+                                expr,
+                                root,
+                                schemas,
+                                callback,
+                                list,
+                            )? {
+                                Ok(builder) => return Ok(builder),
+                                Err(expr) => expr,
+                            }
                         }
                     }
                 }
             }
-        } else {
-            return Ok(());
         }
     }
 
-    Err(eyre!("Couldn't find method {} in any interface!", k))
+    Err(Error::MissingMethod(
+        k.into(),
+        match schema.get_proto().get_display_name().map(|r| r.to_string()) {
+            Ok(Ok(s)) => s,
+            _ => format!("interface ID: {}", schema.get_proto().get_id()),
+        },
+    )
+    .into())
 }
 
 fn compile_toml_expr<F>(
     v: &Value,
     mut expr: cap_expr::Builder,
-    schemas: &mut HashMap<String, DynamicSchema>,
-    f: &mut F,
+    schemas: &SchemaPool,
+    callback: &mut F,
 ) -> Result<()>
 where
     F: FnMut(*const Value) -> Option<u32>,
 {
     // The root expr must always be a cap, because all expressions must begin with cap name of some kind
+    if let Value::Array(l) = v {
+        if l.is_empty() {
+            Err(Error::InvalidConfig(
+                "Capability reference cannot be an empty array".into(),
+            ))?;
+        }
 
-    if let Value::Table(t) = v {
-        if t.len() == 1 {
-            for (k, v) in t {
-                if k.starts_with('@') {
-                    let module_name = k.strip_prefix('@').unwrap_or(k);
+        if let Value::String(k) = &l[0] {
+            let module_name = k.strip_prefix('@').unwrap_or(k);
 
-                    // We only have to pull up the schema if there is more to do (which means a method call)
-                    if let Value::Table(_) = v {
-                        // Now we pull up the schema for this module reference.
-                        // TODO: Insert keystone's schema into the map, or detect it as a hardcoded option
-                        if let Some(schema) = schemas.get(module_name) {
-                            let variant = schema
-                                .get_type_by_scope(vec!["Root".to_string()])
-                                .ok_or(eyre::eyre!("Can't find 'Root' interface in schema!"))?;
+            match l.len() {
+                1 => {
+                    expr.reborrow().set_module_ref(module_name.into());
+                    Ok(())
+                }
+                2 => Err(Error::MissingMethodParameters(l[1].to_string()))?,
+                _ => {
+                    let Some(schema) = schemas.get(module_name) else {
+                        return Err(Error::MissingSchema(module_name.into()).into());
+                    };
 
-                            eval_toml_schema(
-                                v,
-                                expr.reborrow(),
-                                variant,
-                                |mut b: cap_expr::Builder| b.set_module_ref(module_name.into()),
-                            )?
-                        } else {
-                            return Err(eyre!("Couldn't find schema for {}", module_name));
-                        }
+                    let variant = if let Ok(s) = schema.get_type_by_scope(&["Root"], None) {
+                        s
                     } else {
-                        expr.reborrow().set_module_ref(module_name.into());
-                    }
-                } else {
-                    return Err(eyre!("Capability references must start with @"));
+                        // Check inside schema/keystone.capnp for Root, just in case this is the built-in keystone capability
+                        schema.get_type_by_scope(&["Root"], Some("schema/keystone.capnp"))?
+                    };
+
+                    let Value::String(name) = &l[1] else {
+                        return Err(
+                            Error::InvalidConfig("Method name must be a string".into()).into()
+                        );
+                    };
+
+                    let TypeVariant::Capability(cs) = variant else {
+                        return Err(Error::InvalidConfig(
+                            "Root schema was not a capability".into(),
+                        )
+                        .into());
+                    };
+
+                    let Value::Table(t) = &l[2] else {
+                        return Err(Error::InvalidConfig(
+                            "Method parameters must be a table, and parameter names must be included (position parameters are not allowed)"
+                                .into(),
+                        ).into());
+                    };
+
+                    let cap = CapabilitySchema::new(*cs);
+
+                    // Evaluate the method call
+                    let mut builder = eval_toml_capability(
+                        name,
+                        t,
+                        expr.reborrow(),
+                        cap,
+                        schema,
+                        schemas,
+                        callback,
+                        &l[3..],
+                    )?;
+
+                    builder.set_module_ref(module_name.into());
+                    Ok(())
                 }
             }
-
-            Ok(())
         } else {
-            Err(eyre!(
-                "Capability references must be the only key in their table."
-            ))
+            Err(Error::InvalidConfig(
+                "First element of an array must be a Capability reference, which must be a string starting with @"
+                    .into(),
+            ).into())
         }
     } else {
-        Err(eyre!(
-            "Root capexpr must always be a cap name! Did you forget to use @module_name format?"
-        ))
+        Err(Error::InvalidConfig("Capability reference must be a TOML array".into()).into())
     }
 }
 
 pub fn to_capnp(config: &Table, mut msg: keystone_config::Builder<'_>) -> Result<()> {
+    let span = tracing::span!(tracing::Level::DEBUG, "config::to_capnp", config = ?config);
+    let _enter = span.enter();
+    let schemas = builtin_schemas()?;
     let dynamic: dynamic_value::Builder = msg.reborrow().into();
     let mut exprs: HashMap<*const Value, u32> = HashMap::new();
-    let mut schemas: HashMap<String, DynamicSchema> = HashMap::new();
     let exprs_ref = &mut exprs;
-    value_to_struct(
-        config,
-        dynamic.downcast(),
-        &mut schemas,
-        &mut |v| -> Option<u32> {
+    value_to_struct(config, dynamic.downcast(), &schemas, &mut |v| -> Option<
+        u32,
+    > {
+        if v.is_null() {
+            exprs_ref.insert(v, exprs_ref.len() as u32);
+            Some(exprs_ref[&v])
+        } else {
             expr_recurse(unsafe { v.as_ref().unwrap() }, exprs_ref);
             if exprs_ref.contains_key(&v) {
                 Some(exprs_ref[&v])
             } else {
                 None
             }
-        },
-    )?;
+        }
+    })?;
 
     // We've already identified all capexprs that need to be rooted in the cap table
     let mut builder = msg.init_cap_table(exprs.len() as u32);
     for (k, v) in &exprs {
-        // Note: The lifetimes here do work out such that we could store a safe reference alongside the hashable pointer,
-        // thus avoiding the unsafe as_ref() call, but this is simpler to implement for now.
-        compile_toml_expr(
-            unsafe { k.as_ref().unwrap() },
-            builder.reborrow().get(*v),
-            &mut schemas,
-            &mut |v| -> Option<u32> {
-                if exprs.contains_key(&v) {
-                    Some(exprs[&v])
-                } else {
-                    None
-                }
-            },
-        )?;
+        // A blank key means this cap index is the autogenerated state cell, so we leave it's entry blank
+        if !k.is_null() {
+            // Note: The lifetimes here do work out such that we could store a safe reference alongside the hashable pointer,
+            // thus avoiding the unsafe as_ref() call, but this is simpler to implement for now.
+            compile_toml_expr(
+                unsafe { k.as_ref().unwrap() },
+                builder.reborrow().get(*v),
+                &schemas,
+                &mut |v| -> Option<u32> {
+                    if exprs.contains_key(&v) {
+                        Some(exprs[&v])
+                    } else {
+                        None
+                    }
+                },
+            )?;
+        }
     }
 
     Ok(())
+}
+
+const SELF_SCHEMA: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/self.schema"));
+pub const HOST_NAME: &str = "keystone";
+
+fn builtin_schemas() -> capnp::Result<SchemaPool> {
+    let schemas = SchemaPool::new();
+    let bufread = BufReader::new(SELF_SCHEMA);
+
+    let ks = DynamicSchema::new(capnp::serialize::read_message(
+        bufread,
+        capnp::message::ReaderOptions {
+            traversal_limit_in_words: None,
+            nesting_limit: 128,
+        },
+    )?)?;
+
+    schemas.insert(HOST_NAME.into(), ks);
+    Ok(schemas)
 }
 
 #[test]
@@ -611,7 +855,7 @@ config = {{ greeting = "Bonjour" }}
 [[modules]]
 name = "Indirect World"
 path = "{}"
-config = {{ helloWorld = {{ "@Hello World" = 0 }} }}
+config = {{ helloWorld = [ "@Hello World" ] }}
 "#,
         keystone_util::get_binary_path("hello-world-module")
             .as_os_str()
@@ -626,6 +870,62 @@ config = {{ helloWorld = {{ "@Hello World" = 0 }} }}
     );
 
     to_capnp(&source.parse::<toml::Table>()?, msg.reborrow())?;
+    //println!("{:#?}", msg.reborrow_as_reader());
+
+    Ok(())
+}
+
+#[test]
+fn test_stateful_config() -> Result<()> {
+    let mut message = ::capnp::message::Builder::new_default();
+    let mut msg = message.init_root::<keystone_config::Builder>();
+    let source = format!(
+        r#"
+database = "test.sqlite"
+defaultLog = "debug"
+
+[[modules]]
+name = "Stateful"
+path = "{}"
+config = {{ echoWord = "Echo" }}
+"#,
+        keystone_util::get_binary_path("stateful-module")
+            .as_os_str()
+            .to_str()
+            .unwrap()
+            .replace('\\', "/")
+    );
+
+    to_capnp(&source.parse::<toml::Table>()?, msg.reborrow())?;
+    //println!("{:#?}", msg.reborrow_as_reader());
+
+    Ok(())
+}
+
+#[test]
+fn test_complex_config() -> Result<()> {
+    let mut message = ::capnp::message::Builder::new_default();
+    let mut msg = message.init_root::<keystone_config::Builder>();
+    let source = format!(
+        r#"
+database = "test.sqlite"
+defaultLog = "debug"
+
+[[modules]]
+name = "Config Test"
+path = "{}"
+config = {{ nested = {{ state = [ "@keystone", "initCell", {{id = "myCellName"}}, "result" ], moreState = [ "@keystone", "initCell", {{id = "myCellName"}}, "result" ] }} }}
+"#,
+        keystone_util::get_binary_path("complex-config-module")
+            .as_os_str()
+            .to_str()
+            .unwrap()
+            .replace('\\', "/")
+    );
+
+    to_capnp(&source.parse::<toml::Table>()?, msg.reborrow())?;
+    let reader = msg.reborrow_as_reader();
+    assert_eq!(reader.get_cap_table()?.len(), 2);
     //println!("{:#?}", msg.reborrow_as_reader());
 
     Ok(())

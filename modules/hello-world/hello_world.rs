@@ -10,7 +10,7 @@ impl root::Server for HelloWorldImpl {
         params: root::SayHelloParams,
         mut results: root::SayHelloResults,
     ) -> Result<(), ::capnp::Error> {
-        tracing::info!("say_hello was called!");
+        tracing::debug!("say_hello was called!");
         let request = params.get()?.get_request()?;
         let name = request.get_name()?.to_str()?;
         let greet = self.greeting.as_str();

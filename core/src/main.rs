@@ -11,7 +11,7 @@ pub mod http;
 pub mod keystone;
 mod posix_module;
 mod posix_spawn;
-mod proxy;
+pub mod proxy;
 mod spawn;
 
 capnp_import::capnp_import!("/schema/**/*.capnp");

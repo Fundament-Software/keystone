@@ -1,0 +1,23 @@
+[package]
+name = "lua-module"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+#[lib]
+#crate-type = ["cdylib"]
+
+[dependencies]
+color-eyre.workspace = true
+eyre.workspace = true
+cap-std.workspace = true
+tokio.workspace = true
+capstone.workspace = true
+capstone-rpc.workspace = true
+capstone-macros.workspace = true
+capstone-import.workspace = true
+async-backtrace.workspace = true
+mlua.workspace = true
+lua-src = "547.0.0"
+keystone = { path = "../../core" }

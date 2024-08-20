@@ -1,6 +1,7 @@
 use crate::buffer_allocator::BufferAllocator;
 use capnp::message::{ReaderOptions, TypedReader};
-use eyre::{eyre, Result};
+use capnp::traits::SetPointerBuilder;
+use eyre::Result;
 use rusqlite::{params, Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -12,7 +13,6 @@ pub trait DatabaseInterface {
 pub struct RootDatabase {
     conn: Connection,
     alloc: BufferAllocator,
-    buf: Vec<u8>,
 }
 
 // Rust's type system does not like enums in generic constants
@@ -24,16 +24,18 @@ const ROOT_TABLES: &[&str] = &["states", "sturdyrefs", "objects", "stringmap"];
 
 impl RootDatabase {
     fn expect_change(call: Result<usize, rusqlite::Error>, count: usize) -> Result<()> {
-        if call? != count {
-            Err(eyre!("Didn't actually insert a row?!"))
+        let n = call?;
+        if n != count {
+            Err(rusqlite::Error::StatementChangedRows(n).into())
         } else {
             Ok(())
         }
     }
+
     fn get_generic<const TABLE: usize>(
         &mut self,
         id: i64,
-        mut builder: capnp::any_pointer::Builder<'_>,
+        builder: capnp::dynamic_value::Builder<'_>,
     ) -> Result<()> {
         let mut stmt = self.conn.prepare_cached(
             format!("SELECT data FROM {} WHERE id = ?1", ROOT_TABLES[TABLE]).as_str(),
@@ -42,66 +44,135 @@ impl RootDatabase {
             params![id],
             |row: &rusqlite::Row| -> Result<(), rusqlite::Error> {
                 let v = row.get_ref(0)?;
-                let mut slice = v.as_blob()?;
-                let message_reader = TypedReader::<_, capnp::any_pointer::Owned>::new(
-                    capnp::serialize::read_message_from_flat_slice_no_alloc(
-                        &mut slice,
+                let slice = [v.as_blob()?];
+
+                let message_reader =
+                    TypedReader::<_, capnp::any_pointer::Owned>::new(capnp::message::Reader::new(
+                        capnp::message::SegmentArray::new(&slice),
                         ReaderOptions {
                             traversal_limit_in_words: None,
                             nesting_limit: 128,
                         },
-                    )
-                    .map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?,
-                );
-                builder
-                    .set_as(
-                        message_reader
-                            .get()
-                            .map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?,
-                    )
-                    .map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))
+                    ));
+                let reader: capnp::any_pointer::Reader = message_reader
+                    .get()
+                    .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+
+                match builder {
+                    capnp::dynamic_value::Builder::Struct(mut s) => s
+                        .copy_from(reader)
+                        .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e))),
+                    capnp::dynamic_value::Builder::AnyPointer(mut b) => b
+                        .set_as(reader)
+                        .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e))),
+                    _ => Err(rusqlite::Error::InvalidQuery),
+                }
             },
         )?;
         Ok(())
     }
 
-    fn set_generic<const TABLE: usize, R: capnp::traits::SetPointerBuilder>(
+    /*fn get_single_segment<'a, R: SetPointerBuilder + Clone>(
+        message: &'a mut capnp::message::Builder<&mut BufferAllocator>,
+        data: R,
+    ) -> Result<&'a [u8]> {
+        message.set_root(data)?;
+        if let capnp::OutputSegments::MultiSegment(v) = message.get_segments_for_output() {
+            let n = v.into_iter().fold(0, |i, v| i + v.len()) * 2;
+            std::mem::swap(x, y)
+            let a = (*message).into_allocator();
+            a.reserve(n);
+            *message = capnp::message::Builder::new(a);
+            message.set_root(data)?;
+        }
+
+        match message.get_segments_for_output() {
+            capnp::OutputSegments::SingleSegment(s) => Ok(s[0]),
+            capnp::OutputSegments::MultiSegment(v) => Err(capnp::Error::from_kind(
+                capnp::ErrorKind::InvalidNumberOfSegments(v.len()),
+            )
+            .into()),
+        }
+    }*/
+
+    fn set_generic<const TABLE: usize, const UPDATE: bool, R: SetPointerBuilder + Clone>(
         &mut self,
         string_index: i64,
         data: R,
     ) -> Result<()> {
         let mut message = capnp::message::Builder::new(&mut self.alloc);
-        message.set_root(data)?;
-        let slice =
-            if let capnp::OutputSegments::SingleSegment(s) = message.get_segments_for_output() {
-                s[0]
-            } else {
-                self.buf.clear();
-                capnp::serialize::write_message(&mut self.buf, &message)?;
-                self.buf.as_slice()
-            };
+        message.set_root(data.clone())?;
 
-        let result = self.conn.prepare_cached(
-            format!("INSERT INTO {} (id, data) VALUES (?1, ?2) ON CONFLICT(id) DO UPDATE SET data=?2", ROOT_TABLES[TABLE]).as_str())?.execute(
-            params![string_index, slice]
-        );
-        Self::expect_change(result, 1)
+        if let capnp::OutputSegments::MultiSegment(v) = message.get_segments_for_output() {
+            let n = v.into_iter().fold(0, |i, v| i + v.len()) * 2;
+            let a = message.into_allocator(); // it is very important the old message is deallocated
+            a.reserve(n);
+            message = capnp::message::Builder::new(a);
+            message.set_root(data)?;
+        }
+
+        let slice = match message.get_segments_for_output() {
+            capnp::OutputSegments::SingleSegment(s) => s[0],
+            capnp::OutputSegments::MultiSegment(v) => {
+                return Err(
+                    capnp::Error::from_kind(capnp::ErrorKind::InvalidNumberOfSegments(v.len()))
+                        .into(),
+                );
+            }
+        };
+        //let slice = Self::get_single_segment(&mut message, data)?;
+
+        if UPDATE {
+            let call = self.conn.prepare_cached(
+                format!("INSERT INTO {} (id, data) VALUES (?1, ?2) ON CONFLICT(id) DO UPDATE SET data=?2", ROOT_TABLES[TABLE]).as_str())?.execute(
+                params![string_index, slice]
+            );
+
+            Self::expect_change(call, 1)
+        } else {
+            let call = self
+                .conn
+                .prepare_cached(
+                    format!(
+                        "INSERT OR IGNORE INTO {} (id, data) VALUES (?1, ?2)",
+                        ROOT_TABLES[TABLE]
+                    )
+                    .as_str(),
+                )?
+                .execute(params![string_index, slice])?;
+
+            if call > 1 {
+                Err(rusqlite::Error::StatementChangedRows(call).into())
+            } else {
+                Ok(())
+            }
+        }
     }
 
-    fn add_generic<const TABLE: usize, R: capnp::traits::SetPointerBuilder>(
+    fn add_generic<const TABLE: usize, R: SetPointerBuilder + Clone>(
         &mut self,
         data: R,
     ) -> Result<i64> {
         let mut message = capnp::message::Builder::new(&mut self.alloc);
-        message.set_root(data)?;
-        let slice =
-            if let capnp::OutputSegments::SingleSegment(s) = message.get_segments_for_output() {
-                s[0]
-            } else {
-                self.buf.clear();
-                capnp::serialize::write_message(&mut self.buf, &message)?;
-                self.buf.as_slice()
-            };
+        message.set_root(data.clone())?;
+
+        if let capnp::OutputSegments::MultiSegment(v) = message.get_segments_for_output() {
+            let n = v.into_iter().fold(0, |i, v| i + v.len()) * 2;
+            let a = message.into_allocator();
+            a.reserve(n);
+            message = capnp::message::Builder::new(a);
+            message.set_root(data)?;
+        }
+
+        let slice = match message.get_segments_for_output() {
+            capnp::OutputSegments::SingleSegment(s) => s[0],
+            capnp::OutputSegments::MultiSegment(v) => {
+                return Err(
+                    capnp::Error::from_kind(capnp::ErrorKind::InvalidNumberOfSegments(v.len()))
+                        .into(),
+                );
+            }
+        };
 
         let result = self
             .conn
@@ -127,43 +198,55 @@ impl RootDatabase {
     pub fn get_state(
         &mut self,
         string_index: i64,
-        builder: capnp::any_pointer::Builder<'_>,
+        builder: capnp::dynamic_value::Builder<'_>,
     ) -> Result<()> {
         self.get_generic::<ROOT_STATES>(string_index, builder)
     }
 
-    pub fn set_state<R: capnp::traits::SetPointerBuilder>(
+    pub fn set_state<R: SetPointerBuilder + Clone>(
         &mut self,
         string_index: i64,
         data: R,
     ) -> Result<()> {
-        self.set_generic::<ROOT_STATES, R>(string_index, data)
+        self.set_generic::<ROOT_STATES, true, R>(string_index, data)
+    }
+
+    pub fn init_state<R: SetPointerBuilder + Clone>(
+        &mut self,
+        string_index: i64,
+        data: R,
+    ) -> Result<()> {
+        self.set_generic::<ROOT_STATES, false, R>(string_index, data)
     }
 
     pub fn get_sturdyref(
         &mut self,
         sturdy_id: i64,
-        builder: capnp::any_pointer::Builder<'_>,
+        builder: capnp::dynamic_value::Builder<'_>,
     ) -> Result<()> {
         self.get_generic::<ROOT_STURDYREFS>(sturdy_id, builder)
     }
-    pub fn add_sturdyref<R: capnp::traits::SetPointerBuilder>(&mut self, data: R) -> Result<i64> {
+    pub fn add_sturdyref<R: SetPointerBuilder + Clone>(&mut self, data: R) -> Result<i64> {
         self.add_generic::<ROOT_STURDYREFS, R>(data)
     }
-    pub fn set_sturdyref<R: capnp::traits::SetPointerBuilder>(
+    pub fn set_sturdyref<R: SetPointerBuilder + Clone>(
         &mut self,
         sturdy_id: i64,
         data: R,
     ) -> Result<()> {
-        self.set_generic::<ROOT_STURDYREFS, R>(sturdy_id, data)
+        self.set_generic::<ROOT_STURDYREFS, true, R>(sturdy_id, data)
     }
     pub fn drop_sturdyref(&mut self, id: i64) -> Result<()> {
         self.drop_generic::<ROOT_STURDYREFS>(id)
     }
-    pub fn add_object<R: capnp::traits::SetPointerBuilder>(&mut self, data: R) -> Result<i64> {
+    pub fn add_object<R: SetPointerBuilder + Clone>(&mut self, data: R) -> Result<i64> {
         self.add_generic::<ROOT_OBJECTS, R>(data)
     }
-    pub fn get_object(&mut self, id: i64, builder: capnp::any_pointer::Builder<'_>) -> Result<()> {
+    pub fn get_object(
+        &mut self,
+        id: i64,
+        builder: capnp::dynamic_value::Builder<'_>,
+    ) -> Result<()> {
         self.get_generic::<ROOT_OBJECTS>(id, builder)
     }
     pub fn drop_object(&mut self, id: i64) -> Result<()> {
@@ -185,7 +268,6 @@ impl From<Connection> for RootDatabase {
         Self {
             conn,
             alloc: BufferAllocator::new(),
-            buf: Vec::new(),
         }
     }
 }
@@ -220,6 +302,7 @@ impl DatabaseInterface for RootDatabase {
 }
 pub struct Manager {}
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum OpenOptions {
     Create,
     Truncate,
@@ -228,7 +311,9 @@ pub enum OpenOptions {
 }
 
 impl Manager {
-    fn create(path: &Path) -> Result<Connection, rusqlite::Error> {
+    fn create(path: impl AsRef<Path>) -> Result<Connection, rusqlite::Error> {
+        let span = tracing::span!(tracing::Level::DEBUG, "Manager::create", path = ?path.as_ref());
+        let _enter = span.enter();
         Connection::open_with_flags(
             path,
             OpenFlags::SQLITE_OPEN_CREATE | OpenFlags::SQLITE_OPEN_READ_WRITE,
@@ -236,12 +321,14 @@ impl Manager {
     }
 
     pub fn open_database<DB: From<Connection> + DatabaseInterface>(
-        path: &Path,
+        path: impl AsRef<Path>,
         options: OpenOptions,
     ) -> Result<DB> {
+        let span = tracing::span!(tracing::Level::DEBUG, "Manager::open_database", path = ?path.as_ref(), options = ?options);
+        let _enter = span.enter();
         match options {
             OpenOptions::Create => {
-                let create = if let Ok(file) = std::fs::File::open(path) {
+                let create = if let Ok(file) = std::fs::File::open(path.as_ref()) {
                     file.metadata()?.len() == 0
                 } else {
                     true
@@ -261,7 +348,7 @@ impl Manager {
             }
             OpenOptions::Truncate => {
                 // If the file already exists, we truncate it instead of deleting it to support temp file situations.
-                if let Ok(file) = std::fs::File::open(path) {
+                if let Ok(file) = std::fs::File::open(path.as_ref()) {
                     file.set_len(0)?;
                 }
                 let mut r: DB = Self::create(path)?.into();
@@ -278,7 +365,7 @@ impl Manager {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum KnownEvent {
     Unknown,
     CreateNode,

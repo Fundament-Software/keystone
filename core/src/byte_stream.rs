@@ -50,7 +50,6 @@ where
     C: FnMut(&[u8]) -> F,
     F: Future<Output = Result<(), capnp::Error>>,
 {
-    #[async_backtrace::framed]
     async fn write(&self, bytes: &[u8]) {
         let fut = {
             let mut cell = self.consumer.borrow_mut();
@@ -65,13 +64,11 @@ where
         fut.await
     }
 
-    #[async_backtrace::framed]
     async fn end(&self) {
         *self.consumer.borrow_mut() = None;
         Ok(())
     }
 
-    #[async_backtrace::framed]
     async fn get_substream(&self) {
         Err(capnp::Error::unimplemented("Not implemented".into()))
     }
@@ -119,7 +116,6 @@ impl std::future::Future for ByteStreamBufferImpl {
 
 #[capnproto_rpc(byte_stream_capnp::byte_stream)]
 impl Server for ByteStreamBufferImpl {
-    #[async_backtrace::framed]
     async fn write(&self, bytes: &[u8]) {
         let copy = self.clone();
         let closed = self.0.borrow().closed;
@@ -141,13 +137,11 @@ impl Server for ByteStreamBufferImpl {
         }
     }
 
-    #[async_backtrace::framed]
     async fn end(&self) {
         self.0.borrow_mut().closed = true;
         Ok(())
     }
 
-    #[async_backtrace::framed]
     async fn get_substream(&self) {
         Err(capnp::Error::unimplemented("Not implemented".into()))
     }
@@ -186,7 +180,6 @@ enum PassThrough<'a> {
 
 impl Client {
     /// Convenience function to make it easier to send bytes through the ByteStream
-    #[async_backtrace::framed]
     pub async fn write_bytes(
         &self,
         bytes: &[u8],
@@ -205,7 +198,6 @@ impl Client {
     /// stream.
     ///
     /// A copy buffer of 4 KB is created to take data from the reader to the byte stream.
-    #[async_backtrace::framed]
     pub async fn copy(&self, reader: &mut (impl AsyncRead + Unpin)) -> eyre::Result<usize> {
         let mut total_bytes = 0;
         let mut buffer = BytesMut::with_capacity(4096);

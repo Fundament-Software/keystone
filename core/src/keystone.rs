@@ -259,15 +259,27 @@ impl Keystone {
             .map(|(id, m)| (m.name.clone(), *id))
             .collect();
 
+        #[cfg(miri)]
+        let caplog = CapLog::<MAX_BUFFER_SIZE>::new_storage(
+            caplog_config.get_max_file_size(),
+            caplog::hashed_array_trie::Storage::new(std::path::Path::new("/"), 2_u64.pow(8))?,
+            Path::new(caplog_config.get_data_prefix()?.to_str()?),
+            caplog_config.get_max_open_files() as usize,
+            check_consistency,
+        )?;
+
+        #[cfg(not(miri))]
+        let caplog = CapLog::<MAX_BUFFER_SIZE>::new(
+            caplog_config.get_max_file_size(),
+            Path::new(caplog_config.get_trie_file()?.to_str()?),
+            Path::new(caplog_config.get_data_prefix()?.to_str()?),
+            caplog_config.get_max_open_files() as usize,
+            check_consistency,
+        )?;
+
         Ok(Self {
             db: Rc::new(RefCell::new(db)),
-            log: CapLog::<MAX_BUFFER_SIZE>::new(
-                caplog_config.get_max_file_size(),
-                Path::new(caplog_config.get_trie_file()?.to_str()?),
-                Path::new(caplog_config.get_data_prefix()?.to_str()?),
-                caplog_config.get_max_open_files() as usize,
-                check_consistency,
-            )?,
+            log: caplog,
             file_server: Rc::new(RefCell::new(AmbientAuthorityImpl::new())),
             modules,
             timeout: Duration::from_millis(config.get_ms_timeout()),

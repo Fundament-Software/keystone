@@ -21,6 +21,7 @@ allow = [
 ]
 confidence-threshold = 0.8
 exceptions = [
+    { allow = ["CC0-1.0"], crate = "tiny-keccak" },
     { allow = ["CC0-1.0"], crate = "constant_time_eq" },
     { allow = ["Unicode-DFS-2016"], crate = "unicode-ident" },
 ]

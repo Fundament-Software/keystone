@@ -1,9 +1,6 @@
-capnp_import::capnp_extract_bin!();
 use std::path::PathBuf;
 
 fn main() {
-    let cmd_dir = commandhandle().unwrap();
-
     // Export schema path
     let manifest: std::path::PathBuf = std::env::var_os("CARGO_MANIFEST_DIR").unwrap().into();
     println!(
@@ -16,7 +13,6 @@ fn main() {
         .into();
 
     let mut cmd = capnpc::CompilerCommand::new();
-    cmd.capnp_executable(cmd_dir.path().join("capnp"));
     cmd.output_path(out_dir.join("capnp_output"));
     cmd.omnibus(out_dir.join("capnproto.rs"));
 

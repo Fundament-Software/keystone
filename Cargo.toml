@@ -6,7 +6,6 @@ members = [
   "modules/indirect-world",
   "modules/stateful",
   "modules/complex-config",
-  "modules/lua-module",
   "util",
 ]
 resolver = "2"

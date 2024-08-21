@@ -12,7 +12,7 @@ pub mod keystone;
 mod posix_module;
 mod posix_process;
 mod posix_spawn;
-pub mod proxy;
+mod proxy;
 mod sqlite;
 
 include!(concat!(env!("OUT_DIR"), "/capnproto.rs"));

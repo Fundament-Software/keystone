@@ -7,6 +7,14 @@ license.workspace = true
 
 #[lib]
 #crate-type = ["cdylib"]
+[lib]
+doctest = false
+path = "lib.rs"
+
+[[bin]]
+name = "lua-module"
+path = "main.rs"
+
 
 [dependencies]
 color-eyre.workspace = true
@@ -21,3 +29,8 @@ async-backtrace.workspace = true
 mlua.workspace = true
 lua-src = "547.0.0"
 keystone = { path = "../../core" }
+tempfile.workspace = true
+keystone-util.workspace = true
+async-byte-channel.workspace = true
+tracing.workspace = true
+toml = "0.8.12"

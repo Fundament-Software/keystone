@@ -34,7 +34,6 @@ pub fn get_capnp_id(file: &std::path::Path) -> u64 {
 }
 
 pub fn extended(
-    cmdpath: impl AsRef<Path>,
     capnp_paths: &[impl AsRef<str>],
     rust_out: impl AsRef<Path>,
     capnp_out: impl AsRef<Path>,
@@ -48,7 +47,6 @@ pub fn extended(
         .into();
 
     let mut cmd = capnpc::CompilerCommand::new();
-    cmd.capnp_executable(cmdpath);
     cmd.output_path(out_dir.join("capnp_output"));
     cmd.omnibus(out_dir.join(rust_out));
 
@@ -127,13 +125,10 @@ pub fn extended(
 /// # Example
 /// Here is an example build.rs file using this function:
 /// ```ignore
-/// capnp_import::capnp_extract_bin!();
-///
 /// fn main() {
-///     let output_dir = commandhandle().unwrap();
-///     keystone_build::standard(&output_dir.path().join("capnp"), &["example.capnp"]).unwrap();
+///     keystone_build::standard(&["example.capnp"]).unwrap();
 /// }
 /// ```
-pub fn standard(cmdpath: impl AsRef<Path>, capnp_paths: &[&str]) -> Result<()> {
-    extended(cmdpath, capnp_paths, "capnproto.rs", "keystone.schema")
+pub fn standard(capnp_paths: &[&str]) -> Result<()> {
+    extended(capnp_paths, "capnproto.rs", "keystone.schema")
 }

@@ -44,7 +44,6 @@ async-backtrace = "0.2.7"
 futures-util = "0.3"
 capstone = { git = "https://github.com/Fundament-Software/capstone-rs" }
 capstone-futures = { git = "https://github.com/Fundament-Software/capstone-rs" }
-capstone-import = { git = "https://github.com/Fundament-Software/capstone-rs" }
 capstone-rpc = { git = "https://github.com/Fundament-Software/capstone-rs" }
 capstone-macros = { git = "https://github.com/Fundament-Software/capstone-rs" }
 capstone-gen = { git = "https://github.com/Fundament-Software/capstone-rs" }

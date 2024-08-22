@@ -4,6 +4,7 @@ members = [
   "build",
   "modules/hello-world",
   "modules/indirect-world",
+  "modules/lua-module",
   "modules/stateful",
   "modules/complex-config",
   "util",

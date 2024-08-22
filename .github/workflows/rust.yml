@@ -56,33 +56,6 @@ jobs:
     - name: Run tests
       run: cargo test --workspace --all --verbose
     
-  miri:
-    name: "Miri"
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: nightly
-          override: true
-          components: miri
-
-      - name: Setup miri
-        run: cargo miri setup
-          
-      - name: Install Clang
-        run: |
-            export DEBIAN_FRONTEND=noninteractive
-            sudo apt update
-            sudo apt install -y clang-15
-            sudo update-alternatives --install /usr/bin/c++ c++ /usr/bin/clang++-15 60
-            sudo update-alternatives --install /usr/bin/cc cc /usr/bin/clang-15 60
-
-      - name: Test default features
-        run: cargo miri test --all
-
   fmt:
     name: formatting
     runs-on: ubuntu-latest

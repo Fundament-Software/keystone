@@ -34,6 +34,10 @@ tracing-subscriber.workspace = true
 tracing.workspace = true
 keystone.workspace = true
 
+[dev-dependencies]
+eyre.workspace = true
+test-binary.workspace = true
+
 [build-dependencies]
 capstone-gen.workspace = true
 tempfile.workspace = true

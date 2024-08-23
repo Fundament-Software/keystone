@@ -39,6 +39,5 @@ keystone-build.workspace = true
 [dev-dependencies]
 eyre.workspace = true
 tempfile.workspace = true
-keystone-util.workspace = true
 async-byte-channel.workspace = true
 #console-subscriber = "0.4"

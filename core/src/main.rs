@@ -9,7 +9,7 @@ mod config;
 mod database;
 pub mod host;
 pub mod http;
-pub mod keystone;
+mod keystone;
 mod posix_module;
 mod posix_process;
 mod posix_spawn;
@@ -21,6 +21,7 @@ include!(concat!(env!("OUT_DIR"), "/capnproto.rs"));
 use crate::keystone_capnp::keystone_config;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use eyre::Result;
+pub use keystone::*;
 use std::{convert::Into, str::FromStr};
 
 #[derive(Parser)]

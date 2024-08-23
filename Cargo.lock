@@ -130,7 +130,7 @@ dependencies = [
 [[package]]
 name = "async-byte-channel"
 version = "0.0.1"
-source = "git+https://github.com/Fundament-Software/capstone-rs#460de831910c3e36d893949f20fd1c5ba990c940"
+source = "git+https://github.com/Fundament-Software/capstone-rs#775e067ac83189b6b74b9c3589f3850d3d398e0c"
 dependencies = [
  "tokio",
 ]
@@ -304,6 +304,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8318a53db07bb3f8dca91a600466bdb3f2eaadeedfdbcf02e1accbad9271ba50"
 
 [[package]]
+name = "camino"
+version = "1.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8b96ec4966b5813e2c0507c1f86115c8c5abaadc3980879c3424042a02fd1ad3"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "cap-directories"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -407,7 +416,7 @@ dependencies = [
 [[package]]
 name = "capstone"
 version = "0.18.0"
-source = "git+https://github.com/Fundament-Software/capstone-rs#460de831910c3e36d893949f20fd1c5ba990c940"
+source = "git+https://github.com/Fundament-Software/capstone-rs#775e067ac83189b6b74b9c3589f3850d3d398e0c"
 dependencies = [
  "embedded-io",
  "flurry",
@@ -417,7 +426,7 @@ dependencies = [
 [[package]]
 name = "capstone-futures"
 version = "0.18.0"
-source = "git+https://github.com/Fundament-Software/capstone-rs#460de831910c3e36d893949f20fd1c5ba990c940"
+source = "git+https://github.com/Fundament-Software/capstone-rs#775e067ac83189b6b74b9c3589f3850d3d398e0c"
 dependencies = [
  "capstone",
  "futures-util",
@@ -428,7 +437,7 @@ dependencies = [
 [[package]]
 name = "capstone-gen"
 version = "0.18.0"
-source = "git+https://github.com/Fundament-Software/capstone-rs#460de831910c3e36d893949f20fd1c5ba990c940"
+source = "git+https://github.com/Fundament-Software/capstone-rs#775e067ac83189b6b74b9c3589f3850d3d398e0c"
 dependencies = [
  "capnpc-sys",
  "capstone",
@@ -440,7 +449,7 @@ dependencies = [
 [[package]]
 name = "capstone-macros"
 version = "0.18.0"
-source = "git+https://github.com/Fundament-Software/capstone-rs#460de831910c3e36d893949f20fd1c5ba990c940"
+source = "git+https://github.com/Fundament-Software/capstone-rs#775e067ac83189b6b74b9c3589f3850d3d398e0c"
 dependencies = [
  "capstone",
  "capstone-gen",
@@ -454,13 +463,36 @@ dependencies = [
 [[package]]
 name = "capstone-rpc"
 version = "0.18.0"
-source = "git+https://github.com/Fundament-Software/capstone-rs#460de831910c3e36d893949f20fd1c5ba990c940"
+source = "git+https://github.com/Fundament-Software/capstone-rs#775e067ac83189b6b74b9c3589f3850d3d398e0c"
 dependencies = [
  "capstone",
  "capstone-futures",
  "futures-util",
  "tokio",
  "tokio-stream",
+]
+
+[[package]]
+name = "cargo-platform"
+version = "0.1.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "24b1f0365a6c6bb4020cd05806fd0d33c44d38046b8bd7f0e40814b9763cabfc"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "cargo_metadata"
+version = "0.15.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eee4243f1f26fc7a42710e7439c149e2b10b05472f88090acce52632f231a73a"
+dependencies = [
+ "camino",
+ "cargo-platform",
+ "semver",
+ "serde",
+ "serde_json",
+ "thiserror",
 ]
 
 [[package]]
@@ -574,7 +606,6 @@ dependencies = [
  "eyre",
  "keystone",
  "keystone-build",
- "keystone-util",
  "tempfile",
  "tokio",
  "tokio-util",
@@ -1136,6 +1167,7 @@ dependencies = [
  "keystone",
  "keystone-build",
  "tempfile",
+ "test-binary",
  "tokio",
  "tokio-util",
  "tracing",
@@ -1303,7 +1335,6 @@ dependencies = [
  "hello-world",
  "keystone",
  "keystone-build",
- "keystone-util",
  "tempfile",
  "tokio",
  "tokio-util",
@@ -1392,23 +1423,18 @@ dependencies = [
  "capstone-rpc",
  "clap",
  "color-eyre",
- "complex-config",
  "console-subscriber",
  "eyre",
  "futures-util",
- "hello-world",
  "hyper",
  "hyper-tls",
- "indirect-world",
  "keystone-build",
- "keystone-util",
  "libc",
  "predicates 2.1.5",
  "rand",
  "rusqlite",
  "serde",
  "serde_json",
- "stateful",
  "tempfile",
  "thiserror",
  "time",
@@ -1433,13 +1459,6 @@ dependencies = [
  "object 0.30.4",
  "platforms",
  "wasm-gen",
-]
-
-[[package]]
-name = "keystone-util"
-version = "0.1.0"
-dependencies = [
- "tempfile",
 ]
 
 [[package]]
@@ -1851,6 +1870,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "paste"
+version = "1.0.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
+
+[[package]]
 name = "percent-encoding"
 version = "2.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2217,6 +2242,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "689224d06523904ebcc9b482c6a3f4f7fb396096645c4cd10c0d2ff7371a34d3"
 
 [[package]]
+name = "semver"
+version = "1.0.23"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "61697e0a1c7e512e84a621326239844a24d8207b4669b41bc18b32ea5cbf988b"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "serde"
 version = "1.0.208"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2318,10 +2352,10 @@ dependencies = [
  "eyre",
  "keystone",
  "keystone-build",
- "keystone-util",
  "tempfile",
  "tokio",
  "tokio-util",
+ "toml",
  "tracing",
  "tracing-subscriber",
 ]
@@ -2376,6 +2410,19 @@ name = "termtree"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3369f5ac52d5eb6ab48c6b4ffdc8efbcad6b89c765749064ba298f2c68a16a76"
+
+[[package]]
+name = "test-binary"
+version = "3.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6c7cb854285c40b61c0fade358bf63a2bb1226688a1ea11432ea65349209e6e3"
+dependencies = [
+ "camino",
+ "cargo_metadata",
+ "once_cell",
+ "paste",
+ "thiserror",
+]
 
 [[package]]
 name = "thiserror"

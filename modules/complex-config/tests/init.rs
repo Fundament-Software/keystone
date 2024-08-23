@@ -1,12 +1,9 @@
-mod harness;
 use eyre::Result;
-use harness::attach_trace;
-use harness::test_harness;
 
 #[test]
 fn test_complex_config_init() -> Result<()> {
-    test_harness(
-        &keystone_util::build_module_config(
+    keystone::test_harness(
+        &keystone::build_module_config(
             "Complex Config",
             "complex-config-module",
             r#"{ nested = { state = [ "@keystone", "initCell", {id = "myCellName"}, "result" ], moreState = [ "@keystone", "initCell", {id = "myCellName"}, "result" ] } }"#,

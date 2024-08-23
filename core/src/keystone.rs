@@ -696,6 +696,41 @@ impl Keystone {
     }
 }*/
 
+#[inline]
+pub fn build_module_config(name: &str, binary: &str, config: &str) -> String {
+    format!(
+        r#"
+    [[modules]]
+    name = "{name}"
+    path = "{}"
+    config = {config}"#,
+        get_binary_path(binary)
+            .as_os_str()
+            .to_str()
+            .unwrap()
+            .replace('\\', "/"),
+    )
+}
+
+pub fn get_binary_path(name: &str) -> std::path::PathBuf {
+    let exe = std::env::current_exe().expect("couldn't get current EXE path");
+    let mut target_dir = exe.parent().unwrap();
+
+    if target_dir.ends_with("deps") {
+        target_dir = target_dir.parent().unwrap();
+    }
+
+    #[cfg(windows)]
+    {
+        return target_dir.join(format!("{}.exe", name).as_str());
+    }
+
+    #[cfg(not(windows))]
+    {
+        return target_dir.join(name);
+    }
+}
+
 pub struct KeystoneRoot {
     db: Rc<RefCell<RootDatabase>>,
     cells: Rc<RefCell<CellCapSet>>,
@@ -778,53 +813,3 @@ pub(crate) fn init_rpc_system<
 
     Ok((rpc_system, bootstrap, disconnector, api))
 }
-
-/*
-#[test]
-fn test_indirect_init() -> eyre::Result<()> {
-    let source = String::new();
-
-    source.push_str(&keystone_util::build_module_config(
-        "Hello World",
-        "hello-world-module",
-        r#"{ greeting = "Indirect" }"#,
-    ));
-
-    source.push_str(&keystone_util::build_module_config(
-        "Indirect World",
-        "indirect-world-module",
-        r#"{ helloWorld = [ "@Hello World" ] }"#,
-    ));
-
-    test_harness(&source, |mut instance| async move {
-        {
-            let hello_client: hello_world::hello_world_capnp::root::Client =
-                instance.get_api_pipe("Hello World").unwrap();
-
-            let mut sayhello = hello_client.say_hello_request();
-            sayhello.get().init_request().set_name("Keystone".into());
-            let hello_response = sayhello.send().promise.await?;
-
-            let msg = hello_response.get()?.get_reply()?.get_message()?;
-
-            assert_eq!(msg, "Indirect, Keystone!");
-        }
-
-        {
-            let indirect_client: crate::indirect::root::Client =
-                instance.get_api_pipe("Indirect World").unwrap();
-
-            let mut sayhello = indirect_client.say_hello_request();
-            sayhello.get().init_request().set_name("Keystone".into());
-            let hello_response = sayhello.send().promise.await?;
-
-            let msg = hello_response.get()?.get_reply()?.get_message()?;
-
-            assert_eq!(msg, "Indirect, Keystone!");
-        }
-
-        instance.shutdown().await;
-        Ok(())
-    })
-}
-*/

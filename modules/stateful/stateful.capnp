@@ -20,6 +20,8 @@ struct MyState {
     last @0 :Text;
 }
 
+# All modules must have a struct named "Config" that keystone can look up when compiling
+# the root configuration file. 
 struct Config {
     echoWord @0 :Text;
     # The annotation here tells keystone to automatically create a cell with the ID of our module ("stateful") and return it.

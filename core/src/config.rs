@@ -825,7 +825,7 @@ name = "Hello World"
 path = "{}"
 config = {{ greeting = "Bonjour" }}
 "#,
-        keystone_util::get_binary_path("hello-world-module")
+        crate::keystone::get_binary_path("hello-world-module")
             .as_os_str()
             .to_str()
             .unwrap()
@@ -857,12 +857,12 @@ name = "Indirect World"
 path = "{}"
 config = {{ helloWorld = [ "@Hello World" ] }}
 "#,
-        keystone_util::get_binary_path("hello-world-module")
+        crate::keystone::get_binary_path("hello-world-module")
             .as_os_str()
             .to_str()
             .unwrap()
             .replace('\\', "/"),
-        keystone_util::get_binary_path("indirect-world-module")
+        crate::keystone::get_binary_path("indirect-world-module")
             .as_os_str()
             .to_str()
             .unwrap()
@@ -889,7 +889,7 @@ name = "Stateful"
 path = "{}"
 config = {{ echoWord = "Echo" }}
 "#,
-        keystone_util::get_binary_path("stateful-module")
+        crate::keystone::get_binary_path("stateful-module")
             .as_os_str()
             .to_str()
             .unwrap()
@@ -916,7 +916,7 @@ name = "Config Test"
 path = "{}"
 config = {{ nested = {{ state = [ "@keystone", "initCell", {{id = "myCellName"}}, "result" ], moreState = [ "@keystone", "initCell", {{id = "myCellName"}}, "result" ] }} }}
 "#,
-        keystone_util::get_binary_path("complex-config-module")
+        crate::keystone::get_binary_path("complex-config-module")
             .as_os_str()
             .to_str()
             .unwrap()

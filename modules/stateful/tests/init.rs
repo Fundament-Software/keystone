@@ -1,8 +1,7 @@
-mod harness;
 use eyre::Result;
 //use harness::test_harness;
-use keystone::keystone::Keystone;
 use keystone::keystone_capnp::keystone_config;
+use keystone::Keystone;
 use tempfile::NamedTempFile;
 
 #[test]
@@ -13,9 +12,9 @@ fn test_stateful() -> Result<()> {
     let temp_db = NamedTempFile::new().unwrap().into_temp_path();
     let temp_log = NamedTempFile::new().unwrap().into_temp_path();
     let temp_prefix = NamedTempFile::new().unwrap().into_temp_path();
-    let mut source = keystone_util::build_temp_config(&temp_db, &temp_log, &temp_prefix);
+    let mut source = keystone::build_temp_config(&temp_db, &temp_log, &temp_prefix);
 
-    source.push_str(&keystone_util::build_module_config(
+    source.push_str(&keystone::build_module_config(
         "Stateful",
         "stateful-module",
         r#"{ echoWord = "echo" }"#,

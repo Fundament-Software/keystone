@@ -6,7 +6,6 @@ members = [
   "modules/indirect-world",
   "modules/stateful",
   "modules/complex-config",
-  "util",
 ]
 resolver = "2"
 default-members = ["core"]
@@ -56,10 +55,10 @@ rusqlite = { version = "0.31", features = [
   "array",
 ] }
 keystone-build = { path = "build" }
-keystone-util = { path = "util" }
 keystone = { path = "core" }
 hello-world = { path = "modules/hello-world" }
 indirect-world = { path = "modules/indirect-world" }
 stateful = { path = "modules/stateful" }
 complex-config = { path = "modules/complex-config" }
 tempfile = "3"
+test-binary = "3.0"

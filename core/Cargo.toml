@@ -50,10 +50,11 @@ clap = { version = "4.5.4", features = ["derive"] }
 tracing-subscriber.workspace = true
 tracing.workspace = true
 time = "0.3.34"
-toml = "0.8.12"
+toml = "0.8"
 futures-util.workspace = true
 rusqlite.workspace = true
 binfarce = "0.2.1"
+tempfile.workspace = true
 thiserror = "1.0.61"
 wasmparser = { version = "0.207.0", default-features = false, optional = true }
 append-only-vec = "0.1.5"
@@ -71,13 +72,7 @@ features = ["Win32_Foundation"]
 predicates = "2.1"
 assert_fs = "1.0"
 console-subscriber = "0.2.0"
-tempfile.workspace = true
 serde_json = "1.0"
-keystone-util.workspace = true
-hello-world.workspace = true
-indirect-world.workspace = true
-stateful.workspace = true
-complex-config.workspace = true
 
 [build-dependencies]
 capstone-gen.workspace = true

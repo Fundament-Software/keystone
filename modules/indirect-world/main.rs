@@ -9,6 +9,8 @@ use capnp_macros::capnproto_rpc;
 use capnp_rpc::{rpc_twoparty_capnp, twoparty, RpcSystem};
 use keystone::module_capnp::module_start;
 use std::cell::RefCell;
+
+#[cfg(feature = "tracing")]
 use tracing::Level;
 
 pub struct ModuleImpl {

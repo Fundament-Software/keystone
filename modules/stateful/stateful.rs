@@ -31,3 +31,15 @@ impl root::Server for StatefulImpl {
         Ok(())
     }
 }
+
+impl keystone::Module<crate::stateful_capnp::config::Owned> for StatefulImpl {
+    async fn new(
+        config: <crate::stateful_capnp::config::Owned as capnp::traits::Owned>::Reader<'_>,
+        _: keystone::keystone_capnp::host::Client<capnp::any_pointer::Owned>,
+    ) -> capnp::Result<Self> {
+        Ok(StatefulImpl {
+            echo_word: config.get_echo_word()?.to_string()?,
+            echo_last: config.get_state()?,
+        })
+    }
+}

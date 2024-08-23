@@ -69,7 +69,6 @@ mlua = { version = "0.9.9", features = ["lua54", "vendored", "macros", "async"] 
 [patch."https://github.com/Fundament-Software/capstone-rs"]
 capstone = { path = "../../c/capstone-rs/capnp" }
 capstone-futures = { path = "../../c/capstone-rs/capnp-futures" }
-capstone-import = { path = "../../c/capstone-rs/capnp-import" }
 capstone-rpc = { path = "../../c/capstone-rs/capnp-rpc" }
 capstone-macros = { path = "../../c/capstone-rs/capnp-macros" }
 capstone-gen = { path = "../../c/capstone-rs/capnpc" }

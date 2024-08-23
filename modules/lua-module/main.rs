@@ -1,3 +1,4 @@
+include!(concat!(env!("OUT_DIR"), "/capnproto.rs"));
 use capnp::schema::CapabilitySchema;
 use capnp_rpc::{rpc_twoparty_capnp, twoparty, RpcSystem};
 use keystone::keystone::Keystone;
@@ -9,9 +10,9 @@ use std::pin::Pin;
 use std::rc::Rc;
 
 use crate::lua_module_capnp::{hello_world, lua_module_api};
-use crate::module_capnp::module_error;
-use crate::spawn_capnp::program::SpawnParams;
-use crate::spawn_capnp::{process, program};
+use keystone::module_capnp::module_error;
+use keystone::spawn_capnp::program::SpawnParams;
+use keystone::spawn_capnp::{process, program};
 use capnp::capability::FromClientHook;
 use capnp::private::capability::ClientHook;
 use capnp::traits::FromPointerReader;
@@ -19,13 +20,6 @@ use capnp::traits::{HasTypeId, IntoInternalStructReader};
 use capnp::{any_pointer, dynamic_struct, dynamic_value};
 use capnp_macros::capnproto_rpc;
 
-capnp_import::capnp_import!(
-    "../../core/schema/storage.capnp",
-    "../../core/schema/module.capnp",
-    "../../core/schema/spawn.capnp",
-    "hello_world.capnp",
-    "lua_module.capnp"
-);
 
 struct LuaProgramImpl {}
 struct LuaProcessImpl {
@@ -405,7 +399,7 @@ async fn bootstrap(lua: &Lua, _: ()) -> LuaResult<LuaTable> {
     let program_client: program::Client<
         lua_module_capnp::fake_keystone::Owned,
         lua_module_api::Owned,
-        crate::module_capnp::module_error::Owned<capnp::any_pointer::Owned>,
+        keystone::module_capnp::module_error::Owned<capnp::any_pointer::Owned>,
     > = capnp_rpc::new_client(LuaProgramImpl {});
     let mut request = program_client.spawn_request();
     request.get().set_args(keystone_cap).unwrap();
@@ -586,7 +580,7 @@ mod tests {
         let program_client: program::Client<
             hello_world::Owned,
             lua_module_api::Owned,
-            crate::module_capnp::module_error::Owned<capnp::any_pointer::Owned>,
+            keystone::module_capnp::module_error::Owned<capnp::any_pointer::Owned>,
         > = capnp_rpc::new_client(LuaProgramImpl {});
         let hello_world_client: hello_world::Client = capnp_rpc::new_client(TestHelloWorld {});
         let mut request = program_client.spawn_request();
@@ -658,4 +652,7 @@ mod tests {
         .await?;
         Ok(())
     }
+}
+fn main() {
+    
 }

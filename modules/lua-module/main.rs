@@ -394,12 +394,14 @@ async fn test_bootstrap(lua: &Lua, _: ()) -> LuaResult<LuaTable> {
     Ok(functions)
 }
 async fn from_config(lua: &Lua, config: String) -> LuaResult<LuaTable> {
-    let (client_writer, server_reader) = async_byte_channel::channel();
-    let (server_writer, client_reader) = async_byte_channel::channel();
+    //let (client_writer, server_reader) = async_byte_channel::channel();
+    //let (server_writer, client_reader) = async_byte_channel::channel();
     let local_set = tokio::task::LocalSet::new();
     let guard = local_set.enter();
+    let reader = tokio::io::stdin();
+    let writer = tokio::io::stdout();
     let (mut instance, rpc, _disconnect, api, schema) =
-        keystone::keystone::Keystone::init_single_module_typeless(&config, "Hello World", server_reader, server_writer)
+        keystone::keystone::Keystone::init_single_module_typeless(&config, "Hello World", reader, writer)
             .await
             .unwrap();
 
@@ -412,8 +414,8 @@ async fn from_config(lua: &Lua, config: String) -> LuaResult<LuaTable> {
     //    rpc,
     //    functions.get::<&str, mlua::Function>("sayHello")?.call_async::<(), ()>(())
     //).1.unwrap();
-    functions.set("client_writer", lua.create_any_userdata(client_writer)?)?;
-    functions.set("client_reader", lua.create_any_userdata(client_reader)?)?;
+    //functions.set("client_writer", lua.create_any_userdata(client_writer)?)?;
+    //functions.set("client_reader", lua.create_any_userdata(client_reader)?)?;
     functions.set(
         "await_rpc",
         lua.create_async_function(move |lua: &Lua, rpc: LuaAnyUserData| async move {
@@ -510,7 +512,8 @@ mod tests {
             help(&lua),
             lua.load(
                 r#"
-            cap.sayHello()
+            local results = cap.sayHello()
+            print(results.reply.message)
         "#,
             )
             .exec_async(),
@@ -529,7 +532,7 @@ async fn help(lua: &Lua) {
         .unwrap()
         .take::<RpcSystem<rpc_twoparty_capnp::Side>>()
         .unwrap();
-    for _ in 0..100 {
+    for _ in 0..1000 {
         tokio::task::yield_now().await;
         futures::poll!(&mut fut); //.await;
     }

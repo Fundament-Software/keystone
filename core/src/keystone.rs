@@ -214,6 +214,95 @@ impl Keystone {
             capnp::capability::FromClientHook::new(api.pipeline.get_api().as_cap()),
         ))
     }
+    pub async fn init_single_module_typeless<
+        T: tokio::io::AsyncRead + 'static + Unpin,
+        U: tokio::io::AsyncWrite + 'static + Unpin,
+    >(
+        config: impl AsRef<str>,
+        module: impl AsRef<str>,
+        reader: T,
+        writer: U,
+    ) -> Result<(
+        Self,
+        RpcSystem<rpc_twoparty_capnp::Side>,
+        capnp_rpc::Disconnector<rpc_twoparty_capnp::Side>,
+        capnp::capability::Client,
+        capnp::schema::CapabilitySchema
+    )> {
+        let mut message = ::capnp::message::Builder::new_default();
+        let mut msg = message.init_root::<keystone_config::Builder>();
+        let schemas = crate::config::to_capnp(&config.as_ref().parse::<toml::Table>()?, msg.reborrow())?;
+
+        let mut instance = Keystone::new(
+            message.get_root_as_reader::<keystone_config::Reader>()?,
+            false,
+        )?;
+
+        let config = message.get_root_as_reader::<keystone_config::Reader>()?;
+        let modules = config.get_modules()?;
+        let mut target = None;
+        for s in modules.iter() {
+            let id = instance.get_id(s)?;
+            if s.get_name()?.to_str()? == module.as_ref() {
+                target = Some(s);
+            } else {
+                instance.init_module(id, s, config.get_cap_table()?).await?;
+
+            }
+        }
+
+        let span = tracing::debug_span!("Module", module = module.as_ref());
+        let _enter = span.enter();
+
+        let cap_table = config.get_cap_table()?;
+        let (rpc_system, api, id, disconnector) = if let Some(s) = target {
+            tracing::debug!("Found target module, initializing in current thread");
+            let id = instance.get_id(s)?;
+
+            let (conf, _) = Self::extract_config_pair(s)?;
+            let replacement = CapReplacement::new(conf, |index, mut builder| {
+                if instance.autoinit_check(cap_table, builder.reborrow(), index, id)? {
+                    Ok(())
+                } else {
+                    instance.resolve_cap_expr(cap_table.get(index), cap_table, builder)
+                }
+            });
+
+            let host: crate::keystone_capnp::host::Client<any_pointer> = capnp_rpc::new_client(
+                HostImpl::new(id, instance.db.clone(), instance.cells.clone()),
+            );
+
+            tracing::debug!("Initializing RPC system");
+            let (rpc_system, _, disconnector, api) =
+                init_rpc_system(reader, writer, host.client, replacement, |_| Ok(()))?;
+
+            Ok((rpc_system, api, id, disconnector))
+        } else {
+            Err(Error::ModuleNameNotFound(module.as_ref().to_string()))
+        }?;
+        
+        let schema = match schemas.get(module.as_ref()).unwrap().get_type_by_scope(&["Root"], None).unwrap() {
+            capnp::introspect::TypeVariant::Capability(s) => s.to_owned().into(),
+            _ => todo!()
+        };
+        tracing::debug!("Resolving API proxy");
+        let module = instance
+            .modules
+            .get_mut(&id)
+            .ok_or(Error::ModuleNotFound(id))?;
+        capnp_rpc::queued::ClientInner::resolve(
+            &module.queue.inner,
+            Ok(api.pipeline.get_api().as_cap()),
+        );
+        module.state = ModuleState::Ready;
+        Ok((
+            instance,
+            rpc_system,
+            disconnector,
+            capnp::capability::FromClientHook::new(api.pipeline.get_api().as_cap()),
+            schema
+        ))
+    }
 
     pub fn new(config: keystone_config::Reader, check_consistency: bool) -> Result<Self> {
         let span = tracing::info_span!("Initialization");

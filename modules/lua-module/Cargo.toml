@@ -34,6 +34,7 @@ async-byte-channel.workspace = true
 tracing.workspace = true
 toml = "0.8.12"
 keystone-build.workspace = true
+futures = "0.3.30"
 
 [build-dependencies]
 capstone-gen.workspace = true

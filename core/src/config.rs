@@ -37,14 +37,14 @@ fn expr_recurse(val: &Value, exprs: &mut HashMap<*const Value, u32>) {
 
 type SchemaVec = append_only_vec::AppendOnlyVec<(String, DynamicSchema)>;
 
-struct SchemaPool(SchemaVec);
+pub struct SchemaPool(SchemaVec);
 
 impl SchemaPool {
     fn new() -> Self {
         Self(SchemaVec::new())
     }
 
-    fn get<'a>(&'a self, name: &str) -> Option<&'a DynamicSchema> {
+    pub fn get<'a>(&'a self, name: &str) -> Option<&'a DynamicSchema> {
         self.0
             .iter()
             .find(|(existing_name, _)| name == existing_name)
@@ -724,7 +724,7 @@ where
     }
 }
 
-pub fn to_capnp(config: &Table, mut msg: keystone_config::Builder<'_>) -> Result<()> {
+pub fn to_capnp(config: &Table, mut msg: keystone_config::Builder<'_>) -> Result<SchemaPool> {
     let span = tracing::span!(tracing::Level::DEBUG, "config::to_capnp", config = ?config);
     let _enter = span.enter();
     let schemas = builtin_schemas()?;
@@ -769,7 +769,7 @@ pub fn to_capnp(config: &Table, mut msg: keystone_config::Builder<'_>) -> Result
         }
     }
 
-    Ok(())
+    Ok(schemas)
 }
 
 const SELF_SCHEMA: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/self.schema"));

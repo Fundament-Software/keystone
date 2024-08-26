@@ -38,6 +38,7 @@ capstone.workspace = true
 capstone-futures.workspace = true
 capstone-rpc.workspace = true
 capstone-macros.workspace = true
+capstone-gen.workspace = true
 color-eyre.workspace = true
 eyre.workspace = true
 hyper = { version = "0.14", features = ["full"] }

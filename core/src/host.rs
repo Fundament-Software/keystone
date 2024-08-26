@@ -1,14 +1,15 @@
 use crate::cell::SimpleCellImpl;
-use crate::database::RootDatabase;
+use crate::database::DatabaseExt;
 use crate::keystone::CellCapSet;
 use crate::keystone_capnp::host;
+use crate::sqlite::SqliteDatabase;
 use eyre::Result;
 use std::{cell::RefCell, marker::PhantomData, rc::Rc};
 
 #[derive(Clone)]
 pub struct HostImpl<State> {
     instance_id: u64,
-    db: Rc<RefCell<RootDatabase>>,
+    db: Rc<crate::sqlite_capnp::root::ServerDispatch<SqliteDatabase>>,
     cells: Rc<RefCell<CellCapSet>>,
     phantom: PhantomData<State>,
 }
@@ -17,7 +18,11 @@ impl<State> HostImpl<State>
 where
     State: ::capnp::traits::Owned,
 {
-    pub fn new(id: u64, db: Rc<RefCell<RootDatabase>>, cells: Rc<RefCell<CellCapSet>>) -> Self {
+    pub fn new(
+        id: u64,
+        db: Rc<crate::sqlite_capnp::root::ServerDispatch<SqliteDatabase>>,
+        cells: Rc<RefCell<CellCapSet>>,
+    ) -> Self {
         Self {
             instance_id: id,
             db,
@@ -67,7 +72,7 @@ where
         let _enter = span.enter();
         tracing::debug!("get_state()");
         self.db
-            .borrow_mut()
+            .server
             .get_state(self.instance_id as i64, results.get().init_state().into())
             .map_err(|e| capnp::Error::failed(e.to_string()))?;
 
@@ -83,7 +88,7 @@ where
         let _enter = span.enter();
         tracing::debug!("set_state()");
         self.db
-            .borrow_mut()
+            .server
             .set_state(self.instance_id as i64, params.get()?.get_state()?)
             .map_err(|e| capnp::Error::failed(e.to_string()))?;
         Ok(())

@@ -1,16 +1,9 @@
-use std::borrow::BorrowMut;
-use std::cell::Cell;
-use std::collections::HashSet;
-use std::{cell::RefCell, ops::AddAssign, path::Path, rc::Rc};
-
-use crate::sqlite_capnp::{add_d_b, database, r_o_database};
+use crate::buffer_allocator::BufferAllocator;
 use crate::sqlite_capnp::{
-    d_b_any, delete, function_invocation, insert::source, prepared_statement, r_a_table_ref,
-    r_o_table_ref, result_stream, select, sql_function, table, table_ref, update, where_expr,
-};
-use crate::sqlite_capnp::{
-    expr, index, indexed_column, insert, join_clause, select_core, table_field, table_function_ref,
-    table_or_subquery,
+    add_d_b, d_b_any, database, delete, expr, function_invocation, index, indexed_column, insert,
+    insert::source, join_clause, prepared_statement, r_a_table_ref, r_o_database, r_o_table_ref,
+    result_stream, select, select_core, sql_function, table, table_field, table_function_ref,
+    table_or_subquery, table_ref, update, where_expr,
 };
 use capnp_macros::{capnp_let, capnproto_rpc};
 use capnp_rpc::CapabilityServerSet;
@@ -18,6 +11,10 @@ use d_b_any::DBAny;
 use rusqlite::{
     params, params_from_iter, types::ToSqlOutput, Connection, OpenFlags, Result, ToSql,
 };
+use std::borrow::BorrowMut;
+use std::cell::Cell;
+use std::collections::HashSet;
+use std::{cell::RefCell, ops::AddAssign, path::Path, rc::Rc};
 
 use crate::sturdyref_capnp::{restorer, saveable};
 
@@ -92,8 +89,10 @@ thread_local! {
     static TABLE_SET: RefCell<CapabilityServerSet<TableRefImpl, table::Client>> =
         RefCell::new(CapabilityServerSet::new());
 }
-struct SqliteDatabase {
-    connection: Connection,
+
+pub struct SqliteDatabase {
+    pub connection: Connection,
+    pub alloc: RefCell<BufferAllocator>,
     column_set: RefCell<HashSet<String>>,
     prepared_insert_set:
         RefCell<CapabilityServerSet<StatementAndParams, prepared_statement::Client<insert::Owned>>>,
@@ -108,13 +107,11 @@ struct SqliteDatabase {
     table_function_set: RefCell<CapabilityServerSet<TableFunction, table_function_ref::Client>>,
 }
 impl SqliteDatabase {
-    pub fn new<P: AsRef<Path> + Clone>(
-        path: P,
-        flags: OpenFlags,
-    ) -> eyre::Result<(add_d_b::Client, Connection)> {
-        let connection = Connection::open_with_flags(path.clone(), flags)?;
-        let server = SqliteDatabase {
+    pub fn new<P: AsRef<Path>>(path: P, flags: OpenFlags) -> rusqlite::Result<Self> {
+        let connection = Connection::open_with_flags(path, flags)?;
+        Ok(SqliteDatabase {
             connection: connection,
+            alloc: RefCell::new(Default::default()),
             column_set: RefCell::new(HashSet::new()),
             prepared_insert_set: RefCell::new(CapabilityServerSet::new()),
             prepared_select_set: RefCell::new(CapabilityServerSet::new()),
@@ -123,12 +120,29 @@ impl SqliteDatabase {
             index_set: RefCell::new(CapabilityServerSet::new()),
             sql_function_set: RefCell::new(CapabilityServerSet::new()),
             table_function_set: RefCell::new(CapabilityServerSet::new()),
-        };
-        let client: add_d_b::Client = capnp_rpc::new_client(server);
-        let conn = Connection::open_with_flags(path, flags)?;
-        Ok((client, conn))
+        })
     }
 }
+
+impl From<Connection> for SqliteDatabase {
+    fn from(conn: Connection) -> Self {
+        SqliteDatabase {
+            connection: conn,
+            alloc: RefCell::new(Default::default()),
+            column_set: RefCell::new(HashSet::new()),
+            prepared_insert_set: RefCell::new(CapabilityServerSet::new()),
+            prepared_select_set: RefCell::new(CapabilityServerSet::new()),
+            prepared_delete_set: RefCell::new(CapabilityServerSet::new()),
+            prepared_update_set: RefCell::new(CapabilityServerSet::new()),
+            index_set: RefCell::new(CapabilityServerSet::new()),
+            sql_function_set: RefCell::new(CapabilityServerSet::new()),
+            table_function_set: RefCell::new(CapabilityServerSet::new()),
+        }
+    }
+}
+
+impl crate::sqlite_capnp::root::Server for SqliteDatabase {}
+
 #[capnproto_rpc(r_o_database)]
 impl r_o_database::Server for SqliteDatabase {
     async fn select(&self, q: Select) {
@@ -1485,8 +1499,10 @@ mod tests {
     #[tokio::test]
     async fn test_test() -> eyre::Result<()> {
         let db_path = NamedTempFile::new().unwrap().into_temp_path();
-        let (client, _connection) =
-            SqliteDatabase::new(db_path.to_path_buf(), OpenFlags::default())?;
+        let client: add_d_b::Client = capnp_rpc::new_client(SqliteDatabase::new(
+            db_path.to_path_buf(),
+            OpenFlags::default(),
+        )?);
 
         let create_table_request = client.build_create_table_request(vec![
             table_field::TableField {

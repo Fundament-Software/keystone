@@ -82,18 +82,30 @@ struct ByteStreamBufferInternal {
     closed: bool,
 }
 
-#[derive(Clone)]
-pub struct ByteStreamBufferImpl(Rc<RefCell<ByteStreamBufferInternal>>);
-
-impl ByteStreamBufferImpl {
-    pub fn new() -> Self {
-        Self(Rc::new(RefCell::new(ByteStreamBufferInternal {
+impl Default for ByteStreamBufferInternal {
+    fn default() -> Self {
+        Self {
             buf: Vec::new(),
             write_waker: None,
             read_waker: None,
             pending: AtomicUsize::new(0),
             closed: false,
-        })))
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct ByteStreamBufferImpl(Rc<RefCell<ByteStreamBufferInternal>>);
+
+impl ByteStreamBufferImpl {
+    pub fn new() -> Self {
+        Default::default()
+    }
+}
+
+impl Default for ByteStreamBufferImpl {
+    fn default() -> Self {
+        Self(Rc::new(RefCell::new(Default::default())))
     }
 }
 

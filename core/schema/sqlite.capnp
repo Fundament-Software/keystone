@@ -38,7 +38,7 @@ interface Table extends(TableRef) {
   adminless @0 () -> (res :TableRef);
 }
 
-interface RootDB extends(AddDB) {
+interface Root extends(AddDB) {
 
 }
 

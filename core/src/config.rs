@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::str::FromStr;
 use std::{fs::File, io::BufReader, path::Path};
 
 use crate::keystone::Error;
@@ -27,7 +28,7 @@ fn expr_recurse(val: &Value, exprs: &mut HashMap<*const Value, u32>) {
             //}
         }
         Value::Table(t) => {
-            for (k, v) in t {
+            for (_, v) in t {
                 expr_recurse(v, exprs);
             }
         }
@@ -35,24 +36,47 @@ fn expr_recurse(val: &Value, exprs: &mut HashMap<*const Value, u32>) {
     }
 }
 
-type SchemaVec = append_only_vec::AppendOnlyVec<(String, DynamicSchema)>;
+type SchemaVec = append_only_vec::AppendOnlyVec<(Vec<String>, DynamicSchema)>;
 
 struct SchemaPool(SchemaVec);
 
 impl SchemaPool {
-    fn new() -> Self {
-        Self(SchemaVec::new())
+    pub fn new() -> Self {
+        Default::default()
     }
 
     fn get<'a>(&'a self, name: &str) -> Option<&'a DynamicSchema> {
         self.0
             .iter()
-            .find(|(existing_name, _)| name == existing_name)
+            .find(|(v, _)| {
+                v.iter()
+                    .find(|file| name.eq_ignore_ascii_case(file))
+                    .is_some()
+            })
             .map(|(_, sc)| sc)
     }
 
-    fn insert(&self, name: String, schema: DynamicSchema) {
-        self.0.push((name, schema));
+    fn insert(&self, name: Option<&str>, schema: DynamicSchema) {
+        if let Some(n) = name {
+            self.0.push((vec![n.to_string()], schema));
+        } else {
+            let list = schema
+                .get_files()
+                .filter(|f| schema.get_type_by_scope(&["Root"], Some(f)).is_ok())
+                .flat_map(|f| std::path::PathBuf::from_str(f));
+
+            self.0.push((
+                list.flat_map(|f| f.file_stem().map(|s| s.to_string_lossy().into_owned()))
+                    .collect(),
+                schema,
+            ));
+        }
+    }
+}
+
+impl Default for SchemaPool {
+    fn default() -> Self {
+        Self(SchemaVec::new())
     }
 }
 
@@ -249,7 +273,7 @@ where
             let dynobj: capnp::dynamic_struct::Builder = anyconfig.init_dynamic((*st).into())?;
             if let Value::Table(t) = c {
                 if let Some(n) = name {
-                    schemas.insert(n.to_string(), schema);
+                    schemas.insert(Some(n), schema);
                 }
                 value_to_struct(t, dynobj, schemas, callback)
             } else {
@@ -671,8 +695,25 @@ where
                     let variant = if let Ok(s) = schema.get_type_by_scope(&["Root"], None) {
                         s
                     } else {
-                        // Check inside schema/keystone.capnp for Root, just in case this is the built-in keystone capability
-                        schema.get_type_by_scope(&["Root"], Some("schema/keystone.capnp"))?
+                        // If no explicit name was provided, we should've generated possible names from the file_stems, so try to find it
+                        let path = schema
+                            .get_files()
+                            .filter(|f| schema.get_type_by_scope(&["Root"], Some(f)).is_ok())
+                            .find(|f| {
+                                std::path::PathBuf::from_str(f)
+                                    .map(|p| {
+                                        p.file_stem()
+                                            .map(|s| s.eq_ignore_ascii_case(module_name))
+                                            .unwrap_or(false)
+                                    })
+                                    .unwrap_or(false)
+                            });
+
+                        if let Some(p) = path {
+                            Ok(schema.get_type_by_scope(&["Root"], Some(&p))?)
+                        } else {
+                            Err(Error::MissingSchema(module_name.into()))
+                        }?
                     };
 
                     let Value::String(name) = &l[1] else {
@@ -773,8 +814,9 @@ pub fn to_capnp(config: &Table, mut msg: keystone_config::Builder<'_>) -> Result
 }
 
 const SELF_SCHEMA: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/self.schema"));
-pub const HOST_NAME: &str = "keystone";
 
+/// Returns a pool containing all built-in schemas that keystone has been built with.
+/// Currently this is simply everything in `schema/`, but could be modified at runtime.
 fn builtin_schemas() -> capnp::Result<SchemaPool> {
     let schemas = SchemaPool::new();
     let bufread = BufReader::new(SELF_SCHEMA);
@@ -787,7 +829,7 @@ fn builtin_schemas() -> capnp::Result<SchemaPool> {
         },
     )?)?;
 
-    schemas.insert(HOST_NAME.into(), ks);
+    schemas.insert(None, ks);
     Ok(schemas)
 }
 

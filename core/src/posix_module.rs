@@ -271,7 +271,7 @@ mod tests {
             Default::default(),
         );
 
-        let db: crate::database::RootDatabase = crate::database::Manager::open_database(
+        let db: crate::sqlite::SqliteDatabase = crate::database::Manager::open_database(
             std::path::Path::new(temp_db.as_os_str()),
             crate::database::OpenOptions::Create,
         )
@@ -334,7 +334,7 @@ mod tests {
             capnp_rpc::new_client(spawn_process_server);
 
         let temp_db = NamedTempFile::new().unwrap().into_temp_path();
-        let db: crate::database::RootDatabase = crate::database::Manager::open_database(
+        let db: crate::sqlite::SqliteDatabase = crate::database::Manager::open_database(
             std::path::Path::new(temp_db.as_os_str()),
             crate::database::OpenOptions::Create,
         )

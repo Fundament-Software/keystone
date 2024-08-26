@@ -7,16 +7,22 @@ pub struct BufferAllocator {
 
 impl BufferAllocator {
     pub fn new() -> Self {
-        Self {
-            buf: Vec::new(),
-            used: false,
-        }
+        Default::default()
     }
 
     /// Sets the internal buffer to have a capacity of at least minimum_size
     pub fn reserve(&mut self, minimum_size: usize) {
         if minimum_size > self.buf.len() {
             self.buf.resize(minimum_size, 0);
+        }
+    }
+}
+
+impl Default for BufferAllocator {
+    fn default() -> Self {
+        Self {
+            buf: Vec::new(),
+            used: false,
         }
     }
 }

@@ -1,9 +1,11 @@
 use crate::cap_replacement::CapReplacement;
 use crate::cell::SimpleCellImpl;
+use crate::database::DatabaseExt;
 use crate::posix_module::ModuleProcessCapSet;
 pub use crate::proxy::ProxyServer;
 use caplog::{CapLog, MAX_BUFFER_SIZE};
 use capnp::any_pointer::Owned as any_pointer;
+use capnp::capability::FromServer;
 use capnp::capability::{FromClientHook, RemotePromise};
 use capnp::private::capability::ClientHook;
 use capnp::traits::SetPointerBuilder;
@@ -22,8 +24,8 @@ use super::{
 };
 
 use crate::{
-    cap_std_capnproto::AmbientAuthorityImpl, database::RootDatabase, host::HostImpl,
-    posix_module::PosixModuleImpl, posix_process::PosixProgramImpl,
+    cap_std_capnproto::AmbientAuthorityImpl, host::HostImpl, posix_module::PosixModuleImpl,
+    posix_process::PosixProgramImpl, sqlite::SqliteDatabase,
 };
 type SpawnProgram = crate::spawn_capnp::program::Client<
     posix_module_args::Owned<any_pointer>,
@@ -117,7 +119,7 @@ pub struct ModuleInstance {
 }
 
 pub struct Keystone {
-    db: Rc<RefCell<RootDatabase>>,
+    db: Rc<crate::sqlite_capnp::root::ServerDispatch<SqliteDatabase>>,
     log: CapLog<MAX_BUFFER_SIZE>,
     file_server: Rc<RefCell<AmbientAuthorityImpl>>,
     pub modules: HashMap<u64, ModuleInstance>,
@@ -225,7 +227,7 @@ impl Keystone {
         }
 
         let caplog_config = config.get_caplog()?;
-        let mut db: RootDatabase = crate::database::Manager::open_database(
+        let db: SqliteDatabase = crate::database::open_database(
             Path::new(config.get_database()?.to_str()?),
             crate::database::OpenOptions::Create,
         )?;
@@ -278,7 +280,7 @@ impl Keystone {
         )?;
 
         Ok(Self {
-            db: Rc::new(RefCell::new(db)),
+            db: Rc::new(crate::sqlite_capnp::root::Client::from_server(db)),
             log: caplog,
             file_server: Rc::new(RefCell::new(AmbientAuthorityImpl::new())),
             modules,
@@ -349,6 +351,20 @@ impl Keystone {
         x?.get()?.get_result()
     }
 
+    fn internal_cap(&self, id: &str) -> Option<Box<dyn ClientHook>> {
+        match id {
+            "keystone" => Some(
+                capnp_rpc::new_client::<crate::keystone_capnp::root::Client, KeystoneRoot>(
+                    KeystoneRoot::new(self),
+                )
+                .client
+                .hook,
+            ),
+            "sqlite" => Some(capnp_rpc::local::Client::from_rc(self.db.clone()).add_ref()),
+            _ => None,
+        }
+    }
+
     fn recurse_cap_expr(
         &self,
         reader: cap_expr::Reader<'_>,
@@ -358,12 +374,8 @@ impl Keystone {
             cap_expr::Which::ModuleRef(r) => {
                 let k = r?.to_string()?;
                 capnp::any_pointer::Pipeline::new(Box::new(capnp_rpc::rpc::SingleCapPipeline::new(
-                    if k == crate::config::HOST_NAME {
-                        capnp_rpc::new_client::<crate::keystone_capnp::root::Client, KeystoneRoot>(
-                            KeystoneRoot::new(self),
-                        )
-                        .client
-                        .hook
+                    if let Some(hook) = self.internal_cap(&k) {
+                        hook
                     } else {
                         let id = self
                             .namemap
@@ -552,7 +564,7 @@ impl Keystone {
     ) -> Result<u64> {
         Ok(self
             .db
-            .borrow_mut()
+            .server
             .get_string_index(config.get_name()?.to_str()?)? as u64)
     }
 
@@ -732,7 +744,7 @@ pub fn get_binary_path(name: &str) -> std::path::PathBuf {
 }
 
 pub struct KeystoneRoot {
-    db: Rc<RefCell<RootDatabase>>,
+    db: Rc<crate::sqlite_capnp::root::ServerDispatch<SqliteDatabase>>,
     cells: Rc<RefCell<CellCapSet>>,
 }
 
@@ -753,12 +765,21 @@ impl crate::keystone_capnp::root::Server for KeystoneRoot {
     ) -> Result<(), ::capnp::Error> {
         let span = tracing::debug_span!("host", id = "keystone");
         let _enter = span.enter();
+        let params = params.get()?;
         tracing::debug!("init_cell()");
         let id = self
             .db
-            .borrow_mut()
-            .get_string_index(params.get()?.get_id()?.to_str()?)
+            .server
+            .get_string_index(params.get_id()?.to_str()?)
             .map_err(|e| capnp::Error::failed(e.to_string()))?;
+
+        // If a default was provided, initialize the state ourselves with that value before we create the cell.
+        if params.has_default() {
+            self.db
+                .server
+                .init_state(id, params.get_default()?)
+                .map_err(|e| capnp::Error::failed(e.to_string()))?;
+        }
 
         let client = self
             .cells

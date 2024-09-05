@@ -1,17 +1,18 @@
 use super::domain::DomainImpl;
 use super::{Domain, Https};
 use capnp_macros::capnproto_rpc;
-use hyper::client::HttpConnector;
 use hyper_tls::HttpsConnector;
+use hyper_util::client::legacy::{connect::HttpConnector, Client as HttpClient};
+use hyper_util::rt::TokioExecutor;
 
 pub struct HttpsImpl {
-    https_client: hyper::Client<HttpsConnector<HttpConnector>>,
+    https_client: HttpClient<HttpsConnector<HttpConnector>, String>,
 }
 
 impl HttpsImpl {
     pub fn new() -> Self {
         let connector = HttpsConnector::new();
-        let https_client = hyper::Client::builder().build::<_, hyper::Body>(connector);
+        let https_client = HttpClient::builder(TokioExecutor::new()).build::<_, String>(connector);
         HttpsImpl { https_client }
     }
 }

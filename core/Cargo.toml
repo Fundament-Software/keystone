@@ -40,8 +40,10 @@ capstone-rpc.workspace = true
 capstone-macros.workspace = true
 color-eyre.workspace = true
 eyre.workspace = true
-hyper = { version = "0.14", features = ["full"] }
-hyper-tls = "0.5"
+hyper = { version = "1", features = ["full"] }
+hyper-util = { version = "0.1", features = ["full"] }
+http-body-util = "0.1"
+hyper-tls = "0.6"
 serde = { version = "1.0", features = ["derive"] }
 tokio.workspace = true
 tokio-util.workspace = true

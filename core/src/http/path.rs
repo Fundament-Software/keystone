@@ -1,11 +1,17 @@
 use super::Path;
 use capnp_macros::capnproto_rpc;
+use http_body_util::BodyExt;
 use hyper::{
-    client::{HttpConnector, ResponseFuture},
     http::uri::Authority,
     HeaderMap,
 };
 use hyper_tls::HttpsConnector;
+use hyper_util::client::legacy::{
+    connect::HttpConnector,
+    Client as HttpClient,
+    ResponseFuture
+};
+
 use Path::HttpVerb;
 
 impl std::fmt::Display for Path::HttpVerb {
@@ -25,7 +31,7 @@ impl std::fmt::Display for Path::HttpVerb {
 
 #[derive(Clone)]
 pub struct PathImpl {
-    https_client: hyper::Client<HttpsConnector<HttpConnector>>,
+    https_client: HttpClient<HttpsConnector<HttpConnector>, String>,
     query: Vec<(String, String)>,
     path_list: Vec<String>,
     headers: HeaderMap,
@@ -40,7 +46,7 @@ impl PathImpl {
     pub fn new<A: TryInto<Authority>, S: Into<Vec<String>>>(
         authority: A,
         path_list: S,
-        https_client: hyper::Client<HttpsConnector<HttpConnector>>,
+        https_client: HttpClient<HttpsConnector<HttpConnector>, String>,
     ) -> Result<Self, capnp::Error> {
         let verb_whitelist = vec![
             HttpVerb::Get,
@@ -99,10 +105,10 @@ impl PathImpl {
             request_builder = request_builder.header(key, value);
         }
 
-        let request_body: hyper::Body = match body {
-            Some(_) if has_empty_body => hyper::Body::empty(),
+        let request_body: String = match body {
+            Some(_) if has_empty_body => String::new(),
             Some(body) => body.into(),
-            None => hyper::Body::empty(),
+            None => String::new(),
         };
 
         let request = request_builder
@@ -137,9 +143,10 @@ async fn http_request_promise(
                 .into(),
         );
     }
-    let body_bytes = hyper::body::to_bytes(response.into_body())
+    let body_bytes: bytes::Bytes = response.into_body().collect()
         .await
-        .map_err(|err| capnp::Error::failed(err.to_string()))?;
+        .map_err(|err| capnp::Error::failed(err.to_string()))?
+        .to_bytes();
     let body = String::from_utf8(body_bytes.to_vec()).map_err(|_| {
         capnp::Error::failed("Couldn't convert response body to utf8 String".to_string())
     })?;
@@ -297,11 +304,12 @@ impl Path::Server for PathImpl {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use hyper_util::rt::TokioExecutor;
 
     #[tokio::test]
     async fn get_test() -> capnp::Result<()> {
         let connector = HttpsConnector::new();
-        let https_client = hyper::Client::builder().build::<_, hyper::Body>(connector);
+        let https_client = HttpClient::builder(TokioExecutor::new()).build::<_, String>(connector);
         let mut path_client: Path::Client =
             capnp_rpc::new_client(PathImpl::new("httpbin.org", vec!["".into()], https_client)?);
 
@@ -331,7 +339,7 @@ mod tests {
     async fn whitelist_test() -> capnp::Result<()> {
         // Set url as example.org
         let connector = HttpsConnector::new();
-        let https_client = hyper::Client::builder().build::<_, hyper::Body>(connector);
+        let https_client = HttpClient::builder(TokioExecutor::new()).build::<_, String>(connector);
         let mut path_client: Path::Client =
             capnp_rpc::new_client(PathImpl::new("example.org", vec!["".into()], https_client)?);
 
@@ -369,7 +377,7 @@ mod tests {
     #[tokio::test]
     async fn post_test() -> capnp::Result<()> {
         let connector = HttpsConnector::new();
-        let https_client = hyper::Client::builder().build::<_, hyper::Body>(connector);
+        let https_client = HttpClient::builder(TokioExecutor::new()).build::<_, String>(connector);
         let mut path_client: Path::Client = capnp_rpc::new_client(PathImpl::new(
             "httpbin.org",
             vec!["post".into()],
@@ -428,7 +436,7 @@ mod tests {
     async fn header_test() -> capnp::Result<()> {
         // Current way to run it and see results: cargo test -- --nocapture
         let connector = HttpsConnector::new();
-        let https_client = hyper::Client::builder().build::<_, hyper::Body>(connector);
+        let https_client = HttpClient::builder(TokioExecutor::new()).build::<_, String>(connector);
         let mut path_client: Path::Client = capnp_rpc::new_client(PathImpl::new(
             "httpbin.org",
             vec!["headers".into()],

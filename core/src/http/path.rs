@@ -1,16 +1,9 @@
 use super::Path;
 use capnp_macros::capnproto_rpc;
 use http_body_util::BodyExt;
-use hyper::{
-    http::uri::Authority,
-    HeaderMap,
-};
+use hyper::{http::uri::Authority, HeaderMap};
 use hyper_tls::HttpsConnector;
-use hyper_util::client::legacy::{
-    connect::HttpConnector,
-    Client as HttpClient,
-    ResponseFuture
-};
+use hyper_util::client::legacy::{connect::HttpConnector, Client as HttpClient, ResponseFuture};
 
 use Path::HttpVerb;
 
@@ -143,7 +136,9 @@ async fn http_request_promise(
                 .into(),
         );
     }
-    let body_bytes: bytes::Bytes = response.into_body().collect()
+    let body_bytes: bytes::Bytes = response
+        .into_body()
+        .collect()
         .await
         .map_err(|err| capnp::Error::failed(err.to_string()))?
         .to_bytes();

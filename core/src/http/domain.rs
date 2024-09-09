@@ -1,21 +1,21 @@
 use super::path::PathImpl;
 use super::{Domain, Path};
 use capnp_macros::capnproto_rpc;
-use hyper::client::HttpConnector;
 use hyper::http::uri::Authority;
 use hyper_tls::HttpsConnector;
+use hyper_util::client::legacy::{connect::HttpConnector, Client as HttpClient};
 
 #[derive(Clone)]
 pub struct DomainImpl {
     domain_name: Authority,
-    https_client: hyper::Client<HttpsConnector<HttpConnector>>,
+    https_client: HttpClient<HttpsConnector<HttpConnector>, String>,
     modifiable: bool,
 }
 
 impl DomainImpl {
     pub fn new<A: TryInto<Authority>>(
         domain_name: A,
-        https_client: hyper::Client<HttpsConnector<HttpConnector>>,
+        https_client: HttpClient<HttpsConnector<HttpConnector>, String>,
     ) -> Result<Self, capnp::Error> {
         Ok(DomainImpl {
             https_client,

@@ -1,5 +1,7 @@
 @0xf2c0f3a93e0203ec;
 
+using ST = import "storage.capnp";
+
 struct TableField {
 	name @0 :Text;
 	baseType @1 :Type;
@@ -38,9 +40,12 @@ interface Table extends(TableRef) {
   adminless @0 () -> (res :TableRef);
 }
 
-interface Root extends(AddDB) {
-
+struct Storage {
+	id @0 :UInt8;
+	data @1 :Text;
 }
+
+interface Root extends(AddDB, ST.Restore(Storage)) {}
 
 struct TableRestriction {
 	name @0 :Text;

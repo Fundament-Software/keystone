@@ -14,6 +14,7 @@ mod posix_process;
 mod posix_spawn;
 mod proxy;
 mod sqlite;
+mod sturdyref;
 
 use eyre::Result;
 pub use keystone::*;

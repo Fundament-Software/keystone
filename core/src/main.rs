@@ -15,11 +15,12 @@ mod posix_process;
 mod posix_spawn;
 mod proxy;
 mod sqlite;
+mod sturdyref;
 
 include!(concat!(env!("OUT_DIR"), "/capnproto.rs"));
 
 use crate::keystone_capnp::keystone_config;
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap::{Parser, Subcommand, ValueEnum};
 use eyre::Result;
 pub use keystone::*;
 use std::{convert::Into, fs, io::Read, str::FromStr};

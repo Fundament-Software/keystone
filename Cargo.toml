@@ -6,6 +6,7 @@ members = [
   "examples/indirect-world",
   "examples/stateful",
   "examples/complex-config",
+  "examples/sqlite-usage",
 ]
 resolver = "2"
 default-members = ["core"]
@@ -21,13 +22,12 @@ documentation = "https://docs.rs/keystone/"
 readme = "README.md"
 
 [workspace.dependencies]
-cap-std = "2.0.0"
 color-eyre = "0.6"
 eyre = "0.6"
 rand = { version = "0.8.5", features = ["std_rng"] }
 tracing-subscriber = { version = "0.3.18", features = ["time"] }
 tracing = "0.1.40"
-tokio = { version = "1.18", features = [
+tokio = { version = "1.40", features = [
   "net",
   "rt",
   "macros",
@@ -37,7 +37,7 @@ tokio = { version = "1.18", features = [
   "signal",
   "process",
 ] }
-tokio-util = { version = "0.7.4", features = ["compat"] }
+tokio-util = { version = "0.7.11", features = ["compat"] }
 async-backtrace = "0.2.7"
 futures-util = "0.3"
 capstone = { git = "https://github.com/Fundament-Software/capstone-rs" }
@@ -47,7 +47,7 @@ capstone-macros = { git = "https://github.com/Fundament-Software/capstone-rs" }
 capstone-gen = { git = "https://github.com/Fundament-Software/capstone-rs" }
 async-byte-channel = { git = "https://github.com/Fundament-Software/capstone-rs" }
 uuid = "1.*"
-rusqlite = { version = "0.31", features = [
+rusqlite = { version = "0.32", features = [
   "bundled",
   "modern_sqlite",
   "i128_blob",
@@ -62,3 +62,14 @@ stateful = { path = "examples/stateful" }
 complex-config = { path = "examples/complex-config" }
 tempfile = "3"
 test-binary = "3.0"
+
+[patch."https://github.com/Fundament-Software/capstone-rs"]
+capstone = { path = "../capstone-rs/capnp" }
+capstone-futures = { path = "../capstone-rs/capnp-futures" }
+capstone-rpc = { path = "../capstone-rs/capnp-rpc" }
+capstone-macros = { path = "../capstone-rs/capnp-macros" }
+capstone-gen = { path = "../capstone-rs/capnpc" }
+async-byte-channel = { path = "../capstone-rs/async-byte-channel" }
+
+[patch."https://github.com/Fundament-Software/caplog"]
+caplog = { path = "../caplog" }

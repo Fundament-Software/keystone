@@ -1,16 +1,13 @@
-use crate::cell::SimpleCellImpl;
 use crate::database::DatabaseExt;
-use crate::keystone::CellCapSet;
 use crate::keystone_capnp::host;
 use crate::sqlite::SqliteDatabase;
 use eyre::Result;
-use std::{cell::RefCell, marker::PhantomData, rc::Rc};
+use std::{marker::PhantomData, rc::Rc};
 
 #[derive(Clone)]
 pub struct HostImpl<State> {
     instance_id: u64,
     db: Rc<crate::sqlite_capnp::root::ServerDispatch<SqliteDatabase>>,
-    cells: Rc<RefCell<CellCapSet>>,
     phantom: PhantomData<State>,
 }
 
@@ -18,15 +15,10 @@ impl<State> HostImpl<State>
 where
     State: ::capnp::traits::Owned,
 {
-    pub fn new(
-        id: u64,
-        db: Rc<crate::sqlite_capnp::root::ServerDispatch<SqliteDatabase>>,
-        cells: Rc<RefCell<CellCapSet>>,
-    ) -> Self {
+    pub fn new(id: u64, db: Rc<crate::sqlite_capnp::root::ServerDispatch<SqliteDatabase>>) -> Self {
         Self {
             instance_id: id,
             db,
-            cells,
             phantom: PhantomData,
         }
     }

@@ -1,5 +1,6 @@
 use crate::database::DatabaseExt;
 use crate::sqlite::SqliteDatabase;
+use crate::sqlite_capnp::root::ServerDispatch;
 use crate::storage_capnp::cell;
 use capnp::any_pointer::Owned as any_pointer;
 use capnp_macros::capnproto_rpc;
@@ -7,18 +8,15 @@ use std::rc::Rc;
 
 pub struct SimpleCellImpl {
     id: i64,
-    db: Rc<crate::sqlite_capnp::root::ServerDispatch<SqliteDatabase>>,
+    db: Rc<ServerDispatch<SqliteDatabase>>,
 }
 
 impl SimpleCellImpl {
-    pub fn new(id: i64, db: Rc<crate::sqlite_capnp::root::ServerDispatch<SqliteDatabase>>) -> Self {
+    pub fn new(id: i64, db: Rc<ServerDispatch<SqliteDatabase>>) -> Self {
         Self { id, db }
     }
 
-    pub fn init(
-        id: i64,
-        db: Rc<crate::sqlite_capnp::root::ServerDispatch<SqliteDatabase>>,
-    ) -> eyre::Result<Self> {
+    pub fn init(id: i64, db: Rc<ServerDispatch<SqliteDatabase>>) -> eyre::Result<Self> {
         let empty_struct: u64 = 0b0000000000000000000000000000000011111111111111111111111111111100;
         let segments: &[&[u8]] = &[&empty_struct.to_le_bytes()];
         let segment_array = capnp::message::SegmentArray::new(segments);

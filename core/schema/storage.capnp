@@ -41,14 +41,14 @@ interface Saveable(T) {
     save @0 () -> (ref :SturdyRef(T));
 }
 
-interface Save(Sturdy) {
+interface Save(Storage) {
     # Keystone provides this, specialized to whatever type your module requests its storage to be in. To implement Saveable, create a whatever storage you want, call save from this interface on keystone's capability, and return the result.
-    save @0 [T] (s :Sturdy) -> (ref :SturdyRef(T));
+    save @0 [T] (data :Storage) -> (ref :SturdyRef(T));
 }
 
-interface Restore(Sturdy) {
+interface Restore(Storage) {
     # Implement this on your module's root object and take the exact same data as you provide to save, returning what it restores to.
-    restore @0 [T] (s :Sturdy) -> (cap :T);
+    restore @0 [T] (data :Storage) -> (cap :T);
 }
 
 struct ConnectionInfo {

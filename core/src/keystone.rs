@@ -5,7 +5,6 @@ use crate::posix_module::ModuleProcessCapSet;
 pub use crate::proxy::ProxyServer;
 use caplog::{CapLog, MAX_BUFFER_SIZE};
 use capnp::any_pointer::Owned as any_pointer;
-use capnp::capability::FromServer;
 use capnp::capability::{FromClientHook, RemotePromise};
 use capnp::private::capability::ClientHook;
 use capnp::traits::SetPointerBuilder;
@@ -131,6 +130,10 @@ pub struct Keystone {
     process_set: Rc<RefCell<crate::posix_process::ProcessCapSet>>,
 }
 
+pub const BUILTIN_KEYSTONE: &str = "keystone";
+pub const BUILTIN_SQLITE: &str = "sqlite";
+const BUILTIN_MODULES: [&str; 2] = [BUILTIN_KEYSTONE, BUILTIN_SQLITE];
+
 impl Keystone {
     pub async fn init_single_module<
         T: tokio::io::AsyncRead + 'static + Unpin,
@@ -185,9 +188,8 @@ impl Keystone {
                 }
             });
 
-            let host: crate::keystone_capnp::host::Client<any_pointer> = capnp_rpc::new_client(
-                HostImpl::new(id, instance.db.clone(), instance.cells.clone()),
-            );
+            let host: crate::keystone_capnp::host::Client<any_pointer> =
+                capnp_rpc::new_client(HostImpl::new(id, instance.db.clone()));
 
             tracing::debug!("Initializing RPC system");
             let (rpc_system, _, disconnector, api) =
@@ -227,10 +229,14 @@ impl Keystone {
         }
 
         let caplog_config = config.get_caplog()?;
-        let db: SqliteDatabase = crate::database::open_database(
+        let db = crate::database::open_database(
             Path::new(config.get_database()?.to_str()?),
+            |conn| SqliteDatabase::new_connection(conn),
             crate::database::OpenOptions::Create,
         )?;
+
+        let builtin =
+            BUILTIN_MODULES.map(|s| (s.to_string(), db.get_string_index(s).unwrap() as u64));
 
         tracing::debug!("Iterating through {} modules", config.get_modules()?.len());
         let modules = config.get_modules().map_or(HashMap::new(), |modules| {
@@ -256,10 +262,25 @@ impl Keystone {
                 .collect()
         });
 
-        let namemap = modules
+        let namemap: HashMap<String, u64> = modules
             .iter()
             .map(|(id, m)| (m.name.clone(), *id))
+            .chain(builtin.into_iter())
             .collect();
+
+        {
+            let mut clients = db.server.clients.borrow_mut();
+            clients.extend(
+                modules
+                    .iter()
+                    .map(|(id, instance)| (*id, instance.queue.add_ref())),
+            );
+
+            clients.insert(
+                namemap[BUILTIN_SQLITE],
+                capnp_rpc::local::Client::from_rc(db.clone()).add_ref(),
+            );
+        }
 
         #[cfg(miri)]
         let caplog = CapLog::<MAX_BUFFER_SIZE>::new_storage(
@@ -280,7 +301,7 @@ impl Keystone {
         )?;
 
         Ok(Self {
-            db: Rc::new(crate::sqlite_capnp::root::Client::from_server(db)),
+            db,
             log: caplog,
             file_server: Rc::new(RefCell::new(AmbientAuthorityImpl::new())),
             modules,
@@ -353,14 +374,14 @@ impl Keystone {
 
     fn internal_cap(&self, id: &str) -> Option<Box<dyn ClientHook>> {
         match id {
-            "keystone" => Some(
+            BUILTIN_KEYSTONE => Some(
                 capnp_rpc::new_client::<crate::keystone_capnp::root::Client, KeystoneRoot>(
                     KeystoneRoot::new(self),
                 )
                 .client
                 .hook,
             ),
-            "sqlite" => Some(capnp_rpc::local::Client::from_rc(self.db.clone()).add_ref()),
+            BUILTIN_SQLITE => Some(capnp_rpc::local::Client::from_rc(self.db.clone()).add_ref()),
             _ => None,
         }
     }
@@ -484,7 +505,7 @@ impl Keystone {
         tracing::debug!("Set Initialized flag");
 
         let host: crate::keystone_capnp::host::Client<any_pointer> =
-            capnp_rpc::new_client(HostImpl::new(id, self.db.clone(), self.cells.clone()));
+            capnp_rpc::new_client(HostImpl::new(id, self.db.clone()));
         let client = self.posix_spawn(host.clone(), config).await.ok();
 
         let (conf, workpath) = match Self::extract_config_pair(config) {
@@ -763,7 +784,7 @@ impl crate::keystone_capnp::root::Server for KeystoneRoot {
         params: crate::keystone_capnp::root::InitCellParams,
         mut results: crate::keystone_capnp::root::InitCellResults,
     ) -> Result<(), ::capnp::Error> {
-        let span = tracing::debug_span!("host", id = "keystone");
+        let span = tracing::debug_span!("host", id = BUILTIN_KEYSTONE);
         let _enter = span.enter();
         let params = params.get()?;
         tracing::debug!("init_cell()");
@@ -833,4 +854,21 @@ pub(crate) fn init_rpc_system<
     let api = api_request.send();
 
     Ok((rpc_system, bootstrap, disconnector, api))
+}
+
+/// This extends the capability server set so it can store an AnyPointer version of a client, but retrieve it as a specialized client type
+pub(crate) trait CapabilityServerSetExt<S, C>
+where
+    C: capnp::capability::FromServer<S>,
+{
+    fn new_generic_client<T: FromClientHook>(&mut self, s: S) -> T;
+}
+
+impl<S, C> CapabilityServerSetExt<S, C> for CapabilityServerSet<S, C>
+where
+    C: capnp::capability::FromServer<S>,
+{
+    fn new_generic_client<T: FromClientHook>(&mut self, s: S) -> T {
+        FromClientHook::new(self.new_client(s).into_client_hook())
+    }
 }

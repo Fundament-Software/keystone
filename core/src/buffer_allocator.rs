@@ -1,5 +1,6 @@
 /// Uses up Buf before resorting to allocations. If it runs out of space in buf, doubles the
 /// size of buf for next time.
+#[derive(Default)]
 pub struct BufferAllocator {
     buf: Vec<u8>,
     used: bool, // interesting note: this could be made threadsafe if this was atomic.
@@ -14,15 +15,6 @@ impl BufferAllocator {
     pub fn reserve(&mut self, minimum_size: usize) {
         if minimum_size > self.buf.len() {
             self.buf.resize(minimum_size, 0);
-        }
-    }
-}
-
-impl Default for BufferAllocator {
-    fn default() -> Self {
-        Self {
-            buf: Vec::new(),
-            used: false,
         }
     }
 }

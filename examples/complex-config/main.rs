@@ -69,7 +69,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 use tempfile::NamedTempFile;
 
 #[test]
-fn test_complex_config_init() -> eyre::Result<()> {
+fn test_complex_config() -> eyre::Result<()> {
     //console_subscriber::init();
 
     #[cfg(feature = "tracing")]

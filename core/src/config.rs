@@ -48,11 +48,7 @@ impl SchemaPool {
     fn get<'a>(&'a self, name: &str) -> Option<&'a DynamicSchema> {
         self.0
             .iter()
-            .find(|(v, _)| {
-                v.iter()
-                    .find(|file| name.eq_ignore_ascii_case(file))
-                    .is_some()
-            })
+            .find(|(v, _)| v.iter().any(|file| name.eq_ignore_ascii_case(file)))
             .map(|(_, sc)| sc)
     }
 
@@ -351,6 +347,25 @@ where
             Value::Datetime(d) => builder.set(field, d.to_string().as_str().into())?,
             Value::Array(l) => {
                 if let capnp::schema_capnp::field::Slot(x) = field.get_proto().which()? {
+                    if let schema_capnp::type_::Which::AnyPointer(_) = x.get_type()?.which()? {
+                        if l.first()
+                            .map(|v| v.as_str().unwrap_or_default())
+                            .map(|s| s.starts_with('@'))
+                            .unwrap_or(false)
+                        {
+                            // Register that we set this field so we don't autofill it
+                            bypass.insert(field.get_index());
+
+                            // TODO: refactor capnproto-rust so we don't have to do this
+                            unsafe {
+                                if let Some(capid) = callback(v as *const Value) {
+                                    builder.set_capability_to_int(field, capid)?;
+                                }
+                            }
+                            continue 'outer;
+                        }
+                    }
+
                     value_to_list(
                         l,
                         builder.initn(field, l.len() as u32)?.downcast(),
@@ -710,7 +725,7 @@ where
                             });
 
                         if let Some(p) = path {
-                            Ok(schema.get_type_by_scope(&["Root"], Some(&p))?)
+                            Ok(schema.get_type_by_scope(&["Root"], Some(p))?)
                         } else {
                             Err(Error::MissingSchema(module_name.into()))
                         }?
@@ -968,6 +983,35 @@ config = {{ nested = {{ state = [ "@keystone", "initCell", {{id = "myCellName"}}
     to_capnp(&source.parse::<toml::Table>()?, msg.reborrow())?;
     let reader = msg.reborrow_as_reader();
     assert_eq!(reader.get_cap_table()?.len(), 2);
+    //println!("{:#?}", msg.reborrow_as_reader());
+
+    Ok(())
+}
+
+#[test]
+fn test_config_array() -> Result<()> {
+    let mut message = ::capnp::message::Builder::new_default();
+    let mut msg = message.init_root::<keystone_config::Builder>();
+    let source = format!(
+        r#"
+database = "test.sqlite"
+defaultLog = "debug"
+
+[[modules]]
+name = "Sqlite Usage"
+path = "{}"
+config = {{ sqlite = [ "@sqlite" ], outer = [ "@keystone", "initCell", {{id = "OuterTableRef", default = ["@sqlite", "createTable", {{ def = [{{ name="state", baseType="text", nullable=false }}, {{ name="blah", baseType="text", nullable=false }}] }}, "res"]}}, "result" ], inner = [ "@keystone", "initCell", {{id = "InnerTableRef"}}, "result" ] }}
+"#,
+        crate::keystone::get_binary_path("sqlite-usage-module")
+            .as_os_str()
+            .to_str()
+            .unwrap()
+            .replace('\\', "/")
+    );
+
+    to_capnp(&source.parse::<toml::Table>()?, msg.reborrow())?;
+    let reader = msg.reborrow_as_reader();
+    assert_eq!(reader.get_cap_table()?.len(), 3);
     //println!("{:#?}", msg.reborrow_as_reader());
 
     Ok(())

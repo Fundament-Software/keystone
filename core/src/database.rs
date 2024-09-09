@@ -1,11 +1,15 @@
 use crate::buffer_allocator::BufferAllocator;
 use crate::sqlite::SqliteDatabase;
+use crate::storage_capnp::restore::restore_results;
+use capnp::any_pointer::Owned as any_pointer;
+use capnp::capability::FromClientHook;
 use capnp::message::{ReaderOptions, TypedReader};
 use capnp::traits::SetPointerBuilder;
 use eyre::Result;
 use rusqlite::{params, Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
+use std::rc::Rc;
 
 /// Internal trait that extends our internal database object with keystone-specific actions
 #[allow(dead_code)]
@@ -25,10 +29,8 @@ pub trait DatabaseExt {
     fn get_sturdyref(
         &self,
         sturdy_id: i64,
-        builder: capnp::dynamic_value::Builder<'_>,
-    ) -> Result<()>;
-    fn add_sturdyref<R: SetPointerBuilder + Clone>(&self, data: R) -> Result<i64>;
-    fn set_sturdyref<R: SetPointerBuilder + Clone>(&self, sturdy_id: i64, data: R) -> Result<()>;
+    ) -> Result<capnp::capability::RemotePromise<restore_results::Owned<any_pointer, any_pointer>>>;
+    fn add_sturdyref<R: SetPointerBuilder + Clone>(&self, module_id: u64, data: R) -> Result<i64>;
     fn drop_sturdyref(&self, id: i64) -> Result<()>;
     fn add_object<R: SetPointerBuilder + Clone>(&self, data: R) -> Result<i64>;
     fn get_object(&self, id: i64, builder: capnp::dynamic_value::Builder<'_>) -> Result<()>;
@@ -40,8 +42,7 @@ pub trait DatabaseExt {
 const ROOT_STATES: usize = 0;
 const ROOT_STURDYREFS: usize = 1;
 const ROOT_OBJECTS: usize = 2;
-const ROOT_STRINGMAP: usize = 3;
-const ROOT_TABLES: &[&str] = &["states", "sturdyrefs", "objects", "stringmap"];
+const ROOT_TABLES: &[&str] = &["states", "sturdyrefs", "objects"];
 
 fn expect_change(call: Result<usize, rusqlite::Error>, count: usize) -> Result<()> {
     let n = call?;
@@ -66,14 +67,13 @@ fn get_generic<const TABLE: usize>(
             let v = row.get_ref(0)?;
             let slice = [v.as_blob()?];
 
-            let message_reader =
-                TypedReader::<_, capnp::any_pointer::Owned>::new(capnp::message::Reader::new(
-                    capnp::message::SegmentArray::new(&slice),
-                    ReaderOptions {
-                        traversal_limit_in_words: None,
-                        nesting_limit: 128,
-                    },
-                ));
+            let message_reader = TypedReader::<_, any_pointer>::new(capnp::message::Reader::new(
+                capnp::message::SegmentArray::new(&slice),
+                ReaderOptions {
+                    traversal_limit_in_words: None,
+                    nesting_limit: 128,
+                },
+            ));
             let reader: capnp::any_pointer::Reader = message_reader
                 .get()
                 .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
@@ -92,46 +92,27 @@ fn get_generic<const TABLE: usize>(
     Ok(())
 }
 
-/*fn get_single_segment<'a, R: SetPointerBuilder + Clone>(
-    message: &'a mut capnp::message::Builder<&mut BufferAllocator>,
+fn get_single_segment<R: SetPointerBuilder + Clone>(
+    alloc: &mut BufferAllocator,
     data: R,
-) -> Result<&'a [u8]> {
-    message.set_root(data)?;
-    if let capnp::OutputSegments::MultiSegment(v) = message.get_segments_for_output() {
-        let n = v.into_iter().fold(0, |i, v| i + v.len()) * 2;
-        std::mem::swap(x, y)
-        let a = (*message).into_allocator();
-        a.reserve(n);
-        *message = capnp::message::Builder::new(a);
-        message.set_root(data)?;
-    }
-
-    match message.get_segments_for_output() {
-        capnp::OutputSegments::SingleSegment(s) => Ok(s[0]),
-        capnp::OutputSegments::MultiSegment(v) => Err(capnp::Error::from_kind(
-            capnp::ErrorKind::InvalidNumberOfSegments(v.len()),
-        )
-        .into()),
-    }
-}*/
-
-fn set_generic<const TABLE: usize, const UPDATE: bool, R: SetPointerBuilder + Clone>(
-    conn: &Connection,
-    mut alloc: std::cell::RefMut<BufferAllocator>,
-    string_index: i64,
-    data: R,
-) -> Result<()> {
-    let mut message = capnp::message::Builder::new(&mut *alloc);
+) -> capnp::Result<capnp::message::Builder<&mut BufferAllocator>> {
+    let mut message = capnp::message::Builder::new(alloc);
     message.set_root(data.clone())?;
 
     if let capnp::OutputSegments::MultiSegment(v) = message.get_segments_for_output() {
         let n = v.into_iter().fold(0, |i, v| i + v.len()) * 2;
-        let a = message.into_allocator(); // it is very important the old message is deallocated
+        let a = message.into_allocator();
         a.reserve(n);
         message = capnp::message::Builder::new(a);
         message.set_root(data)?;
     }
 
+    Ok(message)
+}
+
+fn get_segment_slice<'a>(
+    message: &'a capnp::message::Builder<&mut BufferAllocator>,
+) -> capnp::Result<&'a [u8]> {
     let slice = match message.get_segments_for_output() {
         capnp::OutputSegments::SingleSegment(s) => s[0],
         capnp::OutputSegments::MultiSegment(v) => {
@@ -140,7 +121,18 @@ fn set_generic<const TABLE: usize, const UPDATE: bool, R: SetPointerBuilder + Cl
             );
         }
     };
-    //let slice = Self::get_single_segment(&mut message, data)?;
+
+    Ok(slice)
+}
+
+fn set_generic<const TABLE: usize, const UPDATE: bool, R: SetPointerBuilder + Clone>(
+    conn: &Connection,
+    mut alloc: std::cell::RefMut<BufferAllocator>,
+    string_index: i64,
+    data: R,
+) -> Result<()> {
+    let message = get_single_segment(&mut *alloc, data)?;
+    let slice = get_segment_slice(&message)?;
 
     if UPDATE {
         let call = conn.prepare_cached(
@@ -173,25 +165,8 @@ fn add_generic<const TABLE: usize, R: SetPointerBuilder + Clone>(
     mut alloc: std::cell::RefMut<BufferAllocator>,
     data: R,
 ) -> Result<i64> {
-    let mut message = capnp::message::Builder::new(&mut *alloc);
-    message.set_root(data.clone())?;
-
-    if let capnp::OutputSegments::MultiSegment(v) = message.get_segments_for_output() {
-        let n = v.into_iter().fold(0, |i, v| i + v.len()) * 2;
-        let a = message.into_allocator();
-        a.reserve(n);
-        message = capnp::message::Builder::new(a);
-        message.set_root(data)?;
-    }
-
-    let slice = match message.get_segments_for_output() {
-        capnp::OutputSegments::SingleSegment(s) => s[0],
-        capnp::OutputSegments::MultiSegment(v) => {
-            return Err(
-                capnp::Error::from_kind(capnp::ErrorKind::InvalidNumberOfSegments(v.len())).into(),
-            );
-        }
-    };
+    let message = get_single_segment(&mut *alloc, data)?;
+    let slice = get_segment_slice(&message)?;
 
     let result = conn
         .prepare_cached(format!("INSERT INTO {} (data) VALUES (?1)", ROOT_TABLES[TABLE]).as_str())?
@@ -211,7 +186,7 @@ fn drop_generic<const TABLE: usize>(conn: &Connection, id: i64) -> Result<()> {
 impl DatabaseExt for SqliteDatabase {
     fn init(&self) -> Result<()> {
         // These three tables look the same but we interact with them slightly differently
-        for t in [ROOT_STATES, ROOT_STURDYREFS, ROOT_OBJECTS] {
+        for t in [ROOT_STATES, ROOT_OBJECTS] {
             self.connection.execute(
                 format!(
                     "CREATE TABLE {} (
@@ -224,6 +199,19 @@ impl DatabaseExt for SqliteDatabase {
                 (),
             )?;
         }
+
+        self.connection.execute(
+            format!(
+                "CREATE TABLE {} (
+                    id     INTEGER PRIMARY KEY,
+                    module INTEGER NOT NULL    
+                    data   BLOB NOT NULL
+                )",
+                ROOT_TABLES[ROOT_STURDYREFS]
+            )
+            .as_str(),
+            (),
+        )?;
 
         self.connection.execute(
             "CREATE TABLE stringmap (
@@ -264,34 +252,110 @@ impl DatabaseExt for SqliteDatabase {
 
     fn get_sturdyref(
         &self,
-        sturdy_id: i64,
-        builder: capnp::dynamic_value::Builder<'_>,
-    ) -> Result<()> {
-        get_generic::<ROOT_STURDYREFS>(&self.connection, sturdy_id, builder)
+        id: i64,
+    ) -> Result<capnp::capability::RemotePromise<restore_results::Owned<any_pointer, any_pointer>>>
+    {
+        let mut stmt = self.connection.prepare_cached(
+            format!(
+                "SELECT data, module FROM {} WHERE id = ?1",
+                ROOT_TABLES[ROOT_STURDYREFS]
+            )
+            .as_str(),
+        )?;
+        let promise = stmt.query_row(
+            params![id],
+            |row: &rusqlite::Row| -> Result<
+                capnp::capability::RemotePromise<restore_results::Owned<any_pointer, any_pointer>>,
+                rusqlite::Error,
+            > {
+                let id_ref = row.get_ref(1)?;
+                let module_id = id_ref.as_i64()? as u64;
+                let borrow = self.clients.borrow_mut();
+                let hook =
+                    borrow
+                        .get(&module_id)
+                        .ok_or(rusqlite::Error::IntegralValueOutOfRange(
+                            0,
+                            module_id as i64,
+                        ))?;
+                let client =
+                    crate::storage_capnp::restore::Client::<any_pointer>::new(hook.add_ref());
+
+                let v = row.get_ref(0)?;
+                let slice = [v.as_blob()?];
+
+                let message_reader =
+                    TypedReader::<_, any_pointer>::new(capnp::message::Reader::new(
+                        capnp::message::SegmentArray::new(&slice),
+                        ReaderOptions {
+                            traversal_limit_in_words: None,
+                            nesting_limit: 128,
+                        },
+                    ));
+                let reader: capnp::any_pointer::Reader = message_reader
+                    .get()
+                    .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+
+                let mut req = client.restore_request();
+                req.get()
+                    .set_data(reader)
+                    .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+                Ok(req.send())
+            },
+        )?;
+        Ok(promise)
     }
-    fn add_sturdyref<R: SetPointerBuilder + Clone>(&self, data: R) -> Result<i64> {
-        add_generic::<ROOT_STURDYREFS, R>(&self.connection, self.alloc.borrow_mut(), data)
+
+    fn add_sturdyref<R: SetPointerBuilder + Clone>(&self, module_id: u64, data: R) -> Result<i64> {
+        let mut alloc = self.alloc.borrow_mut();
+        let message = get_single_segment(&mut *alloc, data)?;
+        let slice = get_segment_slice(&message)?;
+
+        let result = self
+            .connection
+            .prepare_cached(
+                format!(
+                    "INSERT INTO {} (module, data) VALUES (?1, ?2)",
+                    ROOT_TABLES[ROOT_STURDYREFS]
+                )
+                .as_str(),
+            )?
+            .execute(params![module_id, slice]);
+        expect_change(result, 1)?;
+        Ok(self.connection.last_insert_rowid())
     }
-    fn set_sturdyref<R: SetPointerBuilder + Clone>(&self, sturdy_id: i64, data: R) -> Result<()> {
-        set_generic::<ROOT_STURDYREFS, true, R>(
-            &self.connection,
-            self.alloc.borrow_mut(),
-            sturdy_id,
-            data,
-        )
-    }
+
     fn drop_sturdyref(&self, id: i64) -> Result<()> {
         drop_generic::<ROOT_STURDYREFS>(&self.connection, id)
     }
+
     fn add_object<R: SetPointerBuilder + Clone>(&self, data: R) -> Result<i64> {
-        add_generic::<ROOT_OBJECTS, R>(&self.connection, self.alloc.borrow_mut(), data)
+        let mut alloc = self.alloc.borrow_mut();
+        let message = get_single_segment(&mut *alloc, data)?;
+        let slice = get_segment_slice(&message)?;
+
+        let result = self
+            .connection
+            .prepare_cached(
+                format!(
+                    "INSERT INTO {} (data) VALUES (?1)",
+                    ROOT_TABLES[ROOT_OBJECTS]
+                )
+                .as_str(),
+            )?
+            .execute(params![slice]);
+        expect_change(result, 1)?;
+        Ok(self.connection.last_insert_rowid())
     }
+
     fn get_object(&self, id: i64, builder: capnp::dynamic_value::Builder<'_>) -> Result<()> {
         get_generic::<ROOT_OBJECTS>(&self.connection, id, builder)
     }
+
     fn drop_object(&self, id: i64) -> Result<()> {
         drop_generic::<ROOT_OBJECTS>(&self.connection, id)
     }
+
     fn get_string_index(&self, s: &str) -> Result<i64> {
         self.connection
             .prepare_cached("INSERT OR IGNORE INTO stringmap (string) VALUES (?1)")?
@@ -320,10 +384,11 @@ fn create(path: impl AsRef<Path>) -> Result<Connection, rusqlite::Error> {
     )
 }
 
-pub fn open_database<DB: From<Connection> + DatabaseExt>(
+pub fn open_database<DB: DatabaseExt>(
     path: impl AsRef<Path>,
+    f: impl Fn(Connection) -> Rc<crate::sqlite_capnp::root::ServerDispatch<DB>>,
     options: OpenOptions,
-) -> Result<DB> {
+) -> Result<Rc<crate::sqlite_capnp::root::ServerDispatch<DB>>> {
     let span = tracing::span!(tracing::Level::DEBUG, "database::open_database", path = ?path.as_ref(), options = ?options);
     let _enter = span.enter();
     match options {
@@ -339,9 +404,9 @@ pub fn open_database<DB: From<Connection> + DatabaseExt>(
                 OpenFlags::SQLITE_OPEN_READ_WRITE
             };
 
-            let r: DB = Connection::open_with_flags(path, flags)?.into();
+            let r = f(Connection::open_with_flags(path, flags)?.into());
             if create {
-                r.init()?;
+                r.server.init()?;
             }
             Ok(r)
         }
@@ -350,16 +415,18 @@ pub fn open_database<DB: From<Connection> + DatabaseExt>(
             if let Ok(file) = std::fs::File::open(path.as_ref()) {
                 file.set_len(0)?;
             }
-            let r: DB = create(path)?.into();
-            r.init()?;
+            let r = f(create(path)?);
+            r.server.init()?;
             Ok(r)
         }
-        OpenOptions::ReadWrite => {
-            Ok(Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE)?.into())
-        }
-        OpenOptions::ReadOnly => {
-            Ok(Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?.into())
-        }
+        OpenOptions::ReadWrite => Ok(f(Connection::open_with_flags(
+            path,
+            OpenFlags::SQLITE_OPEN_READ_WRITE,
+        )?)),
+        OpenOptions::ReadOnly => Ok(f(Connection::open_with_flags(
+            path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )?)),
     }
 }
 
@@ -377,4 +444,4 @@ pub enum KnownEvent {
     DropCapability,
 }
 
-type Microseconds = u64; // Microseconds since 1970 (won't overflow for 500000 years)
+//type Microseconds = u64; // Microseconds since 1970 (won't overflow for 500000 years)

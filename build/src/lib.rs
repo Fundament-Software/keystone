@@ -18,16 +18,20 @@ pub fn create_binary_file(
 
 pub fn get_capnp_id(file: &std::path::Path) -> u64 {
     let f = std::fs::File::open(file).expect("failed to open valid file");
-    let line = std::io::BufReader::new(f).lines().flatten().next().unwrap();
+    let line = std::io::BufReader::new(f)
+        .lines()
+        .map_while(Result::ok)
+        .next()
+        .unwrap();
     let num = line
         .strip_prefix("@0x")
-        .expect(format!("{} ID missing @0x prefix", file.display()).as_str());
+        .unwrap_or_else(|| panic!("{} ID missing @0x prefix", file.display()));
     let (num, _) = num.split_once('#').unwrap_or((num, ""));
 
     u64::from_str_radix(
         num.trim_end()
             .strip_suffix(';')
-            .expect(format!("{} ID missing ; suffix", file.display()).as_str()),
+            .unwrap_or_else(|| panic!("{} ID missing ; suffix", file.display())),
         16,
     )
     .expect(format!("{} ID not valid u64", file.display()).as_str())

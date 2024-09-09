@@ -54,8 +54,12 @@ where
 
     let program = unsafe {
         let mut buf = [0_u16; 2048];
-        let num =
-            GetFinalPathNameByHandleW(source.as_raw_filelike() as isize, buf.as_mut_ptr(), 2048, 0);
+        let num = GetFinalPathNameByHandleW(
+            source.as_raw_filelike() as *mut std::ffi::c_void,
+            buf.as_mut_ptr(),
+            2048,
+            0,
+        );
         OsString::from_wide(&buf[0..num as usize])
     };
 
@@ -158,8 +162,8 @@ type DisconnectorSync = std::sync::Arc<
 pub struct PosixProcessImpl {
     pub cancellation_token: CancellationToken,
     stdin: Rc<Mutex<Option<ChildStdin>>>,
-    stdout_task: JoinHandle<Result<Option<usize>>>,
-    stderr_task: JoinHandle<Result<Option<usize>>>,
+    _stdout_task: JoinHandle<Result<Option<usize>>>,
+    _stderr_task: JoinHandle<Result<Option<usize>>>,
     child_task: Mutex<Option<JoinHandle<Result<Option<ExitStatus>, std::io::Error>>>>,
     killsender: AtomicTake<tokio::sync::oneshot::Sender<()>>,
     exitcode: AtomicI32,
@@ -170,8 +174,8 @@ impl PosixProcessImpl {
     fn new(
         cancellation_token: CancellationToken,
         stdin: Option<ChildStdin>,
-        stdout_task: JoinHandle<Result<Option<usize>>>,
-        stderr_task: JoinHandle<Result<Option<usize>>>,
+        _stdout_task: JoinHandle<Result<Option<usize>>>,
+        _stderr_task: JoinHandle<Result<Option<usize>>>,
         child_task: JoinHandle<Result<Option<ExitStatus>, std::io::Error>>,
         killsender: tokio::sync::oneshot::Sender<()>,
         disconnector: DisconnectorSync,
@@ -179,8 +183,8 @@ impl PosixProcessImpl {
         Self {
             cancellation_token,
             stdin: Rc::new(Mutex::new(stdin)),
-            stdout_task,
-            stderr_task,
+            _stdout_task,
+            _stderr_task,
             child_task: Mutex::new(Some(child_task)),
             killsender: AtomicTake::new(killsender),
             exitcode: AtomicI32::new(0),

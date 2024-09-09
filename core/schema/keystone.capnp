@@ -79,7 +79,8 @@ interface Root {
 }
 
 interface Host(State) {
-  # Per-module keystone interface, used as the bootstrap interface for each module's RPC system.
+  # Per-module keystone interface, used as the bootstrap interface for each module's RPC system. Keystone's implementation
+  # also implements Save(Storage), even though it is not inherited here.
 
   getState @0 () -> (state :State);
   setState @1 (state :State) -> ();

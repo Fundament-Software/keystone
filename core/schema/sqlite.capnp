@@ -76,13 +76,13 @@ interface AddDB extends(Database)  {
 }
 
 interface Database extends(RODatabase) {
-	insert @0 (ins :Insert) -> (res :ResultStream);
+	insert @0 (ins :Insert) -> StatementResults;
 	prepareInsert @1 (ins :Insert) -> (stmt :PreparedStatement(Insert));
 	runPreparedInsert @2 (stmt :PreparedStatement(Insert), bindings :List(DBAny)) -> (res :ResultStream);
-	update @3 (upd :Update) -> (res :ResultStream);
+	update @3 (upd :Update) -> StatementResults;
 	prepareUpdate @4 (upd :Update) -> (stmt :PreparedStatement(Update));
 	runPreparedUpdate @5 (stmt :PreparedStatement(Update), bindings :List(DBAny)) -> (res :ResultStream);
-	delete @6 (del :Delete) -> (res :ResultStream);
+	delete @6 (del :Delete) -> StatementResults;
 	prepareDelete @7 (del :Delete) -> (stmt :PreparedStatement(Delete));
 	runPreparedDelete @8 (stmt :PreparedStatement(Delete), bindings :List(DBAny)) -> (res :ResultStream);
 }
@@ -93,9 +93,13 @@ interface PreparedStatement(Clause) {
 }
 
 interface RODatabase {
-  select @0 (q :Select) -> (res :ResultStream);
+  select @0 (q :Select) -> StatementResults;
   prepareSelect @1 (q :Select) -> (stmt :PreparedStatement(Select));
   runPreparedSelect @2 (stmt :PreparedStatement(Select), bindings :List(DBAny)) -> (res :ResultStream);
+}
+
+struct StatementResults {
+	res @0 :ResultStream;
 }
 
 interface ResultStream {

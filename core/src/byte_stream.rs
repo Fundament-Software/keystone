@@ -184,11 +184,11 @@ impl AsyncRead for ByteStreamBufferImpl {
     }
 }
 
-enum PassThrough<'a> {
+/*enum PassThrough<'a> {
     PendingRead(&'a [u8]),
     PendingWrite(&'a [u8]),
     Ready,
-}
+}*/
 
 impl Client {
     /// Convenience function to make it easier to send bytes through the ByteStream

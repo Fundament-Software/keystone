@@ -17,7 +17,8 @@ fn test_hello_world_init() -> eyre::Result<()> {
             "hello-world-module",
             r#"{  greeting = "Bonjour" }"#,
         ),
-        |mut instance| async move {
+        |message| async move {
+            let mut instance = keystone::test_create_keystone(&message).await.unwrap();
             let hello_client: root::Client = instance.get_api_pipe("Hello World").unwrap();
 
             let mut sayhello = hello_client.say_hello_request();

@@ -1,9 +1,14 @@
 use crate::buffer_allocator::BufferAllocator;
+use crate::cap_replacement;
+use crate::cap_replacement::CapReplacement;
+use crate::cap_replacement::GetPointerBuilder;
 use crate::sqlite::SqliteDatabase;
 use crate::storage_capnp::restore::restore_results;
 use capnp::any_pointer::Owned as any_pointer;
 use capnp::capability::FromClientHook;
 use capnp::message::{ReaderOptions, TypedReader};
+use capnp::private::capability::ClientHook;
+use capnp::traits::ImbueMut;
 use capnp::traits::SetPointerBuilder;
 use eyre::Result;
 use rusqlite::{params, Connection, OpenFlags};
@@ -11,10 +16,18 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::rc::Rc;
 
+pub type Microseconds = i64; // Microseconds since 1970 (won't overflow for 200000 years)
+
 /// Internal trait that extends our internal database object with keystone-specific actions
 #[allow(dead_code)]
 pub trait DatabaseExt {
     fn init(&self) -> Result<()>;
+
+    fn get_generic<const TABLE: usize>(
+        &self,
+        id: i64,
+        builder: capnp::dynamic_value::Builder<'_>,
+    ) -> Result<()>;
 
     fn get_state(
         &self,
@@ -22,17 +35,27 @@ pub trait DatabaseExt {
         builder: capnp::dynamic_value::Builder<'_>,
     ) -> Result<()>;
 
-    fn set_state<R: SetPointerBuilder + Clone>(&self, string_index: i64, data: R) -> Result<()>;
+    async fn set_state<R: SetPointerBuilder + Clone>(
+        &self,
+        string_index: i64,
+        data: R,
+    ) -> Result<()>;
 
-    fn init_state<R: SetPointerBuilder + Clone>(&self, string_index: i64, data: R) -> Result<()>;
+    fn init_state(&self, string_index: i64) -> Result<()>;
 
     fn get_sturdyref(
         &self,
         sturdy_id: i64,
     ) -> Result<capnp::capability::RemotePromise<restore_results::Owned<any_pointer, any_pointer>>>;
-    fn add_sturdyref<R: SetPointerBuilder + Clone>(&self, module_id: u64, data: R) -> Result<i64>;
+    async fn add_sturdyref<R: SetPointerBuilder + Clone>(
+        &self,
+        module_id: u64,
+        data: R,
+        expires: Option<Microseconds>,
+    ) -> Result<i64>;
     fn drop_sturdyref(&self, id: i64) -> Result<()>;
-    fn add_object<R: SetPointerBuilder + Clone>(&self, data: R) -> Result<i64>;
+    fn clean_sturdyrefs(&self, ids: &[i64]) -> Result<()>;
+    async fn add_object<R: SetPointerBuilder + Clone>(&self, data: R) -> Result<i64>;
     fn get_object(&self, id: i64, builder: capnp::dynamic_value::Builder<'_>) -> Result<()>;
     fn drop_object(&self, id: i64) -> Result<()>;
     fn get_string_index(&self, s: &str) -> Result<i64>;
@@ -40,9 +63,9 @@ pub trait DatabaseExt {
 
 // Rust's type system does not like enums in generic constants
 const ROOT_STATES: usize = 0;
-const ROOT_STURDYREFS: usize = 1;
-const ROOT_OBJECTS: usize = 2;
-const ROOT_TABLES: &[&str] = &["states", "sturdyrefs", "objects"];
+const ROOT_OBJECTS: usize = 1;
+const ROOT_STURDYREFS: &str = "sturdyrefs";
+const ROOT_TABLES: &[&str] = &["states", "objects"];
 
 fn expect_change(call: Result<usize, rusqlite::Error>, count: usize) -> Result<()> {
     let n = call?;
@@ -53,65 +76,69 @@ fn expect_change(call: Result<usize, rusqlite::Error>, count: usize) -> Result<(
     }
 }
 
-fn get_generic<const TABLE: usize>(
-    conn: &Connection,
-    id: i64,
-    builder: capnp::dynamic_value::Builder<'_>,
-) -> Result<()> {
-    let mut stmt = conn.prepare_cached(
-        format!("SELECT data FROM {} WHERE id = ?1", ROOT_TABLES[TABLE]).as_str(),
-    )?;
-    stmt.query_row(
-        params![id],
-        |row: &rusqlite::Row| -> Result<(), rusqlite::Error> {
-            let v = row.get_ref(0)?;
-            let slice = [v.as_blob()?];
-
-            let message_reader = TypedReader::<_, any_pointer>::new(capnp::message::Reader::new(
-                capnp::message::SegmentArray::new(&slice),
-                ReaderOptions {
-                    traversal_limit_in_words: None,
-                    nesting_limit: 128,
-                },
-            ));
-            let reader: capnp::any_pointer::Reader = message_reader
-                .get()
-                .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
-
-            match builder {
-                capnp::dynamic_value::Builder::Struct(mut s) => s
-                    .copy_from(reader)
-                    .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e))),
-                capnp::dynamic_value::Builder::AnyPointer(mut b) => b
-                    .set_as(reader)
-                    .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e))),
-                _ => Err(rusqlite::Error::InvalidQuery),
-            }
-        },
-    )?;
-    Ok(())
+trait AllocatorExt: capnp::message::Allocator {
+    fn reserve_hint(&mut self, _: usize) {}
 }
 
-fn get_single_segment<R: SetPointerBuilder + Clone>(
-    alloc: &mut BufferAllocator,
+impl AllocatorExt for BufferAllocator {
+    fn reserve_hint(&mut self, n: usize) {
+        self.reserve(n);
+    }
+}
+
+impl AllocatorExt for capnp::message::HeapAllocator {}
+
+async fn get_single_segment<'a, R: SetPointerBuilder + Clone>(
+    db: &SqliteDatabase,
+    alloc: &'a mut impl AllocatorExt,
     data: R,
-) -> capnp::Result<capnp::message::Builder<&mut BufferAllocator>> {
+) -> capnp::Result<capnp::message::Builder<&'a mut impl AllocatorExt>> {
     let mut message = capnp::message::Builder::new(alloc);
-    message.set_root(data.clone())?;
+
+    let mut caps = Vec::new();
+    let mut builder: capnp::any_pointer::Builder = message.init_root();
+    builder.imbue_mut(&mut caps);
+    builder.set_as(data.clone())?;
 
     if let capnp::OutputSegments::MultiSegment(v) = message.get_segments_for_output() {
         let n = v.into_iter().fold(0, |i, v| i + v.len()) * 2;
         let a = message.into_allocator();
-        a.reserve(n);
+        a.reserve_hint(n);
         message = capnp::message::Builder::new(a);
-        message.set_root(data)?;
+        caps = Vec::new();
+        let mut builder: capnp::any_pointer::Builder = message.init_root();
+        builder.imbue_mut(&mut caps);
+        builder.set_as(data)?;
     }
 
+    let db_ref = db
+        .this
+        .upgrade()
+        .ok_or(capnp::Error::failed("database doesn't exist".into()))?;
+    let mut closure = move |hook: Box<dyn ClientHook>| {
+        let db_ref_ref = db_ref.clone();
+        async move {
+            let saveable: crate::storage_capnp::saveable::Client<capnp::any_pointer::Owned> =
+                capnp::capability::FromClientHook::new(hook);
+
+            let response = saveable.save_request().send().promise.await?;
+            let sturdyref = capnp::capability::get_resolved_cap(response.get()?.get_ref()?).await;
+            let id = db_ref_ref.get_sturdyref_id(sturdyref)?;
+            Ok::<i64, capnp::Error>(id)
+        }
+    };
+    let mut builder: capnp::any_pointer::Builder = message.get_root()?;
+    // We have to re-imbue with this new builder
+    builder.imbue_mut(&mut caps);
+    let pointer: GetPointerBuilder = builder.get_as()?;
+    cap_replacement::replace(&mut closure, pointer.builder).await?;
+
+    // TODO: return list of inserted IDs
     Ok(message)
 }
 
 fn get_segment_slice<'a>(
-    message: &'a capnp::message::Builder<&mut BufferAllocator>,
+    message: &'a capnp::message::Builder<&mut impl AllocatorExt>,
 ) -> capnp::Result<&'a [u8]> {
     let slice = match message.get_segments_for_output() {
         capnp::OutputSegments::SingleSegment(s) => s[0],
@@ -125,62 +152,32 @@ fn get_segment_slice<'a>(
     Ok(slice)
 }
 
-fn set_generic<const TABLE: usize, const UPDATE: bool, R: SetPointerBuilder + Clone>(
-    conn: &Connection,
-    mut alloc: std::cell::RefMut<BufferAllocator>,
-    string_index: i64,
-    data: R,
-) -> Result<()> {
-    let message = get_single_segment(&mut *alloc, data)?;
-    let slice = get_segment_slice(&message)?;
-
-    if UPDATE {
-        let call = conn.prepare_cached(
-            format!("INSERT INTO {} (id, data) VALUES (?1, ?2) ON CONFLICT(id) DO UPDATE SET data=?2", ROOT_TABLES[TABLE]).as_str())?.execute(
-            params![string_index, slice]
-        );
-
-        expect_change(call, 1)
-    } else {
-        let call = conn
-            .prepare_cached(
-                format!(
-                    "INSERT OR IGNORE INTO {} (id, data) VALUES (?1, ?2)",
-                    ROOT_TABLES[TABLE]
-                )
-                .as_str(),
-            )?
-            .execute(params![string_index, slice])?;
-
-        if call > 1 {
-            Err(rusqlite::Error::StatementChangedRows(call).into())
-        } else {
-            Ok(())
-        }
-    }
-}
-
-fn add_generic<const TABLE: usize, R: SetPointerBuilder + Clone>(
-    conn: &Connection,
-    mut alloc: std::cell::RefMut<BufferAllocator>,
-    data: R,
-) -> Result<i64> {
-    let message = get_single_segment(&mut *alloc, data)?;
-    let slice = get_segment_slice(&message)?;
-
-    let result = conn
-        .prepare_cached(format!("INSERT INTO {} (data) VALUES (?1)", ROOT_TABLES[TABLE]).as_str())?
-        .execute(params![slice]);
-    expect_change(result, 1)?;
-    Ok(conn.last_insert_rowid())
-}
-
 fn drop_generic<const TABLE: usize>(conn: &Connection, id: i64) -> Result<()> {
     expect_change(
         conn.prepare_cached(format!("DELETE FROM {} WHERE id = ?1", ROOT_TABLES[TABLE]).as_str())?
             .execute(params![id]),
         1,
     )
+}
+
+fn get_replacement(
+    db: &SqliteDatabase,
+    index: u64,
+    mut builder: capnp::any_pointer::Builder,
+) -> capnp::Result<()> {
+    let result = db
+        .get_sturdyref(index as i64)
+        .map_err(|e| capnp::Error::failed(e.to_string()))?;
+
+    builder.set_as_capability(result.pipeline.get_cap().as_cap());
+    Ok(())
+}
+
+fn cur_time() -> Microseconds {
+    std::time::SystemTime::now()
+        .duration_since(std::time::SystemTime::UNIX_EPOCH)
+        .expect("System time set to before 1970?!")
+        .as_micros() as Microseconds
 }
 
 impl DatabaseExt for SqliteDatabase {
@@ -203,11 +200,13 @@ impl DatabaseExt for SqliteDatabase {
         self.connection.execute(
             format!(
                 "CREATE TABLE {} (
-                    id     INTEGER PRIMARY KEY,
-                    module INTEGER NOT NULL    
-                    data   BLOB NOT NULL
+                    id       INTEGER PRIMARY KEY,
+                    module   INTEGER NOT NULL,
+                    refcount INTEGER NOT NULL,
+                    expires  INTEGER NOT NULL,
+                    data     BLOB NOT NULL
                 )",
-                ROOT_TABLES[ROOT_STURDYREFS]
+                ROOT_STURDYREFS
             )
             .as_str(),
             (),
@@ -224,30 +223,108 @@ impl DatabaseExt for SqliteDatabase {
         Ok(())
     }
 
+    fn get_generic<const TABLE: usize>(
+        &self,
+        id: i64,
+        builder: capnp::dynamic_value::Builder<'_>,
+    ) -> Result<()> {
+        let mut stmt = self.connection.prepare_cached(
+            format!("SELECT data FROM {} WHERE id = ?1", ROOT_TABLES[TABLE]).as_str(),
+        )?;
+        stmt.query_row(
+            params![id],
+            |row: &rusqlite::Row| -> Result<(), rusqlite::Error> {
+                let v = row.get_ref(0)?;
+                let slice = [v.as_blob()?];
+
+                let message_reader =
+                    TypedReader::<_, any_pointer>::new(capnp::message::Reader::new(
+                        capnp::message::SegmentArray::new(&slice),
+                        ReaderOptions {
+                            traversal_limit_in_words: None,
+                            nesting_limit: 128,
+                        },
+                    ));
+                let reader: capnp::any_pointer::Reader = message_reader
+                    .get()
+                    .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+
+                let replacement = CapReplacement::new(reader, |value, builder| {
+                    get_replacement(self, value, builder)
+                });
+
+                match builder {
+                    capnp::dynamic_value::Builder::Struct(mut s) => s
+                        .copy_from(replacement)
+                        .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e))),
+                    capnp::dynamic_value::Builder::AnyPointer(mut b) => b
+                        .set_as(replacement)
+                        .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e))),
+                    _ => Err(rusqlite::Error::InvalidQuery),
+                }
+            },
+        )?;
+        Ok(())
+    }
+
     fn get_state(
         &self,
         string_index: i64,
         builder: capnp::dynamic_value::Builder<'_>,
     ) -> Result<()> {
-        get_generic::<ROOT_STATES>(&self.connection, string_index, builder)
+        self.get_generic::<ROOT_STATES>(string_index, builder)
     }
 
-    fn set_state<R: SetPointerBuilder + Clone>(&self, string_index: i64, data: R) -> Result<()> {
-        set_generic::<ROOT_STATES, true, R>(
-            &self.connection,
-            self.alloc.borrow_mut(),
-            string_index,
-            data,
-        )
+    async fn set_state<R: SetPointerBuilder + Clone>(
+        &self,
+        string_index: i64,
+        data: R,
+    ) -> Result<()> {
+        fn inner(conn: &rusqlite::Connection, string_index: i64, slice: &[u8]) -> Result<()> {
+            let call = conn.prepare_cached(
+                format!("INSERT INTO {} (id, data) VALUES (?1, ?2) ON CONFLICT(id) DO UPDATE SET data=?2", ROOT_TABLES[ROOT_STATES]).as_str())?.execute(
+                params![string_index, slice]
+            );
+
+            expect_change(call, 1)
+            // TODO (in this order)
+            // Confirm the UPDATE query finished correctly
+            // Decrement ref count of all old ids
+            // Increment ref count of all new ids
+            // Delete any old IDs with refcount of 0
+        }
+
+        if let Ok(mut alloc) = self.alloc.try_lock() {
+            let message = get_single_segment(&self, &mut *alloc, data).await?;
+            inner(&self.connection, string_index, get_segment_slice(&message)?)
+        } else {
+            let mut alloc = capnp::message::HeapAllocator::new();
+            let message = get_single_segment(&self, &mut alloc, data).await?;
+            inner(&self.connection, string_index, get_segment_slice(&message)?)
+        }?;
+
+        Ok(())
     }
 
-    fn init_state<R: SetPointerBuilder + Clone>(&self, string_index: i64, data: R) -> Result<()> {
-        set_generic::<ROOT_STATES, false, R>(
-            &self.connection,
-            self.alloc.borrow_mut(),
-            string_index,
-            data,
-        )
+    fn init_state(&self, string_index: i64) -> Result<()> {
+        let slice: &[u8] = &[0; 8];
+
+        let call = self
+            .connection
+            .prepare_cached(
+                format!(
+                    "INSERT OR IGNORE INTO {} (id, data) VALUES (?1, ?2)",
+                    ROOT_TABLES[ROOT_STATES]
+                )
+                .as_str(),
+            )?
+            .execute(params![string_index, slice])?;
+
+        if call > 1 {
+            Err(rusqlite::Error::StatementChangedRows(call).into())
+        } else {
+            Ok(())
+        }
     }
 
     fn get_sturdyref(
@@ -257,13 +334,13 @@ impl DatabaseExt for SqliteDatabase {
     {
         let mut stmt = self.connection.prepare_cached(
             format!(
-                "SELECT data, module FROM {} WHERE id = ?1",
-                ROOT_TABLES[ROOT_STURDYREFS]
+                "SELECT data, module FROM {} WHERE id = ?1 AND expires > ?2",
+                ROOT_STURDYREFS
             )
             .as_str(),
         )?;
         let promise = stmt.query_row(
-            params![id],
+            params![id, cur_time()],
             |row: &rusqlite::Row| -> Result<
                 capnp::capability::RemotePromise<restore_results::Owned<any_pointer, any_pointer>>,
                 rusqlite::Error,
@@ -296,9 +373,14 @@ impl DatabaseExt for SqliteDatabase {
                     .get()
                     .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
 
+                let replacement = CapReplacement::new(reader, |value, builder| {
+                    get_replacement(self, value, builder)
+                });
+
                 let mut req = client.restore_request();
                 req.get()
-                    .set_data(reader)
+                    .init_data()
+                    .set_as(replacement)
                     .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
                 Ok(req.send())
             },
@@ -306,50 +388,112 @@ impl DatabaseExt for SqliteDatabase {
         Ok(promise)
     }
 
-    fn add_sturdyref<R: SetPointerBuilder + Clone>(&self, module_id: u64, data: R) -> Result<i64> {
-        let mut alloc = self.alloc.borrow_mut();
-        let message = get_single_segment(&mut *alloc, data)?;
-        let slice = get_segment_slice(&message)?;
-
-        let result = self
-            .connection
+    async fn add_sturdyref<R: SetPointerBuilder + Clone>(
+        &self,
+        module_id: u64,
+        data: R,
+        expires: Option<Microseconds>,
+    ) -> Result<i64> {
+        fn inner(
+            conn: &rusqlite::Connection,
+            module_id: u64,
+            expire: i64,
+            slice: &[u8],
+        ) -> Result<i64> {
+            Ok(conn
             .prepare_cached(
                 format!(
-                    "INSERT INTO {} (module, data) VALUES (?1, ?2)",
-                    ROOT_TABLES[ROOT_STURDYREFS]
+                    "INSERT INTO {} (module, data, expires, refcount) VALUES (?1, ?2, ?3, 1) RETURNING id",
+                    ROOT_STURDYREFS
                 )
                 .as_str(),
             )?
-            .execute(params![module_id, slice]);
-        expect_change(result, 1)?;
-        Ok(self.connection.last_insert_rowid())
+            .query_row(params![module_id, slice, expire], |row| row.get(0))?)
+        }
+
+        let expire = expires.unwrap_or(i64::MAX);
+        let result = if let Ok(mut alloc) = self.alloc.try_lock() {
+            let message = get_single_segment(&self, &mut *alloc, data).await?;
+            inner(
+                &self.connection,
+                module_id,
+                expire,
+                get_segment_slice(&message)?,
+            )
+        } else {
+            let mut alloc = capnp::message::HeapAllocator::new();
+            let message = get_single_segment(&self, &mut alloc, data).await?;
+            inner(
+                &self.connection,
+                module_id,
+                expire,
+                get_segment_slice(&message)?,
+            )
+        }?;
+
+        Ok(result)
     }
 
     fn drop_sturdyref(&self, id: i64) -> Result<()> {
-        drop_generic::<ROOT_STURDYREFS>(&self.connection, id)
+        expect_change(
+            self.connection
+                .prepare_cached(
+                    format!(
+                        "UPDATE {} SET refcount = refcount - 1 WHERE id = ?1 AND refcount > 0",
+                        ROOT_STURDYREFS
+                    )
+                    .as_str(),
+                )?
+                .execute(params![id]),
+            1,
+        )
     }
 
-    fn add_object<R: SetPointerBuilder + Clone>(&self, data: R) -> Result<i64> {
-        let mut alloc = self.alloc.borrow_mut();
-        let message = get_single_segment(&mut *alloc, data)?;
-        let slice = get_segment_slice(&message)?;
+    fn clean_sturdyrefs(&self, ids: &[i64]) -> Result<()> {
+        let list: Vec<String> = ids.iter().map(|id| format!("?{}", id)).collect();
 
-        let result = self
-            .connection
-            .prepare_cached(
-                format!(
-                    "INSERT INTO {} (data) VALUES (?1)",
-                    ROOT_TABLES[ROOT_OBJECTS]
-                )
-                .as_str(),
-            )?
-            .execute(params![slice]);
-        expect_change(result, 1)?;
-        Ok(self.connection.last_insert_rowid())
+        expect_change(
+            self.connection
+                .prepare_cached(
+                    format!(
+                        "DELETE FROM {} WHERE id IN ({}) AND refcount = 0",
+                        ROOT_STURDYREFS,
+                        list.join(",")
+                    )
+                    .as_str(),
+                )?
+                .execute(rusqlite::params_from_iter(ids)),
+            1,
+        )
+    }
+
+    async fn add_object<R: SetPointerBuilder + Clone>(&self, data: R) -> Result<i64> {
+        fn inner(conn: &rusqlite::Connection, slice: &[u8]) -> Result<i64> {
+            Ok(conn
+                .prepare_cached(
+                    format!(
+                        "INSERT INTO {} (data) VALUES (?1) RETURNING id",
+                        ROOT_TABLES[ROOT_OBJECTS]
+                    )
+                    .as_str(),
+                )?
+                .query_row(params![slice], |row| row.get(0))?)
+        }
+
+        let result = if let Ok(mut alloc) = self.alloc.try_lock() {
+            let message = get_single_segment(&self, &mut *alloc, data).await?;
+            inner(&self.connection, get_segment_slice(&message)?)
+        } else {
+            let mut alloc = capnp::message::HeapAllocator::new();
+            let message = get_single_segment(&self, &mut alloc, data).await?;
+            inner(&self.connection, get_segment_slice(&message)?)
+        }?;
+
+        Ok(result)
     }
 
     fn get_object(&self, id: i64, builder: capnp::dynamic_value::Builder<'_>) -> Result<()> {
-        get_generic::<ROOT_OBJECTS>(&self.connection, id, builder)
+        self.get_generic::<ROOT_OBJECTS>(id, builder)
     }
 
     fn drop_object(&self, id: i64) -> Result<()> {
@@ -443,5 +587,3 @@ pub enum KnownEvent {
     LoadCapability,
     DropCapability,
 }
-
-//type Microseconds = u64; // Microseconds since 1970 (won't overflow for 500000 years)

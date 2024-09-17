@@ -11,17 +11,14 @@ pub struct SturdyRefImpl {
 }
 
 impl SturdyRefImpl {
-    pub fn new(id: i64, db: Rc<ServerDispatch<SqliteDatabase>>) -> Self {
-        Self { id, db }
-    }
-
-    pub fn init<R: SetPointerBuilder + Clone>(
+    pub async fn init<'a, R: SetPointerBuilder + Clone>(
         module_id: u64,
         data: R,
         db: Rc<ServerDispatch<SqliteDatabase>>,
     ) -> eyre::Result<Self> {
         let id = db
-            .add_sturdyref(module_id, data)
+            .add_sturdyref(module_id, data, None)
+            .await
             .map_err(|e| capnp::Error::failed(e.to_string()))?;
 
         Ok(Self { id, db })
@@ -51,6 +48,14 @@ impl sturdy_ref::Server<capnp::any_pointer::Owned> for SturdyRefImpl {
     }
 }
 
+impl Drop for SturdyRefImpl {
+    fn drop(&mut self) {
+        if let Err(e) = self.db.drop_sturdyref(self.id) {
+            // We can't allow a failure here to crash the program, so we do nothing
+            eprintln!("Failed to drop SturdyRef! {}", e.to_string());
+        }
+    }
+}
 /*
 use capnp::capability::FromClientHook;
 use capnp_rpc::CapabilityServerSet;

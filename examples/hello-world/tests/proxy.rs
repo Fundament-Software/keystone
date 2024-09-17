@@ -9,7 +9,8 @@ fn test_hello_world_proxy() -> eyre::Result<()> {
             "hello-world-module",
             r#"{  greeting = "Bonjour" }"#,
         ),
-        |mut instance| async move {
+        |message| async move {
+            let mut instance = keystone::test_create_keystone(&message).await.unwrap();
             let module = &instance.modules[&instance.namemap["Hello World"]];
             let pipe = instance
                 .proxy_set

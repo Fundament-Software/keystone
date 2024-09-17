@@ -215,9 +215,24 @@ pub fn build_temp_config(
     )
 }
 
+pub async fn test_create_keystone(
+    message: &capnp::message::Builder<capnp::message::HeapAllocator>,
+) -> Result<Keystone> {
+    let mut instance = Keystone::new(
+        message.get_root_as_reader::<keystone_config::Reader>()?,
+        false,
+    )?;
+
+    instance
+        .init(message.get_root_as_reader::<keystone_config::Reader>()?)
+        .await?;
+
+    Ok(instance)
+}
+
 pub fn test_harness<F: Future<Output = capnp::Result<()>> + 'static>(
     config: &str,
-    f: impl FnOnce(Keystone) -> F + 'static,
+    f: impl FnOnce(capnp::message::Builder<capnp::message::HeapAllocator>) -> F + 'static,
 ) -> Result<()> {
     let mut message = ::capnp::message::Builder::new_default();
     let mut msg = message.init_root::<keystone_config::Builder>();
@@ -231,21 +246,11 @@ pub fn test_harness<F: Future<Output = capnp::Result<()>> + 'static>(
 
     config::to_capnp(&source.parse::<toml::Table>()?, msg.reborrow())?;
 
-    let mut instance = Keystone::new(
-        message.get_root_as_reader::<keystone_config::Reader>()?,
-        false,
-    )?;
-
     // TODO: might be able to replace the runtime catch below with .unhandled_panic(UnhandledPanic::ShutdownRuntime) if gets stabilized
     let pool = tokio::task::LocalSet::new();
     let fut = pool.run_until(async move {
         tokio::task::spawn_local(async move {
-            instance
-                .init(message.get_root_as_reader::<keystone_config::Reader>()?)
-                .await
-                .unwrap();
-
-            f(instance).await?;
+            f(message).await?;
             Ok::<(), capnp::Error>(())
         })
         .await
@@ -253,6 +258,61 @@ pub fn test_harness<F: Future<Output = capnp::Result<()>> + 'static>(
 
     let runtime = tokio::runtime::Runtime::new()?;
     let result = runtime.block_on(fut);
+    runtime.shutdown_timeout(std::time::Duration::from_millis(1));
+    result.unwrap().unwrap();
+
+    Ok(())
+}
+
+pub fn test_module_harness<
+    C: capnp::capability::FromClientHook,
+    F: Future<Output = capnp::Result<()>> + 'static,
+>(
+    config: &str,
+    module: String,
+    localset: tokio::task::LocalSet,
+    server_reader: impl tokio::io::AsyncRead + 'static + Unpin,
+    server_writer: impl tokio::io::AsyncWrite + 'static + Unpin,
+    join: impl Future<Output = <tokio::task::JoinHandle<capnp::Result<()>> as Future>::Output>,
+    f: impl FnOnce(C) -> F + 'static,
+) -> Result<()> {
+    let temp_db = NamedTempFile::new().unwrap().into_temp_path();
+    let temp_log = NamedTempFile::new().unwrap().into_temp_path();
+    let temp_prefix = NamedTempFile::new().unwrap().into_temp_path();
+    let mut source = build_temp_config(&temp_db, &temp_log, &temp_prefix);
+
+    source.push_str(config);
+
+    let b = localset.run_until(localset.spawn_local(async move {
+        let (mut instance, rpc, _disconnect, api) =
+            keystone::Keystone::init_single_module(&source, module, server_reader, server_writer)
+                .await
+                .unwrap();
+
+        let handle = tokio::task::spawn_local(rpc);
+        f(api).await?;
+
+        tokio::select! {
+            r = handle => r,
+            _ = instance.shutdown() => Ok(Ok(())),
+        }
+        .unwrap()
+        .unwrap();
+
+        Ok::<(), capnp::Error>(())
+    }));
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    let result = runtime.block_on(async move {
+        tokio::select! {
+            r = join => r,
+            r = b => r,
+            r = tokio::signal::ctrl_c() => Ok(Ok(r.expect("failed to capture ctrl-c"))),
+        }
+    });
+
     runtime.shutdown_timeout(std::time::Duration::from_millis(1));
     result.unwrap().unwrap();
 

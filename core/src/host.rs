@@ -1,12 +1,15 @@
 use crate::database::DatabaseExt;
+use crate::keystone::CapabilityServerSetExt;
 use crate::keystone_capnp::host;
 use crate::sqlite::SqliteDatabase;
+use crate::storage_capnp::save;
+use crate::storage_capnp::sturdy_ref;
 use eyre::Result;
 use std::{marker::PhantomData, rc::Rc};
 
 #[derive(Clone)]
 pub struct HostImpl<State> {
-    instance_id: u64,
+    module_id: u64,
     db: Rc<crate::sqlite_capnp::root::ServerDispatch<SqliteDatabase>>,
     phantom: PhantomData<State>,
 }
@@ -15,9 +18,12 @@ impl<State> HostImpl<State>
 where
     State: ::capnp::traits::Owned,
 {
-    pub fn new(id: u64, db: Rc<crate::sqlite_capnp::root::ServerDispatch<SqliteDatabase>>) -> Self {
+    pub fn new(
+        module_id: u64,
+        db: Rc<crate::sqlite_capnp::root::ServerDispatch<SqliteDatabase>>,
+    ) -> Self {
         Self {
-            instance_id: id,
+            module_id,
             db,
             phantom: PhantomData,
         }
@@ -50,6 +56,31 @@ macro_rules! dyn_span {
     };
 }
 
+impl<State> save::Server<capnp::any_pointer::Owned> for HostImpl<State>
+where
+    State: ::capnp::traits::Owned,
+    for<'a> capnp::dynamic_value::Builder<'a>: From<<State as capnp::traits::Owned>::Builder<'a>>,
+{
+    async fn save(
+        &self,
+        params: save::SaveParams<capnp::any_pointer::Owned>,
+        mut results: save::SaveResults<capnp::any_pointer::Owned>,
+    ) -> Result<(), ::capnp::Error> {
+        let cap: sturdy_ref::Client<capnp::any_pointer::Owned> =
+            self.db.sturdyref_set.borrow_mut().new_generic_client(
+                crate::sturdyref::SturdyRefImpl::init(
+                    self.module_id as u64,
+                    params.get()?.get_data()?,
+                    self.db.clone(),
+                )
+                .await
+                .map_err(|e| capnp::Error::failed(e.to_string()))?,
+            );
+        results.get().set_ref(cap);
+        Ok(())
+    }
+}
+
 impl<State> host::Server<State> for HostImpl<State>
 where
     State: ::capnp::traits::Owned,
@@ -60,12 +91,12 @@ where
         _: host::GetStateParams<State>,
         mut results: host::GetStateResults<State>,
     ) -> Result<(), ::capnp::Error> {
-        let span = tracing::debug_span!("host", id = self.instance_id);
+        let span = tracing::debug_span!("host", id = self.module_id);
         let _enter = span.enter();
         tracing::debug!("get_state()");
         self.db
             .server
-            .get_state(self.instance_id as i64, results.get().init_state().into())
+            .get_state(self.module_id as i64, results.get().init_state().into())
             .map_err(|e| capnp::Error::failed(e.to_string()))?;
 
         Ok(())
@@ -76,12 +107,13 @@ where
         params: host::SetStateParams<State>,
         _: host::SetStateResults<State>,
     ) -> Result<(), ::capnp::Error> {
-        let span = tracing::debug_span!("host", id = self.instance_id);
+        let span = tracing::debug_span!("host", id = self.module_id);
         let _enter = span.enter();
         tracing::debug!("set_state()");
         self.db
             .server
-            .set_state(self.instance_id as i64, params.get()?.get_state()?)
+            .set_state(self.module_id as i64, params.get()?.get_state()?)
+            .await
             .map_err(|e| capnp::Error::failed(e.to_string()))?;
         Ok(())
     }
@@ -94,7 +126,7 @@ where
         let params = params.get()?;
         let obj: capnp::dynamic_value::Reader = params.get_obj()?.into();
         let level = params.get_level()?;
-        let span = dyn_span!(level, "[REMOTE]", id = self.instance_id);
+        let span = dyn_span!(level, "[REMOTE]", id = self.module_id);
         let _enter = span.enter();
         dyn_event!(level, "{:?}", obj);
 

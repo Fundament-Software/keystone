@@ -8,7 +8,8 @@ fn test_complex_config_init() -> Result<()> {
             "complex-config-module",
             r#"{ nested = { state = [ "@keystone", "initCell", {id = "myCellName"}, "result" ], moreState = [ "@keystone", "initCell", {id = "myCellName"}, "result" ] } }"#,
         ),
-        |mut instance| async move {
+        |message| async move {
+            let mut instance = keystone::test_create_keystone(&message).await.unwrap();
             let config_client: complex_config::complex_config_capnp::root::Client =
                 instance.get_api_pipe("Complex Config").unwrap();
 

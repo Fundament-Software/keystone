@@ -26,7 +26,8 @@ struct DBAny {
     }
 }
 
-interface ROTableRef {}
+interface ROTableRef {
+}
 
 interface RATableRef extends(ROTableRef) {
   readonly @0 () -> (res :ROTableRef);
@@ -36,13 +37,13 @@ interface TableRef extends(RATableRef) {
 	appendonly @0 () -> (res :RATableRef);
 }
 
-interface Table extends(TableRef) {
+interface Table extends(TableRef, ST.Saveable(Table)) {
   adminless @0 () -> (res :TableRef);
 }
 
 struct Storage {
 	id @0 :UInt8;
-	data @1 :Text;
+	data @1 :UInt64;
 }
 
 interface Root extends(AddDB, ST.Restore(Storage)) {}
@@ -132,7 +133,7 @@ struct Expr {
 	union {
 		literal @0 :DBAny;
 		bindparam @1 :Void;
-		tablereference @2 :TableColumn;
+		column @2 :TableColumn;
 		functioninvocation @3 :FunctionInvocation;
 	}
 }

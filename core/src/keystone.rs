@@ -101,7 +101,7 @@ pub enum ModuleState {
 
 // This can't be a rust generic because we do not know the type parameters at compile time.
 pub struct ModuleInstance {
-    instance_id: u64,
+    module_id: u64,
     name: String,
     client: Option<SpawnProgram>,
     process: Option<SpawnProcess>,
@@ -181,10 +181,10 @@ impl Keystone {
 
             let (conf, _) = Self::extract_config_pair(s)?;
             let replacement = CapReplacement::new(conf, |index, mut builder| {
-                if instance.autoinit_check(cap_table, builder.reborrow(), index, id)? {
+                if instance.autoinit_check(cap_table, builder.reborrow(), index as u32, id)? {
                     Ok(())
                 } else {
-                    instance.resolve_cap_expr(cap_table.get(index), cap_table, builder)
+                    instance.resolve_cap_expr(cap_table.get(index as u32), cap_table, builder)
                 }
             });
 
@@ -250,7 +250,7 @@ impl Keystone {
                         id,
                         ModuleInstance {
                             name: name.to_owned(),
-                            instance_id: id,
+                            module_id: id,
                             client: None,
                             process: None,
                             api: None,
@@ -425,7 +425,7 @@ impl Keystone {
                     Some(args.target_size()?),
                 );
                 let replacement = CapReplacement::new(args, |index, builder| {
-                    self.resolve_cap_expr(cap_table.get(index), cap_table, builder)
+                    self.resolve_cap_expr(cap_table.get(index as u32), cap_table, builder)
                 });
                 call.get().set_as(replacement)?;
                 call.send().pipeline
@@ -534,10 +534,10 @@ impl Keystone {
             let mut spawn_request = client.spawn_request();
             let builder = spawn_request.get();
             let replacement = CapReplacement::new(conf, |index, mut builder| {
-                if self.autoinit_check(cap_table, builder.reborrow(), index, id)? {
+                if self.autoinit_check(cap_table, builder.reborrow(), index as u32, id)? {
                     Ok(())
                 } else {
-                    self.resolve_cap_expr(cap_table.get(index), cap_table, builder)
+                    self.resolve_cap_expr(cap_table.get(index as u32), cap_table, builder)
                 }
             });
 
@@ -794,14 +794,6 @@ impl crate::keystone_capnp::root::Server for KeystoneRoot {
             .get_string_index(params.get_id()?.to_str()?)
             .map_err(|e| capnp::Error::failed(e.to_string()))?;
 
-        // If a default was provided, initialize the state ourselves with that value before we create the cell.
-        if params.has_default() {
-            self.db
-                .server
-                .init_state(id, params.get_default()?)
-                .map_err(|e| capnp::Error::failed(e.to_string()))?;
-        }
-
         let client = self
             .cells
             .borrow_mut()
@@ -810,6 +802,14 @@ impl crate::keystone_capnp::root::Server for KeystoneRoot {
                 SimpleCellImpl::init(id, self.db.clone())
                     .map_err(|e| capnp::Error::failed(e.to_string()))?,
             );
+
+        if params.has_default() {
+            self.db
+                .server
+                .set_state(id, params.get_default()?)
+                .await
+                .map_err(|e| capnp::Error::failed(e.to_string()))?;
+        }
 
         results.get().set_result(client);
         Ok(())

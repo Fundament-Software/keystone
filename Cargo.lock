@@ -118,7 +118,7 @@ dependencies = [
 [[package]]
 name = "async-byte-channel"
 version = "0.0.1"
-source = "git+https://github.com/Fundament-Software/capstone-rs#4e188d859c5bdb5990da026843e3984e9199ddb2"
+source = "git+https://github.com/Fundament-Software/capstone-rs#42a6a6c81e658ff4842c56f002f4f6a371e8e53e"
 dependencies = [
  "tokio",
 ]
@@ -293,7 +293,7 @@ dependencies = [
 [[package]]
 name = "capnp-sys"
 version = "1.1.0"
-source = "git+https://github.com/Fundament-Software/capstone#2664dd25faed5d073e35e76c4358bd10331ed083"
+source = "git+https://github.com/Fundament-Software/capstone#b7c715862fc0b89fa2dfcd587a26ef36d2dfab8e"
 dependencies = [
  "cc",
  "cxx",
@@ -306,7 +306,7 @@ dependencies = [
 [[package]]
 name = "capnpc-sys"
 version = "1.1.0"
-source = "git+https://github.com/Fundament-Software/capstone#2664dd25faed5d073e35e76c4358bd10331ed083"
+source = "git+https://github.com/Fundament-Software/capstone#b7c715862fc0b89fa2dfcd587a26ef36d2dfab8e"
 dependencies = [
  "capnp-sys",
  "cc",
@@ -320,7 +320,7 @@ dependencies = [
 [[package]]
 name = "capstone"
 version = "0.18.0"
-source = "git+https://github.com/Fundament-Software/capstone-rs#4e188d859c5bdb5990da026843e3984e9199ddb2"
+source = "git+https://github.com/Fundament-Software/capstone-rs#42a6a6c81e658ff4842c56f002f4f6a371e8e53e"
 dependencies = [
  "embedded-io",
  "flurry",
@@ -330,7 +330,7 @@ dependencies = [
 [[package]]
 name = "capstone-futures"
 version = "0.18.0"
-source = "git+https://github.com/Fundament-Software/capstone-rs#4e188d859c5bdb5990da026843e3984e9199ddb2"
+source = "git+https://github.com/Fundament-Software/capstone-rs#42a6a6c81e658ff4842c56f002f4f6a371e8e53e"
 dependencies = [
  "capstone",
  "futures-util",
@@ -341,7 +341,7 @@ dependencies = [
 [[package]]
 name = "capstone-gen"
 version = "0.18.0"
-source = "git+https://github.com/Fundament-Software/capstone-rs#4e188d859c5bdb5990da026843e3984e9199ddb2"
+source = "git+https://github.com/Fundament-Software/capstone-rs#42a6a6c81e658ff4842c56f002f4f6a371e8e53e"
 dependencies = [
  "capnpc-sys",
  "capstone",
@@ -353,7 +353,7 @@ dependencies = [
 [[package]]
 name = "capstone-macros"
 version = "0.18.0"
-source = "git+https://github.com/Fundament-Software/capstone-rs#4e188d859c5bdb5990da026843e3984e9199ddb2"
+source = "git+https://github.com/Fundament-Software/capstone-rs#42a6a6c81e658ff4842c56f002f4f6a371e8e53e"
 dependencies = [
  "capstone",
  "capstone-gen",
@@ -367,7 +367,7 @@ dependencies = [
 [[package]]
 name = "capstone-rpc"
 version = "0.18.0"
-source = "git+https://github.com/Fundament-Software/capstone-rs#4e188d859c5bdb5990da026843e3984e9199ddb2"
+source = "git+https://github.com/Fundament-Software/capstone-rs#42a6a6c81e658ff4842c56f002f4f6a371e8e53e"
 dependencies = [
  "capstone",
  "capstone-futures",
@@ -401,9 +401,9 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.1.19"
+version = "1.1.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d74707dde2ba56f86ae90effb3b43ddd369504387e718014de010cec7959800"
+checksum = "45bcde016d64c21da4be18b655631e5ab6d3107607e71a73a9f53eb48aae23fb"
 dependencies = [
  "shlex",
 ]
@@ -1297,7 +1297,7 @@ dependencies = [
 [[package]]
 name = "kj-build"
 version = "1.1.0"
-source = "git+https://github.com/Fundament-Software/capstone#2664dd25faed5d073e35e76c4358bd10331ed083"
+source = "git+https://github.com/Fundament-Software/capstone#b7c715862fc0b89fa2dfcd587a26ef36d2dfab8e"
 dependencies = [
  "cc",
  "eyre",
@@ -1307,7 +1307,7 @@ dependencies = [
 [[package]]
 name = "kj-sys"
 version = "1.1.0"
-source = "git+https://github.com/Fundament-Software/capstone#2664dd25faed5d073e35e76c4358bd10331ed083"
+source = "git+https://github.com/Fundament-Software/capstone#b7c715862fc0b89fa2dfcd587a26ef36d2dfab8e"
 dependencies = [
  "cc",
  "cxx",
@@ -2505,9 +2505,9 @@ checksum = "e91b56cd4cadaeb79bbf1a5645f6b4f8dc5bde8834ad5894a8db35fda9efa1fe"
 
 [[package]]
 name = "unicode-normalization"
-version = "0.1.23"
+version = "0.1.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a56d1686db2308d901306f92a263857ef59ea39678a5458e7cb17f01415101f5"
+checksum = "5033c97c4262335cded6d6fc3e5c18ab755e1a3dc96376350f3d8e9f009ad956"
 dependencies = [
  "tinyvec",
 ]

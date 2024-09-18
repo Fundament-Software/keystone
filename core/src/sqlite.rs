@@ -994,7 +994,7 @@ impl SqliteDatabase {
 
 fn create_column_set(conn: &Connection) -> capnp::Result<HashSet<String>> {
     let mut columns = HashSet::new();
-    let mut table_list_statement = conn.prepare("PRAGMA table_list").map_err(|_| capnp::Error::failed("Failed to query for column names".to_string()))?;
+    let mut table_list_statement = conn.prepare("PRAGMA table_list").map_err(|_| capnp::Error::failed("Failed to query for table names".to_string()))?;
     let mut table_list = table_list_statement.query(()).map_err(|_| capnp::Error::failed("Failed to query for table names".to_string()))?;
     while let Ok(Some(row)) = table_list.next() {
         let Ok(rusqlite::types::ValueRef::Text(table_name)) = row.get_ref(1) else {

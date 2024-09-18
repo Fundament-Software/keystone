@@ -121,12 +121,13 @@ impl SqliteDatabase {
         flags: OpenFlags,
         table_ref_set: Rc<RefCell<CapabilityServerSet<TableRefImpl, table::Client>>>,
         clients: Rc<RefCell<HashMap<u64, Box<dyn capnp::private::capability::ClientHook>>>>,
-    ) -> rusqlite::Result<Rc<ServerDispatch<Self>>> {
-        let connection = Connection::open_with_flags(path, flags)?;
+    ) -> capnp::Result<Rc<ServerDispatch<Self>>> {
+        let connection = Connection::open_with_flags(path, flags).map_err(convert_rusqlite_error)?;
+        let column_set = RefCell::new(create_column_set(&connection)?);
         let result = Rc::new_cyclic(|this| {
             crate::sqlite_capnp::root::Client::from_server(Self {
                 connection,
-                column_set: Default::default(),
+                column_set,
                 alloc: Default::default(),
                 prepared_insert_set: Default::default(),
                 prepared_select_set: Default::default(),
@@ -145,12 +146,13 @@ impl SqliteDatabase {
         Ok(result)
     }
 
-    pub fn new_connection(conn: Connection) -> Rc<ServerDispatch<Self>> {
-        Rc::new_cyclic(|this| {
+    pub fn new_connection(conn: Connection) -> capnp::Result<Rc<ServerDispatch<Self>>> {
+        let column_set = RefCell::new(create_column_set(&conn)?);
+        Ok(Rc::new_cyclic(|this| {
             crate::sqlite_capnp::root::Client::from_server(Self {
                 connection: conn,
                 alloc: Default::default(),
-                column_set: Default::default(),
+                column_set,
                 prepared_insert_set: Default::default(),
                 prepared_select_set: Default::default(),
                 prepared_delete_set: Default::default(),
@@ -163,7 +165,7 @@ impl SqliteDatabase {
                 clients: Default::default(),
                 this: this.clone(),
             })
-        })
+        }))
     }
 
     pub fn get_sturdyref_id(
@@ -988,6 +990,26 @@ impl SqliteDatabase {
         }
         Ok(())
     }
+}
+
+fn create_column_set(conn: &Connection) -> capnp::Result<HashSet<String>> {
+    let mut columns = HashSet::new();
+    let mut table_list_statement = conn.prepare("PRAGMA table_list").map_err(|_| capnp::Error::failed("Failed to query for table names".to_string()))?;
+    let mut table_list = table_list_statement.query(()).map_err(|_| capnp::Error::failed("Failed to query for table names".to_string()))?;
+    while let Ok(Some(row)) = table_list.next() {
+        let Ok(rusqlite::types::ValueRef::Text(table_name)) = row.get_ref(1) else {
+            return Err(capnp::Error::failed("Failed to read table name".to_string()));
+        };
+        let mut statement = conn.prepare(format!("PRAGMA table_info({})", std::str::from_utf8(table_name)?).as_str()).map_err(|_| capnp::Error::failed("Failed to query for column names".to_string()))?;
+        let mut res = statement.query(()).map_err(|_| capnp::Error::failed("Failed to query for column names".to_string()))?;
+        while let Ok(Some(row)) = res.next() {
+            let Ok(rusqlite::types::ValueRef::Text(name)) = row.get_ref(1) else {
+                return Err(capnp::Error::failed("Failed to read column name".to_string()));
+            };
+            columns.insert(std::str::from_utf8(name)?.to_string());
+        }
+    }
+    Ok(columns)
 }
 
 use crate::storage_capnp::restore;

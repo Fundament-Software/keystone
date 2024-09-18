@@ -530,7 +530,7 @@ fn create(path: impl AsRef<Path>) -> Result<Connection, rusqlite::Error> {
 
 pub fn open_database<DB: DatabaseExt>(
     path: impl AsRef<Path>,
-    f: impl Fn(Connection) -> Rc<crate::sqlite_capnp::root::ServerDispatch<DB>>,
+    f: impl Fn(Connection) -> capnp::Result<Rc<crate::sqlite_capnp::root::ServerDispatch<DB>>>,
     options: OpenOptions,
 ) -> Result<Rc<crate::sqlite_capnp::root::ServerDispatch<DB>>> {
     let span = tracing::span!(tracing::Level::DEBUG, "database::open_database", path = ?path.as_ref(), options = ?options);
@@ -548,7 +548,7 @@ pub fn open_database<DB: DatabaseExt>(
                 OpenFlags::SQLITE_OPEN_READ_WRITE
             };
 
-            let r = f(Connection::open_with_flags(path, flags)?.into());
+            let r = f(Connection::open_with_flags(path, flags)?.into())?;
             if create {
                 r.server.init()?;
             }
@@ -559,18 +559,18 @@ pub fn open_database<DB: DatabaseExt>(
             if let Ok(file) = std::fs::File::open(path.as_ref()) {
                 file.set_len(0)?;
             }
-            let r = f(create(path)?);
+            let r = f(create(path)?)?;
             r.server.init()?;
             Ok(r)
         }
         OpenOptions::ReadWrite => Ok(f(Connection::open_with_flags(
             path,
             OpenFlags::SQLITE_OPEN_READ_WRITE,
-        )?)),
+        )?)?),
         OpenOptions::ReadOnly => Ok(f(Connection::open_with_flags(
             path,
             OpenFlags::SQLITE_OPEN_READ_ONLY,
-        )?)),
+        )?)?),
     }
 }
 

@@ -56,7 +56,7 @@ fn test_sqlite_usage_init() -> eyre::Result<()> {
 
                 let msg = echo_response.get()?.get_reply()?.get_message()?;
 
-                panic!("SUCCESS: {:?}", msg);
+                //panic!("SUCCESS: {:?}", msg);
                 assert_eq!(msg, "usage 1 Reload");
             }
 

@@ -1,6 +1,6 @@
 {
   inputs = {
-    nixpkgs.url = "github:nixos/nixpkgs/nixos-24.05";
+    nixpkgs.url = "github:NixOS/nixpkgs";
     rust-overlay.url = "github:oxalica/rust-overlay";
     flake-utils.url = "github:numtide/flake-utils";
 
@@ -36,55 +36,23 @@
           "rust-analyzer-preview"
         ];
       });
-
-      rust-nightly-toolchain = (pkgs.rust-bin.nightly.latest.default.override {
-        extensions = [
-          "rust-src"
-          "rustfmt"
-          "llvm-tools-preview"
-          "rust-analyzer-preview"
-          "miri"
-        ];
-      });
-
     in
     rec {
-      devShells.default = (pkgs.mkShell.override { stdenv = pkgs.stdenvAdapters.useMoldLinker pkgs.llvmPackages_15.stdenv; }) {
-        buildInputs = with pkgs; [
-          openssl
-          pkg-config
-        ];
+      devShells.default =
+        (pkgs.mkShell.override { stdenv = pkgs.llvmPackages.stdenv; }) {
+          buildInputs = with pkgs; [ openssl pkg-config ];
 
-        nativeBuildInputs = with pkgs; [
-          # get current rust toolchain defaults (this includes clippy and rustfmt)
-          rust-custom-toolchain
+          nativeBuildInputs = with pkgs; [
+            # get current rust toolchain defaults (this includes clippy and rustfmt)
+            rust-custom-toolchain
 
-          cargo-edit
-        ];
+            cargo-edit
+          ];
 
-        # fetch with cli instead of native
-        CARGO_NET_GIT_FETCH_WITH_CLI = "true";
-        RUST_BACKTRACE = 1;
-        RUSTFLAGS = "-C linker=clang -C link-arg=-fuse-ld=${pkgs.mold}/bin/mold";
-      };
-
-      devShells.nightly = (pkgs.mkShell.override { stdenv = pkgs.llvmPackages_15.stdenv; }) {
-        buildInputs = with pkgs; [
-          openssl
-          pkg-config
-        ];
-
-        nativeBuildInputs = with pkgs; [
-          # get current rust toolchain defaults (this includes clippy and rustfmt)
-          rust-nightly-toolchain
-
-          cargo-edit
-        ];
-
-        # fetch with cli instead of native
-        CARGO_NET_GIT_FETCH_WITH_CLI = "true";
-        RUST_BACKTRACE = 1;
-      };
+          # fetch with cli instead of native
+          CARGO_NET_GIT_FETCH_WITH_CLI = "true";
+          RUST_BACKTRACE = 1;
+        };
 
       default = { };
 

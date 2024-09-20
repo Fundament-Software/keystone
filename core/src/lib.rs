@@ -69,6 +69,7 @@ pub trait Module<Config: capnp::traits::Owned>: Sized {
     }
 }
 
+#[allow(clippy::type_complexity)]
 pub struct ModuleImpl<
     Config: 'static + capnp::traits::Owned,
     Impl: 'static + Module<Config>,
@@ -89,9 +90,10 @@ impl<
 {
     async fn start(&self, config: Reader) -> capnp::Result<()> {
         tracing::debug!("Constructing module implementation");
-        if let Some(bootstrap) = self.bootstrap.borrow_mut().as_ref() {
+        let bootstrap_ref = self.bootstrap.borrow_mut().as_ref().map(|x| x.clone());
+        if let Some(bootstrap) = bootstrap_ref {
             let inner = Rc::new(API::Reader::from_server(
-                Impl::new(config, bootstrap.clone()).await?,
+                Impl::new(config, bootstrap).await?,
             ));
             self.inner.borrow_mut().replace(inner.clone());
             let api: API::Reader<'_> = capnp::capability::FromClientHook::new(Box::new(
@@ -106,14 +108,12 @@ impl<
         tracing::debug!("Module recieved stop request");
         let r = self.disconnector.borrow_mut().take();
         if let Some(d) = r {
-            let result = if let Some(inner) = self.inner.borrow().as_ref() {
-                inner.stop().await
-            } else {
-                Ok(())
-            };
+            let inner_ref = self.inner.borrow().as_ref().map(|x| x.clone());
+            if let Some(inner) = inner_ref {
+                inner.stop().await?;
+            }
 
-            d.await?;
-            result
+            d.await
         } else {
             Err(capnp::Error::from_kind(capnp::ErrorKind::Disconnected))
         }
@@ -264,6 +264,7 @@ pub fn test_harness<F: Future<Output = capnp::Result<()>> + 'static>(
     Ok(())
 }
 
+#[allow(clippy::unit_arg)]
 pub fn test_module_harness<
     C: capnp::capability::FromClientHook,
     F: Future<Output = capnp::Result<()>> + 'static,

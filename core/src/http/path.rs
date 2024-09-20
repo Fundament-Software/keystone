@@ -100,7 +100,7 @@ impl PathImpl {
 
         let request_body: String = match body {
             Some(_) if has_empty_body => String::new(),
-            Some(body) => body.into(),
+            Some(body) => body,
             None => String::new(),
         };
 

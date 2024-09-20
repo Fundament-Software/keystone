@@ -66,16 +66,19 @@ where
         params: save::SaveParams<capnp::any_pointer::Owned>,
         mut results: save::SaveResults<capnp::any_pointer::Owned>,
     ) -> Result<(), ::capnp::Error> {
-        let cap: sturdy_ref::Client<capnp::any_pointer::Owned> =
-            self.db.sturdyref_set.borrow_mut().new_generic_client(
-                crate::sturdyref::SturdyRefImpl::init(
-                    self.module_id as u64,
-                    params.get()?.get_data()?,
-                    self.db.clone(),
-                )
-                .await
-                .map_err(|e| capnp::Error::failed(e.to_string()))?,
-            );
+        let sturdyref = crate::sturdyref::SturdyRefImpl::init(
+            self.module_id,
+            params.get()?.get_data()?,
+            self.db.clone(),
+        )
+        .await
+        .map_err(|e| capnp::Error::failed(e.to_string()))?;
+
+        let cap: sturdy_ref::Client<capnp::any_pointer::Owned> = self
+            .db
+            .sturdyref_set
+            .borrow_mut()
+            .new_generic_client(sturdyref);
         results.get().set_ref(cap);
         Ok(())
     }

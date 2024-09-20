@@ -1,4 +1,3 @@
-use assert_fs::assert;
 use keystone::http::https_client;
 use keystone::http::Path;
 

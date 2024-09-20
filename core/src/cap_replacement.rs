@@ -120,7 +120,7 @@ impl<'a> capnp::traits::FromPointerBuilder<'a> for GetPointerBuilder<'a> {
         builder: PointerBuilder<'a>,
         _: Option<&'a [capnp::Word]>,
     ) -> capnp::Result<Self> {
-        Ok(Self { builder: builder })
+        Ok(Self { builder })
     }
 }
 /*

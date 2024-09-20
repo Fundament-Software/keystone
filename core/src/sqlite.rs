@@ -4,9 +4,9 @@ use crate::keystone::CapabilityServerSetExt;
 use crate::sqlite_capnp::root::ServerDispatch;
 use crate::sqlite_capnp::{
     add_d_b, d_b_any, database, delete, expr, function_invocation, index, indexed_column, insert,
-    insert::source, join_clause, prepared_statement, r_a_table_ref, r_o_database, r_o_table_ref,
-    result_stream, select, sql_function, table, table_field, table_function_ref, table_or_subquery,
-    table_ref, update, where_expr,
+    join_clause, prepared_statement, r_a_table_ref, r_o_database, r_o_table_ref, result_stream,
+    select, sql_function, table, table_field, table_function_ref, table_or_subquery, table_ref,
+    update, where_expr,
 };
 use crate::storage_capnp::{saveable, sturdy_ref};
 use crate::sturdyref::SturdyRefImpl;
@@ -95,7 +95,7 @@ impl result_stream::Server for PlaceholderResults {
 
 pub struct SqliteDatabase {
     pub connection: Connection,
-    pub alloc: std::sync::Mutex<BufferAllocator>,
+    pub alloc: tokio::sync::Mutex<BufferAllocator>,
     column_set: RefCell<HashSet<String>>,
     prepared_insert_set:
         RefCell<CapabilityServerSet<StatementAndParams, prepared_statement::Client<insert::Owned>>>,
@@ -1421,15 +1421,19 @@ impl TableRefImpl {
         let mut builder = msg.init_root::<crate::sqlite_capnp::storage::Builder>();
         builder.set_id(self.access.into());
         builder.set_data(self.table_name);
-        let cap: sturdy_ref::Client<T> = self.db.sturdyref_set.borrow_mut().new_generic_client(
-            crate::sturdyref::SturdyRefImpl::init(
-                id as u64,
-                builder.into_reader(),
-                self.db.clone(),
-            )
-            .await
-            .map_err(|e| capnp::Error::failed(e.to_string()))?,
-        );
+        let sturdyref = crate::sturdyref::SturdyRefImpl::init(
+            id as u64,
+            builder.into_reader(),
+            self.db.clone(),
+        )
+        .await
+        .map_err(|e| capnp::Error::failed(e.to_string()))?;
+
+        let cap: sturdy_ref::Client<T> = self
+            .db
+            .sturdyref_set
+            .borrow_mut()
+            .new_generic_client(sturdyref);
         Ok(cap)
     }
 
@@ -1448,7 +1452,7 @@ impl TableRefImpl {
                 .borrow_mut()
                 .new_generic_client(TableRefImpl {
                     access,
-                    table_name: self.table_name.clone(),
+                    table_name: self.table_name,
                     db: self.db.clone(),
                 }))
         }
@@ -1546,16 +1550,19 @@ impl saveable::Server<index::Owned> for IndexImpl {
         builder.set_id(AccessLevel::Index.into());
         builder.set_data(self.name);
 
-        let cap: sturdy_ref::Client<index::Owned> =
-            self.db.sturdyref_set.borrow_mut().new_generic_client(
-                crate::sturdyref::SturdyRefImpl::init(
-                    id as u64,
-                    builder.into_reader(),
-                    self.db.clone(),
-                )
-                .await
-                .map_err(|e| capnp::Error::failed(e.to_string()))?,
-            );
+        let sturdyref = crate::sturdyref::SturdyRefImpl::init(
+            id as u64,
+            builder.into_reader(),
+            self.db.clone(),
+        )
+        .await
+        .map_err(|e| capnp::Error::failed(e.to_string()))?;
+
+        let cap: sturdy_ref::Client<index::Owned> = self
+            .db
+            .sturdyref_set
+            .borrow_mut()
+            .new_generic_client(sturdyref);
         results.get().set_ref(cap);
         Ok(())
     }
@@ -1653,6 +1660,7 @@ impl add_d_b::Server for SqliteDatabase {
         results.get().set_res(client);
         Ok(())
     }
+    #[allow(unused_variables)]
     async fn create_restricted_table(&self, base: Table, restriction: List<TableRestriction>) {
         results.get();
         todo!()
@@ -1819,6 +1827,7 @@ fn build_results_stream_buffer(mut rows: rusqlite::Rows<'_>) -> capnp::Result<Ve
 }
 #[cfg(test)]
 mod tests {
+    use crate::sqlite_capnp::insert::source;
     use crate::sqlite_capnp::select_core;
     use capnp::private::capability::ClientHook;
     use tempfile::NamedTempFile;
@@ -2038,6 +2047,7 @@ fn convert_rusqlite_error(err: rusqlite::Error) -> capnp::Error {
     #[cfg(test)]
     return capnp::Error::failed(err.to_string());
 
+    #[cfg(not(test))]
     match err {
         rusqlite::Error::SqliteFailure(_, _) => {
             capnp::Error::failed("Error from underlying sqlite call".to_string())

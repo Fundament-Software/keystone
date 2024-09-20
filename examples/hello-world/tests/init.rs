@@ -1,10 +1,12 @@
 use hello_world::hello_world_capnp::root;
-use std::path::PathBuf;
-use std::str::FromStr;
 
 #[test]
 fn test_hello_world_init() -> eyre::Result<()> {
-    /*let binpath = test_binary::TestBinary::relative_to_parent(
+    /*
+    use std::path::PathBuf;
+    use std::str::FromStr;
+
+    let binpath = test_binary::TestBinary::relative_to_parent(
         "hello-world-module",
         &PathBuf::from_str("Cargo.toml")?,
     )

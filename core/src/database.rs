@@ -143,9 +143,9 @@ fn get_segment_slice<'a>(
     let slice = match message.get_segments_for_output() {
         capnp::OutputSegments::SingleSegment(s) => s[0],
         capnp::OutputSegments::MultiSegment(v) => {
-            return Err(
-                capnp::Error::from_kind(capnp::ErrorKind::InvalidNumberOfSegments(v.len())).into(),
-            );
+            return Err(capnp::Error::from_kind(
+                capnp::ErrorKind::InvalidNumberOfSegments(v.len()),
+            ));
         }
     };
 
@@ -295,11 +295,11 @@ impl DatabaseExt for SqliteDatabase {
         }
 
         if let Ok(mut alloc) = self.alloc.try_lock() {
-            let message = get_single_segment(&self, &mut *alloc, data).await?;
+            let message = get_single_segment(self, &mut *alloc, data).await?;
             inner(&self.connection, string_index, get_segment_slice(&message)?)
         } else {
             let mut alloc = capnp::message::HeapAllocator::new();
-            let message = get_single_segment(&self, &mut alloc, data).await?;
+            let message = get_single_segment(self, &mut alloc, data).await?;
             inner(&self.connection, string_index, get_segment_slice(&message)?)
         }?;
 
@@ -413,7 +413,7 @@ impl DatabaseExt for SqliteDatabase {
 
         let expire = expires.unwrap_or(i64::MAX);
         let result = if let Ok(mut alloc) = self.alloc.try_lock() {
-            let message = get_single_segment(&self, &mut *alloc, data).await?;
+            let message = get_single_segment(self, &mut *alloc, data).await?;
             inner(
                 &self.connection,
                 module_id,
@@ -422,7 +422,7 @@ impl DatabaseExt for SqliteDatabase {
             )
         } else {
             let mut alloc = capnp::message::HeapAllocator::new();
-            let message = get_single_segment(&self, &mut alloc, data).await?;
+            let message = get_single_segment(self, &mut alloc, data).await?;
             inner(
                 &self.connection,
                 module_id,
@@ -481,11 +481,11 @@ impl DatabaseExt for SqliteDatabase {
         }
 
         let result = if let Ok(mut alloc) = self.alloc.try_lock() {
-            let message = get_single_segment(&self, &mut *alloc, data).await?;
+            let message = get_single_segment(self, &mut *alloc, data).await?;
             inner(&self.connection, get_segment_slice(&message)?)
         } else {
             let mut alloc = capnp::message::HeapAllocator::new();
-            let message = get_single_segment(&self, &mut alloc, data).await?;
+            let message = get_single_segment(self, &mut alloc, data).await?;
             inner(&self.connection, get_segment_slice(&message)?)
         }?;
 
@@ -548,7 +548,7 @@ pub fn open_database<DB: DatabaseExt>(
                 OpenFlags::SQLITE_OPEN_READ_WRITE
             };
 
-            let r = f(Connection::open_with_flags(path, flags)?.into())?;
+            let r = f(Connection::open_with_flags(path, flags)?)?;
             if create {
                 r.server.init()?;
             }

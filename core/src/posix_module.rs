@@ -21,8 +21,8 @@ use std::{cell::RefCell, rc::Rc};
 
 pub struct PosixModuleProcessImpl {
     posix_process: process::Client<ByteStream, PosixError>,
-    handle: tokio::task::JoinHandle<Result<(), capnp::Error>>,
-    pub(crate) disconnector: Disconnector<rpc_twoparty_capnp::Side>,
+    _handle: tokio::task::JoinHandle<Result<(), capnp::Error>>,
+    pub(crate) _disconnector: Disconnector<rpc_twoparty_capnp::Side>,
     pub(crate) bootstrap: module_start::Client<any_pointer, cap_pointer>,
     api: RemotePromise<module_start::start_results::Owned<any_pointer, cap_pointer>>,
 }
@@ -158,8 +158,8 @@ impl
 
                         let module_process = PosixModuleProcessImpl {
                             posix_process: process,
-                            handle: tokio::task::spawn_local(rpc_system),
-                            disconnector,
+                            _handle: tokio::task::spawn_local(rpc_system),
+                            _disconnector: disconnector,
                             bootstrap,
                             api,
                         };

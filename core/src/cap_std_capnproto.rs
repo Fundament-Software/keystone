@@ -29,12 +29,7 @@ pub struct AmbientAuthorityImpl {
 
 impl AmbientAuthorityImpl {
     pub fn new() -> Self {
-        Self {
-            authority: cap_std::ambient_authority(),
-            file_set: CapabilityServerSet::new(),
-            dir_set: CapabilityServerSet::new(),
-            instant_set: CapabilityServerSet::new(),
-        }
+        Default::default()
     }
 
     pub async fn get_file_handle(&self, client: &file::Client) -> Option<u64> {
@@ -71,7 +66,12 @@ impl AmbientAuthorityImpl {
 
 impl Default for AmbientAuthorityImpl {
     fn default() -> Self {
-        Self::new()
+        Self {
+            authority: cap_std::ambient_authority(),
+            file_set: CapabilityServerSet::new(),
+            dir_set: CapabilityServerSet::new(),
+            instant_set: CapabilityServerSet::new(),
+        }
     }
 }
 

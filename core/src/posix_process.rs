@@ -54,8 +54,7 @@ where
 
     let program = unsafe {
         let mut buf = [0_u16; 2048];
-        let num =
-            GetFinalPathNameByHandleW(source.as_raw_filelike() as isize, buf.as_mut_ptr(), 2048, 0);
+        let num = GetFinalPathNameByHandleW(source.as_raw_filelike(), buf.as_mut_ptr(), 2048, 0);
         OsString::from_wide(&buf[0..num as usize])
     };
 
@@ -155,23 +154,25 @@ type DisconnectorSync = std::sync::Arc<
     std::sync::Mutex<Option<capnp_rpc::rpc::Disconnector<capnp_rpc::rpc_twoparty_capnp::Side>>>,
 >;
 
+#[allow(clippy::type_complexity)]
 pub struct PosixProcessImpl {
     pub cancellation_token: CancellationToken,
     stdin: Rc<Mutex<Option<ChildStdin>>>,
-    stdout_task: JoinHandle<Result<Option<usize>>>,
-    stderr_task: JoinHandle<Result<Option<usize>>>,
+    _stdout_task: JoinHandle<Result<Option<usize>>>,
+    _stderr_task: JoinHandle<Result<Option<usize>>>,
     child_task: Mutex<Option<JoinHandle<Result<Option<ExitStatus>, std::io::Error>>>>,
     killsender: AtomicTake<tokio::sync::oneshot::Sender<()>>,
     exitcode: AtomicI32,
     pub disconnector: DisconnectorSync,
 }
 
+#[allow(clippy::type_complexity)]
 impl PosixProcessImpl {
     fn new(
         cancellation_token: CancellationToken,
         stdin: Option<ChildStdin>,
-        stdout_task: JoinHandle<Result<Option<usize>>>,
-        stderr_task: JoinHandle<Result<Option<usize>>>,
+        _stdout_task: JoinHandle<Result<Option<usize>>>,
+        _stderr_task: JoinHandle<Result<Option<usize>>>,
         child_task: JoinHandle<Result<Option<ExitStatus>, std::io::Error>>,
         killsender: tokio::sync::oneshot::Sender<()>,
         disconnector: DisconnectorSync,
@@ -179,8 +180,8 @@ impl PosixProcessImpl {
         Self {
             cancellation_token,
             stdin: Rc::new(Mutex::new(stdin)),
-            stdout_task,
-            stderr_task,
+            _stdout_task,
+            _stderr_task,
             child_task: Mutex::new(Some(child_task)),
             killsender: AtomicTake::new(killsender),
             exitcode: AtomicI32::new(0),
@@ -195,7 +196,7 @@ impl PosixProcessImpl {
         program: &cap_std::fs::File,
         args_iter: I,
         stdout_stream: ByteStreamClient,
-        stderr_stream: ByteStreamClient,
+        _stderr_stream: ByteStreamClient,
     ) -> Result<PosixProcessImpl>
     where
         I: IntoIterator<Item = capnp::Result<&'i str>>,

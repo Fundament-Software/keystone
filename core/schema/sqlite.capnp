@@ -1,5 +1,7 @@
 @0xf2c0f3a93e0203ec;
 
+using ST = import "storage.capnp";
+
 struct TableField {
 	name @0 :Text;
 	baseType @1 :Type;
@@ -24,7 +26,8 @@ struct DBAny {
     }
 }
 
-interface ROTableRef {}
+interface ROTableRef {
+}
 
 interface RATableRef extends(ROTableRef) {
   readonly @0 () -> (res :ROTableRef);
@@ -34,13 +37,16 @@ interface TableRef extends(RATableRef) {
 	appendonly @0 () -> (res :RATableRef);
 }
 
-interface Table extends(TableRef) {
+interface Table extends(TableRef, ST.Saveable(Table)) {
   adminless @0 () -> (res :TableRef);
 }
 
-interface RootDB extends(AddDB) {
-
+struct Storage {
+	id @0 :UInt8;
+	data @1 :UInt64;
 }
+
+interface Root extends(AddDB, ST.Restore(Storage)) {}
 
 struct TableRestriction {
 	name @0 :Text;
@@ -127,7 +133,7 @@ struct Expr {
 	union {
 		literal @0 :DBAny;
 		bindparam @1 :Void;
-		tablereference @2 :TableColumn;
+		column @2 :TableColumn;
 		functioninvocation @3 :FunctionInvocation;
 	}
 }

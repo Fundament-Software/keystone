@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::str::FromStr;
 use std::{fs::File, io::BufReader, path::Path};
 
 use crate::keystone::Error;
@@ -27,7 +28,7 @@ fn expr_recurse(val: &Value, exprs: &mut HashMap<*const Value, u32>) {
             //}
         }
         Value::Table(t) => {
-            for (k, v) in t {
+            for (_, v) in t {
                 expr_recurse(v, exprs);
             }
         }
@@ -35,24 +36,43 @@ fn expr_recurse(val: &Value, exprs: &mut HashMap<*const Value, u32>) {
     }
 }
 
-type SchemaVec = append_only_vec::AppendOnlyVec<(String, DynamicSchema)>;
+type SchemaVec = append_only_vec::AppendOnlyVec<(Vec<String>, DynamicSchema)>;
 
 struct SchemaPool(SchemaVec);
 
 impl SchemaPool {
-    fn new() -> Self {
-        Self(SchemaVec::new())
+    pub fn new() -> Self {
+        Default::default()
     }
 
     fn get<'a>(&'a self, name: &str) -> Option<&'a DynamicSchema> {
         self.0
             .iter()
-            .find(|(existing_name, _)| name == existing_name)
+            .find(|(v, _)| v.iter().any(|file| name.eq_ignore_ascii_case(file)))
             .map(|(_, sc)| sc)
     }
 
-    fn insert(&self, name: String, schema: DynamicSchema) {
-        self.0.push((name, schema));
+    fn insert(&self, name: Option<&str>, schema: DynamicSchema) {
+        if let Some(n) = name {
+            self.0.push((vec![n.to_string()], schema));
+        } else {
+            let list = schema
+                .get_files()
+                .filter(|f| schema.get_type_by_scope(&["Root"], Some(f)).is_ok())
+                .flat_map(|f| std::path::PathBuf::from_str(f));
+
+            self.0.push((
+                list.flat_map(|f| f.file_stem().map(|s| s.to_string_lossy().into_owned()))
+                    .collect(),
+                schema,
+            ));
+        }
+    }
+}
+
+impl Default for SchemaPool {
+    fn default() -> Self {
+        Self(SchemaVec::new())
     }
 }
 
@@ -249,7 +269,7 @@ where
             let dynobj: capnp::dynamic_struct::Builder = anyconfig.init_dynamic((*st).into())?;
             if let Value::Table(t) = c {
                 if let Some(n) = name {
-                    schemas.insert(n.to_string(), schema);
+                    schemas.insert(Some(n), schema);
                 }
                 value_to_struct(t, dynobj, schemas, callback)
             } else {
@@ -327,6 +347,25 @@ where
             Value::Datetime(d) => builder.set(field, d.to_string().as_str().into())?,
             Value::Array(l) => {
                 if let capnp::schema_capnp::field::Slot(x) = field.get_proto().which()? {
+                    if let schema_capnp::type_::Which::AnyPointer(_) = x.get_type()?.which()? {
+                        if l.first()
+                            .map(|v| v.as_str().unwrap_or_default())
+                            .map(|s| s.starts_with('@'))
+                            .unwrap_or(false)
+                        {
+                            // Register that we set this field so we don't autofill it
+                            bypass.insert(field.get_index());
+
+                            // TODO: refactor capnproto-rust so we don't have to do this
+                            unsafe {
+                                if let Some(capid) = callback(v as *const Value) {
+                                    builder.set_capability_to_int(field, capid)?;
+                                }
+                            }
+                            continue 'outer;
+                        }
+                    }
+
                     value_to_list(
                         l,
                         builder.initn(field, l.len() as u32)?.downcast(),
@@ -505,6 +544,7 @@ where
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 #[inline]
 fn build_cap_method<'a, F>(
     name: &str,
@@ -566,6 +606,7 @@ where
     Ok(Err(expr))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn eval_toml_capability<'a, F>(
     k: &str,
     v: &Table,
@@ -671,8 +712,25 @@ where
                     let variant = if let Ok(s) = schema.get_type_by_scope(&["Root"], None) {
                         s
                     } else {
-                        // Check inside schema/keystone.capnp for Root, just in case this is the built-in keystone capability
-                        schema.get_type_by_scope(&["Root"], Some("schema/keystone.capnp"))?
+                        // If no explicit name was provided, we should've generated possible names from the file_stems, so try to find it
+                        let path = schema
+                            .get_files()
+                            .filter(|f| schema.get_type_by_scope(&["Root"], Some(f)).is_ok())
+                            .find(|f| {
+                                std::path::PathBuf::from_str(f)
+                                    .map(|p| {
+                                        p.file_stem()
+                                            .map(|s| s.eq_ignore_ascii_case(module_name))
+                                            .unwrap_or(false)
+                                    })
+                                    .unwrap_or(false)
+                            });
+
+                        if let Some(p) = path {
+                            Ok(schema.get_type_by_scope(&["Root"], Some(p))?)
+                        } else {
+                            Err(Error::MissingSchema(module_name.into()))
+                        }?
                     };
 
                     let Value::String(name) = &l[1] else {
@@ -773,8 +831,9 @@ pub fn to_capnp(config: &Table, mut msg: keystone_config::Builder<'_>) -> Result
 }
 
 const SELF_SCHEMA: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/self.schema"));
-pub const HOST_NAME: &str = "keystone";
 
+/// Returns a pool containing all built-in schemas that keystone has been built with.
+/// Currently this is simply everything in `schema/`, but could be modified at runtime.
 fn builtin_schemas() -> capnp::Result<SchemaPool> {
     let schemas = SchemaPool::new();
     let bufread = BufReader::new(SELF_SCHEMA);
@@ -787,7 +846,7 @@ fn builtin_schemas() -> capnp::Result<SchemaPool> {
         },
     )?)?;
 
-    schemas.insert(HOST_NAME.into(), ks);
+    schemas.insert(None, ks);
     Ok(schemas)
 }
 
@@ -825,7 +884,7 @@ name = "Hello World"
 path = "{}"
 config = {{ greeting = "Bonjour" }}
 "#,
-        keystone_util::get_binary_path("hello-world-module")
+        crate::keystone::get_binary_path("hello-world-module")
             .as_os_str()
             .to_str()
             .unwrap()
@@ -857,12 +916,12 @@ name = "Indirect World"
 path = "{}"
 config = {{ helloWorld = [ "@Hello World" ] }}
 "#,
-        keystone_util::get_binary_path("hello-world-module")
+        crate::keystone::get_binary_path("hello-world-module")
             .as_os_str()
             .to_str()
             .unwrap()
             .replace('\\', "/"),
-        keystone_util::get_binary_path("indirect-world-module")
+        crate::keystone::get_binary_path("indirect-world-module")
             .as_os_str()
             .to_str()
             .unwrap()
@@ -889,7 +948,7 @@ name = "Stateful"
 path = "{}"
 config = {{ echoWord = "Echo" }}
 "#,
-        keystone_util::get_binary_path("stateful-module")
+        crate::keystone::get_binary_path("stateful-module")
             .as_os_str()
             .to_str()
             .unwrap()
@@ -916,7 +975,7 @@ name = "Config Test"
 path = "{}"
 config = {{ nested = {{ state = [ "@keystone", "initCell", {{id = "myCellName"}}, "result" ], moreState = [ "@keystone", "initCell", {{id = "myCellName"}}, "result" ] }} }}
 "#,
-        keystone_util::get_binary_path("complex-config-module")
+        crate::keystone::get_binary_path("complex-config-module")
             .as_os_str()
             .to_str()
             .unwrap()
@@ -926,6 +985,35 @@ config = {{ nested = {{ state = [ "@keystone", "initCell", {{id = "myCellName"}}
     to_capnp(&source.parse::<toml::Table>()?, msg.reborrow())?;
     let reader = msg.reborrow_as_reader();
     assert_eq!(reader.get_cap_table()?.len(), 2);
+    //println!("{:#?}", msg.reborrow_as_reader());
+
+    Ok(())
+}
+
+#[test]
+fn test_config_array() -> Result<()> {
+    let mut message = ::capnp::message::Builder::new_default();
+    let mut msg = message.init_root::<keystone_config::Builder>();
+    let source = format!(
+        r#"
+database = "test.sqlite"
+defaultLog = "debug"
+
+[[modules]]
+name = "Sqlite Usage"
+path = "{}"
+config = {{ sqlite = [ "@sqlite" ], outer = [ "@keystone", "initCell", {{id = "OuterTableRef", default = ["@sqlite", "createTable", {{ def = [{{ name="state", baseType="text", nullable=false }}, {{ name="blah", baseType="text", nullable=false }}] }}, "res"]}}, "result" ], inner = [ "@keystone", "initCell", {{id = "InnerTableRef"}}, "result" ] }}
+"#,
+        crate::keystone::get_binary_path("sqlite-usage-module")
+            .as_os_str()
+            .to_str()
+            .unwrap()
+            .replace('\\', "/")
+    );
+
+    to_capnp(&source.parse::<toml::Table>()?, msg.reborrow())?;
+    let reader = msg.reborrow_as_reader();
+    assert_eq!(reader.get_cap_table()?.len(), 3);
     //println!("{:#?}", msg.reborrow_as_reader());
 
     Ok(())

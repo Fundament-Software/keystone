@@ -1,0 +1,43 @@
+[package]
+name = "indirect-world"
+edition.workspace = true
+rust-version.workspace = true
+version = "0.1.0"
+authors = ["Erik McClure <erikm@fundament.software>"]
+homepage.workspace = true
+license.workspace = true
+links = "indirect_world"
+
+[features]
+tracing = []
+
+[lib]
+doctest = false
+path = "lib.rs"
+
+[[bin]]
+name = "indirect-world-module"
+path = "main.rs"
+
+[dependencies]
+capstone.workspace = true
+capstone-futures.workspace = true
+capstone-rpc.workspace = true
+capstone-macros.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing-subscriber.workspace = true
+tracing.workspace = true
+keystone.workspace = true
+hello-world.workspace = true
+
+[build-dependencies]
+capstone-gen.workspace = true
+tempfile.workspace = true
+eyre.workspace = true
+keystone-build.workspace = true
+
+[dev-dependencies]
+eyre.workspace = true
+tempfile.workspace = true
+async-byte-channel.workspace = true

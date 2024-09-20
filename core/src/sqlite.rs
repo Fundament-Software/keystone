@@ -122,7 +122,8 @@ impl SqliteDatabase {
         table_ref_set: Rc<RefCell<CapabilityServerSet<TableRefImpl, table::Client>>>,
         clients: Rc<RefCell<HashMap<u64, Box<dyn capnp::private::capability::ClientHook>>>>,
     ) -> capnp::Result<Rc<ServerDispatch<Self>>> {
-        let connection = Connection::open_with_flags(path, flags).map_err(convert_rusqlite_error)?;
+        let connection =
+            Connection::open_with_flags(path, flags).map_err(convert_rusqlite_error)?;
         let column_set = RefCell::new(create_column_set(&connection)?);
         let result = Rc::new_cyclic(|this| {
             crate::sqlite_capnp::root::Client::from_server(Self {
@@ -994,17 +995,29 @@ impl SqliteDatabase {
 
 fn create_column_set(conn: &Connection) -> capnp::Result<HashSet<String>> {
     let mut columns = HashSet::new();
-    let mut table_list_statement = conn.prepare("PRAGMA table_list").map_err(|_| capnp::Error::failed("Failed to query for table names".to_string()))?;
-    let mut table_list = table_list_statement.query(()).map_err(|_| capnp::Error::failed("Failed to query for table names".to_string()))?;
+    let mut table_list_statement = conn
+        .prepare("PRAGMA table_list")
+        .map_err(|_| capnp::Error::failed("Failed to query for table names".to_string()))?;
+    let mut table_list = table_list_statement
+        .query(())
+        .map_err(|_| capnp::Error::failed("Failed to query for table names".to_string()))?;
     while let Ok(Some(row)) = table_list.next() {
         let Ok(rusqlite::types::ValueRef::Text(table_name)) = row.get_ref(1) else {
-            return Err(capnp::Error::failed("Failed to read table name".to_string()));
+            return Err(capnp::Error::failed(
+                "Failed to read table name".to_string(),
+            ));
         };
-        let mut statement = conn.prepare(format!("PRAGMA table_info({})", std::str::from_utf8(table_name)?).as_str()).map_err(|_| capnp::Error::failed("Failed to query for column names".to_string()))?;
-        let mut res = statement.query(()).map_err(|_| capnp::Error::failed("Failed to query for column names".to_string()))?;
+        let mut statement = conn
+            .prepare(format!("PRAGMA table_info({})", std::str::from_utf8(table_name)?).as_str())
+            .map_err(|_| capnp::Error::failed("Failed to query for column names".to_string()))?;
+        let mut res = statement
+            .query(())
+            .map_err(|_| capnp::Error::failed("Failed to query for column names".to_string()))?;
         while let Ok(Some(row)) = res.next() {
             let Ok(rusqlite::types::ValueRef::Text(name)) = row.get_ref(1) else {
-                return Err(capnp::Error::failed("Failed to read column name".to_string()));
+                return Err(capnp::Error::failed(
+                    "Failed to read column name".to_string(),
+                ));
             };
             columns.insert(std::str::from_utf8(name)?.to_string());
         }

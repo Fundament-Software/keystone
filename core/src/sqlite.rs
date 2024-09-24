@@ -7,11 +7,10 @@ use crate::sqlite_capnp::database::prepare_insert_results;
 use crate::sqlite_capnp::join_clause::join_operation;
 use crate::sqlite_capnp::select::{limit_operation, merge_operation, ordering_term};
 use crate::sqlite_capnp::update::assignment;
-use crate::sqlite_capnp::where_expr::op_and_expr;
 use crate::sqlite_capnp::{add_d_b, database, r_o_database, statement_results};
 use crate::sqlite_capnp::{
     d_b_any, delete, function_invocation, insert::source, prepared_statement, r_a_table_ref,
-    r_o_table_ref, result_stream, select, sql_function, table, table_ref, update, where_expr,
+    r_o_table_ref, result_stream, select, sql_function, table, table_ref, update,
 };
 use crate::sqlite_capnp::{
     expr, index, indexed_column, insert, join_clause, select_core, table_field, table_function_ref,
@@ -575,7 +574,6 @@ impl add_d_b::Server for SqliteDatabase {
         statement_and_params.statement.push(')');
 
         if params.get()?.has_sql_where() {
-            statement_and_params.statement.push_str("WHERE ");
             match_where(
                 self,
                 params.get()?.get_sql_where()?,
@@ -760,7 +758,6 @@ async fn build_delete_statement<'a>(
     })?;
 
     if del.has_sql_where() {
-        statement_and_params.statement.push_str("WHERE ");
         match_where(db, del.get_sql_where()?, &mut statement_and_params).await?;
     }
 
@@ -873,7 +870,6 @@ async fn build_update_statement<'a>(
     }
 
     if upd.has_sql_where() {
-        statement_and_params.statement.push_str(" WHERE ");
         match_where(db, upd.get_sql_where()?, &mut statement_and_params).await?;
     }
 
@@ -992,6 +988,11 @@ async fn build_select_statement<'a>(
                 build_function_invocation(db, func?, &mut statement_and_params).await?;
                 statement_and_params.statement.push_str(", ");
             }
+            expr::Which::Op(_) => {
+                return Err(capnp::Error::failed(
+                    "Operators not supported in this part of the statement".to_string(),
+                ));
+            }
         }
         if let Some(name) = names_iter.next() {
             if statement_and_params.statement.as_bytes()[statement_and_params.statement.len() - 2]
@@ -1017,7 +1018,6 @@ async fn build_select_statement<'a>(
         statement_and_params = Box::pin(build_join_clause(db, from, statement_and_params)).await?;
     }
     if selectcore.has_sql_where() {
-        statement_and_params.statement.push_str(" WHERE ");
         match_where(db, selectcore.get_sql_where()?, &mut statement_and_params).await?;
         statement_and_params.statement.push(' ');
     }
@@ -1326,6 +1326,12 @@ async fn match_expr<'a>(
         expr::Which::Functioninvocation(func) => {
             build_function_invocation(db, func?, statement_and_params).await?;
         }
+        expr::Which::Op(operator) => match operator? {
+            expr::Operator::Is => statement_and_params.statement.push_str(" IS "),
+            expr::Operator::IsNot => statement_and_params.statement.push_str(" IS NOT "),
+            expr::Operator::And => statement_and_params.statement.push_str(" AND "),
+            expr::Operator::Or => statement_and_params.statement.push_str(" OR "),
+        },
     }
     Ok(())
 }
@@ -1394,57 +1400,15 @@ async fn match_dbany<'a>(
 }
 async fn match_where<'a>(
     db: &SqliteDatabase,
-    w_expr: where_expr::Reader<'a>,
+    w_expr: capnp::struct_list::Reader<'a, crate::sqlite_capnp::expr::Owned>,
     statement_and_params: &mut StatementAndParams,
 ) -> capnp::Result<()> {
-    let cols = w_expr.get_cols()?;
-    let operator_and_expr = w_expr.get_operator_and_expr()?;
-    //let cols_len = cols.len();
-    if cols.is_empty() && operator_and_expr.is_empty() {
+    if w_expr.is_empty() {
         return Ok(());
     }
-    if cols.is_empty() {
-        return Err(capnp::Error::failed(
-            "Where clause does not have any column names specified".to_string(),
-        ));
-    } else {
-        statement_and_params.statement.push('(');
-    }
-    for column in cols.iter() {
-        let column = column?.to_string()?;
-        if !db.column_set.borrow_mut().contains(&column) {
-            return Err(capnp::Error::failed(
-                "Invalid column specified in where clause".to_string(),
-            ));
-        }
-        statement_and_params
-            .statement
-            .push_str(format!("{}, ", column).as_str());
-    }
-    statement_and_params
-        .statement
-        .truncate(statement_and_params.statement.len() - 2);
-
-    statement_and_params.statement.push(')');
-
-    if operator_and_expr.is_empty() {
-        return Err(capnp::Error::failed(
-            "Where clause is missing operator and condition".to_string(),
-        ));
-    }
-    for w_expr in operator_and_expr.iter() {
-        match w_expr.get_operator()? {
-            where_expr::Operator::Is => statement_and_params.statement.push_str(" IS "),
-            where_expr::Operator::IsNot => statement_and_params.statement.push_str(" IS NOT "),
-            where_expr::Operator::And => statement_and_params.statement.push_str(" AND "),
-            where_expr::Operator::Or => statement_and_params.statement.push_str(" OR "),
-        }
-        if !w_expr.has_expr() {
-            return Err(capnp::Error::failed(
-                "Where clause is missing condition".to_string(),
-            ));
-        }
-        match_expr(db, w_expr.get_expr()?, statement_and_params).await?;
+    statement_and_params.statement.push_str("WHERE ");
+    for expr in w_expr {
+        match_expr(db, expr, statement_and_params).await?;
     }
     Ok(())
 }
@@ -1486,6 +1450,925 @@ async fn fill_in_bindparams<'a>(
         ));
     }
     Ok(())
+}
+
+//TODO maybe needs to be more specific, but potentially would reveal information that should stay private
+fn convert_rusqlite_error(err: rusqlite::Error) -> capnp::Error {
+    match err {
+        rusqlite::Error::SqliteFailure(_, _) => {
+            capnp::Error::failed("Error from underlying sqlite call".to_string())
+        }
+        rusqlite::Error::SqliteSingleThreadedMode => capnp::Error::failed(
+            "Attempting to open multiple connection when sqlite is in single threaded mode"
+                .to_string(),
+        ),
+        rusqlite::Error::FromSqlConversionFailure(_, _, _) => {
+            capnp::Error::failed("Error converting sql type to rust type".to_string())
+        }
+        rusqlite::Error::IntegralValueOutOfRange(_, _) => {
+            capnp::Error::failed("Integral value out of range".to_string())
+        }
+        rusqlite::Error::Utf8Error(e) => {
+            capnp::Error::from_kind(capnp::ErrorKind::TextContainsNonUtf8Data(e))
+        }
+        rusqlite::Error::NulError(_) => capnp::Error::failed(
+            "Error converting string to c-compatible strting, because it contains an embeded null"
+                .to_string(),
+        ),
+        rusqlite::Error::InvalidParameterName(_) => {
+            capnp::Error::failed("Invalid parameter name".to_string())
+        }
+        rusqlite::Error::InvalidPath(_) => capnp::Error::failed("Invalid path".to_string()),
+        rusqlite::Error::ExecuteReturnedResults => {
+            capnp::Error::failed("Execute call returned rows".to_string())
+        }
+        rusqlite::Error::QueryReturnedNoRows => capnp::Error::failed(
+            "Query that was expected to return rows returned no rows".to_string(),
+        ),
+        rusqlite::Error::InvalidColumnIndex(_) => {
+            capnp::Error::failed("Invalid column index".to_string())
+        }
+        rusqlite::Error::InvalidColumnName(_) => {
+            capnp::Error::failed("Invalid column name".to_string())
+        }
+        rusqlite::Error::InvalidColumnType(_, _, _) => {
+            capnp::Error::failed("Invalid column type".to_string())
+        }
+        rusqlite::Error::StatementChangedRows(_) => {
+            capnp::Error::failed("Query changed more/less rows than expected".to_string())
+        }
+        rusqlite::Error::ToSqlConversionFailure(_) => {
+            capnp::Error::failed("Failed to convert type to sql type".to_string())
+        }
+        rusqlite::Error::InvalidQuery => capnp::Error::failed("Invalid query".to_string()),
+        rusqlite::Error::MultipleStatement => {
+            capnp::Error::failed("Sql contains multiple statements".to_string())
+        }
+        rusqlite::Error::InvalidParameterCount(_, _) => {
+            capnp::Error::failed("Invalid parameter count".to_string())
+        }
+        _ => capnp::Error::failed("Sqlite error".to_string()),
+    }
+}
+impl add_d_b::Client {
+    pub fn send_request_from_sql(
+        &self,
+        sql: &str,
+        bindings: Vec<Bindings>,
+    ) -> eyre::Result<RemotePromise<statement_results::Owned>> {
+        match create_sqlite_params_struct_from_str(sql, bindings)? {
+            Statement::Insert(ins) => Ok(self
+                .clone()
+                .cast_to::<database::Client>()
+                .build_insert_request(Some(ins))
+                .send()),
+            Statement::Update(upd) => Ok(self
+                .clone()
+                .cast_to::<database::Client>()
+                .build_update_request(Some(upd))
+                .send()),
+            Statement::Delete(del) => Ok(self
+                .clone()
+                .cast_to::<database::Client>()
+                .build_delete_request(Some(del))
+                .send()),
+            Statement::Select(sel) => Ok(self
+                .clone()
+                .cast_to::<r_o_database::Client>()
+                .build_select_request(Some(sel))
+                .send()),
+        }
+    }
+    //TODO maybe some way to collapse all prepared statements to one?
+    pub fn send_prepare_insert_request(
+        &self,
+        sql: &str,
+        bindings: Vec<Bindings>,
+    ) -> eyre::Result<RemotePromise<prepare_insert_results::Owned>> {
+        let Statement::Insert(ins) = create_sqlite_params_struct_from_str(sql, bindings)? else {
+            return Err(eyre!("Statement is not insert"));
+        };
+        let mut request = self
+            .clone()
+            .cast_to::<database::Client>()
+            .prepare_insert_request();
+        let mut builder = request.get().init_ins();
+        let mut cols = builder.reborrow().init_cols(ins._cols.len() as u32);
+        for (i, c) in ins._cols.iter().enumerate() {
+            cols.set(i as u32, c.as_str().into());
+        }
+        builder.set_fallback(ins._fallback);
+        let source = builder.reborrow().get_source();
+        ins._source.build_capnp_struct(source);
+        let mut ret = builder
+            .reborrow()
+            .init_returning(ins._returning.len() as u32);
+        for (i, r) in ins._returning.into_iter().enumerate() {
+            r.build_capnp_struct(ret.reborrow().get(i as u32));
+        }
+        builder.set_target(ins._target);
+        return Ok(request.send());
+    }
+}
+impl database::Client {
+    pub fn send_request_from_sql(
+        &self,
+        sql: &str,
+        bindings: Vec<Bindings>,
+    ) -> eyre::Result<RemotePromise<statement_results::Owned>> {
+        match create_sqlite_params_struct_from_str(sql, bindings)? {
+            Statement::Insert(ins) => Ok(self.build_insert_request(Some(ins)).send()),
+            Statement::Update(upd) => Ok(self.build_update_request(Some(upd)).send()),
+            Statement::Delete(del) => Ok(self.build_delete_request(Some(del)).send()),
+            Statement::Select(sel) => Ok(self
+                .clone()
+                .cast_to::<r_o_database::Client>()
+                .build_select_request(Some(sel))
+                .send()),
+        }
+    }
+}
+impl r_o_database::Client {
+    pub fn send_request_from_sql(
+        &self,
+        sql: &str,
+        bindings: Vec<Bindings>,
+    ) -> eyre::Result<RemotePromise<statement_results::Owned>> {
+        match create_sqlite_params_struct_from_str(sql, bindings)? {
+            Statement::Select(sel) => Ok(self.clone().build_select_request(Some(sel)).send()),
+            _ => Err(eyre!("Cast r_o_database::Client to database::Client to use statements that require greater permissions"))
+        }
+    }
+}
+#[derive(Clone)]
+pub enum Bindings {
+    Bindparam,
+    DBAny(DBAnyBindings),
+    Column(Col),
+    Tableref(table_ref::Client),
+    RATableref(r_a_table_ref::Client),
+    ROTableref(r_o_table_ref::Client),
+}
+#[derive(Clone)]
+pub struct Col {
+    debruinin_level: u16,
+    name: String,
+}
+#[derive(Clone)]
+pub enum DBAnyBindings {
+    UNINITIALIZED,
+    _Null(()),
+    _Integer(i64),
+    _Real(f64),
+    _Text(String),
+    _Blob(Vec<u8>),
+    _Pointer(Box<dyn ::capnp::private::capability::ClientHook>),
+}
+impl From<DBAnyBindings> for d_b_any::DBAny {
+    fn from(value: DBAnyBindings) -> Self {
+        match value {
+            DBAnyBindings::UNINITIALIZED => Self::UNINITIALIZED,
+            DBAnyBindings::_Null(_) => Self::_Null(()),
+            DBAnyBindings::_Integer(i) => Self::_Integer(i),
+            DBAnyBindings::_Real(r) => Self::_Real(r),
+            DBAnyBindings::_Text(t) => Self::_Text(t),
+            DBAnyBindings::_Blob(b) => Self::_Blob(b),
+            DBAnyBindings::_Pointer(p) => Self::_Pointer(p),
+        }
+    }
+}
+//TODO rewrite as an iterator
+fn split_sql(sql: &str) -> Vec<&str> {
+    let mut result = Vec::new();
+    let mut last = 0;
+    for (index, matched) in sql.match_indices(&[' ', ',', '(', ')', '?']) {
+        if last != index {
+            result.push(&sql[last..index]);
+        }
+        if matched != " " {
+            result.push(matched);
+        }
+        last = index + matched.len();
+    }
+    if last < sql.len() {
+        result.push(&sql[last..]);
+    }
+    println!("{:?}", result);
+    result
+}
+fn create_sqlite_params_struct_from_str(
+    sql: &str,
+    bindings: Vec<Bindings>,
+) -> eyre::Result<Statement> {
+    let mut iter = split_sql(sql).into_iter();
+    match iter.next().ok_or(eyre!("Statement is incomplete"))? {
+        "INSERT" => Ok(Statement::Insert(parse_insert_statement(
+            &mut iter, &bindings,
+        )?)),
+        "UPDATE" => Ok(Statement::Update(parse_update_statement(
+            &mut iter, &bindings,
+        )?)),
+        "DELETE" => Ok(Statement::Delete(parse_delete_statement(
+            &mut iter, &bindings,
+        )?)),
+        "SELECT" => Ok(Statement::Select(parse_select_statement(
+            &mut iter, &bindings,
+        )?)),
+        _ => Err(eyre!(
+            "Only Insert, Update, Delete, Select statements allowed here"
+        )),
+    }
+}
+
+fn parse_insert_statement(
+    iter: &mut std::vec::IntoIter<&str>,
+    bindings: &Vec<Bindings>,
+) -> eyre::Result<insert::Insert> {
+    let mut conflict_strat = insert::ConflictStrategy::Fail;
+
+    let mut cols = Vec::new();
+    let mut source = source::Source::UNINITIALIZED;
+    let mut returning = Vec::new();
+
+    let mut token = iter.next().ok_or(eyre!("Statement is incomplete"))?;
+    if token == "OR" {
+        token = iter.next().ok_or(eyre!("Statement is incomplete"))?;
+        conflict_strat = match token {
+            "ABORT" => insert::ConflictStrategy::Abort,
+            "FAIL" => insert::ConflictStrategy::Fail,
+            "IGNORE" => insert::ConflictStrategy::Ignore,
+            "ROLLBACK" => insert::ConflictStrategy::Rollback,
+            _ => return Err(eyre::eyre!("Unsupported conflict strategy specified")),
+        };
+    }
+    if iter.next().ok_or(eyre!("Statement is incomplete"))? != "INTO" {
+        return Err(eyre!("INTO missing"));
+    }
+    if iter.next().ok_or(eyre!("Statement is incomplete"))? != "?" {
+        return Err(eyre!(
+            "Table names need to be passed by binding a tableref with {{}}"
+        ));
+    }
+    let Bindings::RATableref(tableref) = bindings[iter
+        .next()
+        .ok_or(eyre!("Statement is incomplete"))?
+        .parse::<usize>()?]
+    .clone() else {
+        return Err(eyre!(
+            "Binding not a tableref, or the wrong kind of tableref"
+        ));
+    };
+
+    token = iter.next().ok_or(eyre!("Statement is incomplete"))?;
+
+    if token == "(" {
+        while let Some(next) = iter.next() {
+            if next == ")" {
+                break;
+            } else if next != "," {
+                cols.push(next.to_string());
+            }
+        }
+        token = iter.next().ok_or(eyre!("Statement is incomplete"))?;
+    }
+
+    if token == "VALUES" {
+        if iter.next().ok_or(eyre!("Statement is incomplete"))? != "(" {
+            return Err(eyre!("Values clause needs to start with a ("));
+        }
+        let mut outer = Vec::new();
+        let mut inner = Vec::new();
+        while let Some(next) = iter.next() {
+            if next == ")" {
+                outer.push(inner);
+                if let Some(next) = iter.next() {
+                    token = next;
+                }
+                if token == "," {
+                    inner = Vec::new();
+                    iter.next();
+                } else {
+                    break;
+                }
+            } else if next != "," {
+                if next == "?" {
+                    let Bindings::DBAny(bind) = bindings[iter
+                        .next()
+                        .ok_or(eyre!("Statement is incomplete"))?
+                        .parse::<usize>()?]
+                    .clone() else {
+                        return Err(eyre!("Only dbany bindings allowed here"));
+                    };
+                    inner.push(bind.into());
+                } else {
+                    inner.push(d_b_any::DBAny::_Text(next.to_string()));
+                }
+            }
+        }
+        source = source::Source::_Values(outer);
+    } else if token == "SELECT" {
+        //TODO optimize
+        if let Some(ret) = iter.clone().rfind(|s| *s == "RETURNING") {
+            token = ret;
+        }
+        source = source::Source::_Select(Box::new(parse_select_statement(iter, bindings)?));
+    } else if token == "DEFAULT" {
+        iter.next().ok_or(eyre!("Statement is incomplete"))?;
+        source = source::Source::_Defaults(());
+        if let Some(next) = iter.next() {
+            token = next;
+        }
+    }
+
+    if token == "RETURNING" {
+        while let Some(token) = iter.next() {
+            if token != "," {
+                if token == "?" {
+                    let bind = bindings[iter
+                        .next()
+                        .ok_or(eyre!("Statement is incomplete"))?
+                        .parse::<usize>()?]
+                    .clone();
+                    match bind {
+                        Bindings::Bindparam => returning.push(expr::Expr::_Bindparam(())),
+                        Bindings::DBAny(a) => returning.push(expr::Expr::_Literal(a.into())),
+                        Bindings::Column(c) => {
+                            returning.push(expr::Expr::_Tablereference(
+                                expr::table_column::TableColumn {
+                                    _col_name: c.name.clone(),
+                                    _reference: c.debruinin_level,
+                                },
+                            ));
+                        }
+                        _ => return Err(eyre!("Unsupported type in returning clause")),
+                    }
+                } else {
+                    returning.push(expr::Expr::_Literal(d_b_any::DBAny::_Text(
+                        token.to_string(),
+                    )));
+                }
+            }
+        }
+    }
+
+    Ok(insert::Insert {
+        _fallback: conflict_strat,
+        _target: tableref,
+        _cols: cols,
+        _source: source,
+        _returning: returning,
+    })
+}
+fn parse_update_statement(
+    iter: &mut std::vec::IntoIter<&str>,
+    bindings: &Vec<Bindings>,
+) -> eyre::Result<update::Update> {
+    let mut conflict_strat = update::ConflictStrategy::Fail;
+    let mut assign: Vec<assignment::Assignment> = Vec::new();
+    let mut join = join_clause::JoinClause {
+        _tableorsubquery: None,
+        _joinoperations: Vec::new(),
+    };
+    let mut where_clause = Vec::new();
+    let mut returning = Vec::new();
+
+    let mut token = iter.next().ok_or(eyre!("Statement is incomplete"))?;
+    if token == "OR" {
+        token = iter.next().ok_or(eyre!("Statement is incomplete"))?;
+        conflict_strat = match token {
+            "ABORT" => update::ConflictStrategy::Abort,
+            "FAIL" => update::ConflictStrategy::Fail,
+            "IGNORE" => update::ConflictStrategy::Ignore,
+            "ROLLBACK" => update::ConflictStrategy::Rollback,
+            _ => return Err(eyre::eyre!("Unsupported conflict strategy specified")),
+        };
+    }
+
+    if iter.next().ok_or(eyre!("Statement is incomplete"))? != "?" {
+        return Err(eyre!(
+            "Table names have to be passed in as tablerefs".to_string()
+        ));
+    }
+    let Bindings::ROTableref(tableref) = bindings[iter
+        .next()
+        .ok_or(eyre!("Statement is incomplete"))?
+        .parse::<usize>()?]
+    .clone() else {
+        return Err(eyre!(
+            "Binding not a tableref, or the wrong kind of tableref"
+        ));
+    };
+    join._tableorsubquery = Some(table_or_subquery::TableOrSubquery::_Tableref(tableref));
+
+    if iter.next().ok_or(eyre!("Statement is incomplete"))? != "SET" {
+        return Err(eyre!(
+            "SET clause non optional in update statements".to_string()
+        ));
+    }
+    while let Some(next) = iter.next() {
+        if iter.next().ok_or(eyre!("Statement is incomplete"))? != "=" {
+            return Err(eyre!("Missing = sign in SET clause statement".to_string()));
+        }
+        let ex = iter.next().ok_or(eyre!("Statement is incomplete"))?;
+        assign.push(assignment::Assignment {
+            _name: next.to_string(),
+            _expr: Some(expr::Expr::_Literal(d_b_any::DBAny::_Text(ex.to_string()))),
+        });
+        if let Some(n) = iter.next() {
+            if n != "," {
+                token = n;
+                break;
+            }
+        }
+    }
+    if token == "FROM" {
+        //TODO proper join
+        if iter.next().ok_or(eyre!("Statement is incomplete"))? != "?" {
+            return Err(eyre!(
+                "Table names have to be passed in as tablerefs".to_string()
+            ));
+        }
+        let Bindings::ROTableref(ro) = bindings[iter
+            .next()
+            .ok_or(eyre!("Statement is incomplete"))?
+            .parse::<usize>()?]
+        .clone() else {
+            return Err(eyre!(
+                "Binding not a tableref, or the wrong kind of tableref"
+            ));
+        };
+        join._joinoperations.push(join_operation::JoinOperation {
+            _operator: None,
+            _tableorsubquery: Some(table_or_subquery::TableOrSubquery::_Tableref(ro)),
+            _joinconstraint: None,
+        });
+        if let Some(next) = iter.next() {
+            token = next;
+        }
+    }
+    if token == "WHERE" {
+        while let Some(next) = iter.next() {
+            if next == "?" {
+                match bindings[iter
+                    .next()
+                    .ok_or(eyre!("Statement is incomplete"))?
+                    .parse::<usize>()?]
+                .clone()
+                {
+                    Bindings::Bindparam => where_clause.push(expr::Expr::_Bindparam(())),
+                    Bindings::DBAny(dba) => where_clause.push(expr::Expr::_Literal(dba.into())),
+                    Bindings::Column(c) => {
+                        where_clause.push(expr::Expr::_Tablereference(
+                            expr::table_column::TableColumn {
+                                _col_name: c.name.clone(),
+                                _reference: c.debruinin_level,
+                            },
+                        ));
+                    }
+                    _ => return Err(eyre!("Unsupported binding type".to_string())),
+                }
+            } else {
+                where_clause.push(expr::Expr::_Literal(d_b_any::DBAny::_Text(
+                    next.to_string(),
+                )));
+            }
+            if let Some(op) = iter.next() {
+                match op {
+                    "RETURNING" => {
+                        token = next;
+                        break;
+                    }
+                    "=" => where_clause.push(expr::Expr::_Op(expr::Operator::Is)),
+                    "IS" => {
+                        if iter
+                            .clone()
+                            .next()
+                            .ok_or(eyre!("Statement is incomplete"))?
+                            == "NOT"
+                        {
+                            iter.next();
+                            where_clause.push(expr::Expr::_Op(expr::Operator::IsNot));
+                        } else {
+                            where_clause.push(expr::Expr::_Op(expr::Operator::Is));
+                        }
+                    }
+                    "!=" => where_clause.push(expr::Expr::_Op(expr::Operator::IsNot)),
+                    "AND" => where_clause.push(expr::Expr::_Op(expr::Operator::And)),
+                    "OR" => where_clause.push(expr::Expr::_Op(expr::Operator::Or)),
+                    _ => return Err(eyre!("Unsupported operator".to_string())),
+                }
+            }
+        }
+    }
+    if token == "RETURNING" {
+        while let Some(token) = iter.next() {
+            if token != "," {
+                if token == "?" {
+                    let bind = bindings[iter
+                        .next()
+                        .ok_or(eyre!("Statement is incomplete"))?
+                        .parse::<usize>()?]
+                    .clone();
+                    match bind {
+                        Bindings::Bindparam => returning.push(expr::Expr::_Bindparam(())),
+                        Bindings::DBAny(a) => returning.push(expr::Expr::_Literal(a.into())),
+                        Bindings::Column(c) => {
+                            returning.push(expr::Expr::_Tablereference(
+                                expr::table_column::TableColumn {
+                                    _col_name: c.name.clone(),
+                                    _reference: c.debruinin_level,
+                                },
+                            ));
+                        }
+                        _ => {
+                            return Err(eyre!(
+                                "Only dbany and bindparams can be used here".to_string()
+                            ))
+                        }
+                    }
+                } else {
+                    returning.push(expr::Expr::_Literal(d_b_any::DBAny::_Text(
+                        token.to_string(),
+                    )));
+                }
+            }
+        }
+    }
+
+    Ok(update::Update {
+        _fallback: conflict_strat,
+        _assignments: assign,
+        _from: Some(join),
+        _sql_where: where_clause,
+        _returning: returning,
+    })
+}
+fn parse_delete_statement(
+    iter: &mut std::vec::IntoIter<&str>,
+    bindings: &Vec<Bindings>,
+) -> eyre::Result<delete::Delete> {
+    let mut where_clause = Vec::new();
+    let mut returning = Vec::new();
+    let mut token = "";
+
+    if iter.next().ok_or(eyre!("Statement is incomplete"))? != "FROM" {
+        return Err(eyre!(
+            "From clause non optional in delete statements".to_string()
+        ));
+    }
+
+    if iter.next().ok_or(eyre!("Statement is incomplete"))? != "?" {
+        return Err(eyre!(
+            "Table names have to be passed in as tablerefs".to_string()
+        ));
+    }
+    let Bindings::Tableref(tableref) = bindings[iter
+        .next()
+        .ok_or(eyre!("Statement is incomplete"))?
+        .parse::<usize>()?]
+    .clone() else {
+        return Err(eyre!(
+            "Binding not a tableref, or the wrong kind of tableref"
+        ));
+    };
+
+    if let Some(next) = iter.next() {
+        token = next;
+    };
+    if token == "WHERE" {
+        while let Some(next) = iter.next() {
+            if next == "?" {
+                match bindings[iter
+                    .next()
+                    .ok_or(eyre!("Statement is incomplete"))?
+                    .parse::<usize>()?]
+                .clone()
+                {
+                    Bindings::Bindparam => where_clause.push(expr::Expr::_Bindparam(())),
+                    Bindings::DBAny(dba) => where_clause.push(expr::Expr::_Literal(dba.into())),
+                    Bindings::Column(c) => {
+                        where_clause.push(expr::Expr::_Tablereference(
+                            expr::table_column::TableColumn {
+                                _col_name: c.name.clone(),
+                                _reference: c.debruinin_level,
+                            },
+                        ));
+                    }
+                    _ => return Err(eyre!("Unsupported binding type".to_string())),
+                }
+            } else {
+                where_clause.push(expr::Expr::_Literal(d_b_any::DBAny::_Text(
+                    next.to_string(),
+                )));
+            }
+            if let Some(op) = iter.next() {
+                match op {
+                    "RETURNING" => {
+                        token = next;
+                        break;
+                    }
+                    "=" => where_clause.push(expr::Expr::_Op(expr::Operator::Is)),
+                    "IS" => {
+                        if iter
+                            .clone()
+                            .next()
+                            .ok_or(eyre!("Statement is incomplete"))?
+                            == "NOT"
+                        {
+                            iter.next();
+                            where_clause.push(expr::Expr::_Op(expr::Operator::IsNot));
+                        } else {
+                            where_clause.push(expr::Expr::_Op(expr::Operator::Is));
+                        }
+                    }
+                    "!=" => where_clause.push(expr::Expr::_Op(expr::Operator::IsNot)),
+                    "AND" => where_clause.push(expr::Expr::_Op(expr::Operator::And)),
+                    "OR" => where_clause.push(expr::Expr::_Op(expr::Operator::Or)),
+                    _ => return Err(eyre!("Unsupported operator".to_string())),
+                }
+            }
+        }
+    }
+    if token == "RETURNING" {
+        while let Some(token) = iter.next() {
+            if token != "," {
+                if token == "?" {
+                    let bind = bindings[iter
+                        .next()
+                        .ok_or(eyre!("Statement is incomplete"))?
+                        .parse::<usize>()?]
+                    .clone();
+                    match bind {
+                        Bindings::Bindparam => returning.push(expr::Expr::_Bindparam(())),
+                        Bindings::DBAny(a) => returning.push(expr::Expr::_Literal(a.into())),
+                        Bindings::Column(c) => {
+                            returning.push(expr::Expr::_Tablereference(
+                                expr::table_column::TableColumn {
+                                    _col_name: c.name.clone(),
+                                    _reference: c.debruinin_level,
+                                },
+                            ));
+                        }
+                        _ => {
+                            return Err(eyre!(
+                                "Only dbany and bindparams can be used here".to_string()
+                            ))
+                        }
+                    }
+                } else {
+                    returning.push(expr::Expr::_Literal(d_b_any::DBAny::_Text(
+                        token.to_string(),
+                    )));
+                }
+            }
+        }
+    }
+
+    Ok(delete::Delete {
+        _from: tableref,
+        _sql_where: where_clause,
+        _returning: returning,
+    })
+}
+fn parse_select_statement(
+    iter: &mut std::vec::IntoIter<&str>,
+    bindings: &Vec<Bindings>,
+) -> eyre::Result<select::Select> {
+    let mut selectcore = Box::new(select_core::SelectCore {
+        _from: None,
+        _results: Vec::new(),
+        _sql_where: Vec::new(),
+    });
+    let mut mergeoperations = Vec::new();
+    let mut conflict_strat = insert::ConflictStrategy::Fail;
+    let mut tableref: Option<r_a_table_ref::Client> = None;
+    let mut cols: Vec<String> = Vec::new();
+    let mut source = source::Source::UNINITIALIZED;
+    let mut names = Vec::new();
+    let mut orderby = Vec::new();
+    let mut limit = None;
+
+    let mut token = "";
+    while let Some(next) = iter.next() {
+        selectcore
+            ._results
+            .push(expr::Expr::_Literal(d_b_any::DBAny::_Text(
+                next.to_string(),
+            )));
+        if let Some(n) = iter.next() {
+            if n != "," {
+                token = n;
+                break;
+            }
+        }
+    }
+
+    if token == "FROM" {
+        //TODO join
+        if iter.next().ok_or(eyre!("Statement is incomplete"))? != "?" {
+            return Err(eyre!(
+                "Table names have to be passed in as tablerefs".to_string()
+            ));
+        }
+        let Bindings::ROTableref(ro) = bindings[iter
+            .next()
+            .ok_or(eyre!("Statement is incomplete"))?
+            .parse::<usize>()?]
+        .clone() else {
+            return Err(eyre!(
+                "Binding not a tableref, or the wrong kind of tableref"
+            ));
+        };
+        selectcore._from = Some(join_clause::JoinClause {
+            _tableorsubquery: Some(table_or_subquery::TableOrSubquery::_Tableref(ro)),
+            _joinoperations: Vec::new(),
+        });
+        if let Some(next) = iter.next() {
+            token = next;
+        }
+    }
+
+    if token == "WHERE" {
+        while let Some(next) = iter.next() {
+            if next == "?" {
+                match bindings[iter
+                    .next()
+                    .ok_or(eyre!("Statement is incomplete"))?
+                    .parse::<usize>()?]
+                .clone()
+                {
+                    Bindings::Bindparam => selectcore._sql_where.push(expr::Expr::_Bindparam(())),
+                    Bindings::DBAny(dba) => {
+                        selectcore._sql_where.push(expr::Expr::_Literal(dba.into()));
+                    }
+                    Bindings::Column(c) => {
+                        selectcore._sql_where.push(expr::Expr::_Tablereference(
+                            expr::table_column::TableColumn {
+                                _col_name: c.name.clone(),
+                                _reference: c.debruinin_level,
+                            },
+                        ));
+                    }
+                    _ => return Err(eyre!("Unsupported binding type".to_string())),
+                }
+            } else {
+                selectcore
+                    ._sql_where
+                    .push(expr::Expr::_Literal(d_b_any::DBAny::_Text(
+                        next.to_string(),
+                    )));
+            }
+            if let Some(op) = iter.next() {
+                match op {
+                    "=" => selectcore
+                        ._sql_where
+                        .push(expr::Expr::_Op(expr::Operator::Is)),
+                    "IS" => {
+                        if iter
+                            .clone()
+                            .next()
+                            .ok_or(eyre!("Statement is incomplete"))?
+                            == "NOT"
+                        {
+                            iter.next();
+                            selectcore
+                                ._sql_where
+                                .push(expr::Expr::_Op(expr::Operator::IsNot));
+                        } else {
+                            selectcore
+                                ._sql_where
+                                .push(expr::Expr::_Op(expr::Operator::Is));
+                        }
+                    }
+                    "!=" => selectcore
+                        ._sql_where
+                        .push(expr::Expr::_Op(expr::Operator::IsNot)),
+                    "AND" => selectcore
+                        ._sql_where
+                        .push(expr::Expr::_Op(expr::Operator::And)),
+                    "OR" => selectcore
+                        ._sql_where
+                        .push(expr::Expr::_Op(expr::Operator::Or)),
+                    _ => {
+                        token = next;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    if token == "UNION" {
+        let next = iter
+            .clone()
+            .next()
+            .ok_or(eyre!("Statement is incomplete"))?;
+
+        if next == "ALL" {
+            iter.next().ok_or(eyre!("Statement is incomplete"))?; //SELECT
+            let select = parse_select_statement(iter, bindings)?;
+            orderby = select._orderby;
+            limit = select._limit;
+            mergeoperations.push(merge_operation::MergeOperation {
+                _operator: merge_operation::MergeOperator::Unionall,
+                _selectcore: Some(*select._selectcore.unwrap()),
+            });
+        } else {
+            iter.next().ok_or(eyre!("Statement is incomplete"))?; //SELECT
+            let select = parse_select_statement(iter, bindings)?;
+            orderby = select._orderby;
+            limit = select._limit;
+            mergeoperations.push(merge_operation::MergeOperation {
+                _operator: merge_operation::MergeOperator::Union,
+                _selectcore: Some(*select._selectcore.unwrap()),
+            });
+        }
+        if let Some(next) = iter.next() {
+            token = next;
+        }
+    } else if token == "INTERSECT" {
+        iter.next().ok_or(eyre!("Statement is incomplete"))?; //SELECT
+        let select = parse_select_statement(iter, bindings)?;
+        orderby = select._orderby;
+        limit = select._limit;
+        mergeoperations.push(merge_operation::MergeOperation {
+            _operator: merge_operation::MergeOperator::Intersect,
+            _selectcore: Some(*select._selectcore.unwrap()),
+        });
+        if let Some(next) = iter.next() {
+            token = next;
+        }
+    } else if token == "EXCEPT" {
+        iter.next().ok_or(eyre!("Statement is incomplete"))?; //SELECT
+        let select = parse_select_statement(iter, bindings)?;
+        orderby = select._orderby;
+        limit = select._limit;
+        mergeoperations.push(merge_operation::MergeOperation {
+            _operator: merge_operation::MergeOperator::Except,
+            _selectcore: Some(*select._selectcore.unwrap()),
+        });
+        if let Some(next) = iter.next() {
+            token = next;
+        }
+    }
+
+    if token == "ORDER" {
+        if iter.next().ok_or(eyre!("Statement is incomplete"))? != "BY" {
+            return Err(eyre!("ORDER not followed by BY".to_string()));
+        }
+        while let Some(next) = iter.next() {
+            let direction = match iter.next().ok_or(eyre!("Statement is incomplete"))? {
+                "ASC" => ordering_term::AscDesc::Asc,
+                "DESC" => ordering_term::AscDesc::Desc,
+                _ => return Err(eyre!("Direction in order clause non optional".to_string())),
+            };
+            //TODO {}
+            orderby.push(ordering_term::OrderingTerm {
+                _expr: Some(expr::Expr::_Literal(d_b_any::DBAny::_Text(
+                    next.to_string(),
+                ))),
+                _direction: direction,
+            });
+
+            if let Some(n) = iter.next() {
+                if n != "," {
+                    token = n;
+                    break;
+                }
+            }
+        }
+    }
+
+    if token == "LIMIT" {
+        let expr = iter.next().ok_or(eyre!("Statement is incomplete"))?;
+        //TODO {}
+        let mut l = limit_operation::LimitOperation {
+            _limit: Some(expr::Expr::_Literal(d_b_any::DBAny::_Text(
+                expr.to_string(),
+            ))),
+            _offset: None,
+        };
+        if let Some(offset) = iter.next() {
+            l._offset = Some(expr::Expr::_Literal(d_b_any::DBAny::_Text(
+                offset.to_string(),
+            )));
+        }
+        limit = Some(l);
+    }
+
+    Ok(select::Select {
+        _selectcore: Some(selectcore),
+        _mergeoperations: mergeoperations,
+        _orderby: orderby,
+        _limit: limit,
+        _names: names,
+    })
+}
+enum Statement {
+    Insert(insert::Insert),
+    Update(update::Update),
+    Delete(delete::Delete),
+    Select(select::Select),
 }
 
 #[cfg(test)]
@@ -1593,13 +2476,14 @@ mod tests {
                     )),
                     _joinoperations: Vec::new(),
                 }),
-                _sql_where: Some(where_expr::WhereExpr {
-                    _cols: vec!["name".to_string()],
-                    _operator_and_expr: vec![where_expr::op_and_expr::OpAndExpr {
-                        _operator: where_expr::Operator::Is,
-                        _expr: Some(expr::Expr::_Literal(DBAny::_Text("ToUpdate".to_string()))),
-                    }],
-                }),
+                _sql_where: vec![
+                    expr::Expr::_Tablereference(expr::table_column::TableColumn {
+                        _col_name: "name".to_string(),
+                        _reference: 0,
+                    }),
+                    expr::Expr::_Op(expr::Operator::Is),
+                    expr::Expr::_Literal(DBAny::_Text("ToUpdate".to_string())),
+                ],
                 _returning: Vec::new(),
             }));
         update_request.send().promise.await?;
@@ -1651,7 +2535,7 @@ mod tests {
                         expr::Expr::_Literal(DBAny::_Text("name".to_string())),
                         expr::Expr::_Literal(DBAny::_Text("data".to_string())),
                     ],
-                    _sql_where: None,
+                    _sql_where: Vec::new(),
                 })),
                 _mergeoperations: Vec::new(),
                 _orderby: Vec::new(),
@@ -1744,7 +2628,7 @@ mod tests {
 
         let res = client
             .send_request_from_sql(
-                "INSERT OR ABORT INTO {0} (name, data) VALUES (Steven, NULL)",
+                "INSERT OR ABORT INTO ?0 (name, data) VALUES (Steven, NULL)",
                 vec![Bindings::RATableref(ra_table_ref_cap.clone())],
             )?
             .promise
@@ -1752,7 +2636,7 @@ mod tests {
 
         client
             .send_request_from_sql(
-                "INSERT OR ABORT INTO {0} (name, data) VALUES (ToUpdate, {1})",
+                "INSERT OR ABORT INTO ?0 (name, data) VALUES (ToUpdate, ?1)",
                 vec![
                     Bindings::RATableref(ra_table_ref_cap.clone()),
                     Bindings::DBAny(DBAnyBindings::_Blob(vec![4, 5, 6])),
@@ -1762,15 +2646,21 @@ mod tests {
             .await?;
         client
             .send_request_from_sql(
-                "UPDATE OR FAIL {0} SET name = Updated, data = NULL WHERE name IS ToUpdate",
-                vec![Bindings::ROTableref(ro_tableref_cap.clone())],
+                "UPDATE OR FAIL ?0 SET name = Updated, data = NULL WHERE ?1 IS ToUpdate",
+                vec![
+                    Bindings::ROTableref(ro_tableref_cap.clone()),
+                    Bindings::Column(Col {
+                        debruinin_level: 0,
+                        name: "name".to_string(),
+                    }),
+                ],
             )?
             .promise
             .await?;
 
         let prepared = client
             .send_prepare_insert_request(
-                "INSERT OR ABORT INTO {0} (name, data) VALUES (Mike, {1}) RETURNING {2}",
+                "INSERT OR ABORT INTO ?0 (name, data) VALUES (Mike, ?1) RETURNING ?2",
                 vec![
                     Bindings::RATableref(ra_table_ref_cap.clone()),
                     Bindings::DBAny(DBAnyBindings::_Blob(vec![1, 2, 3])),
@@ -1795,7 +2685,7 @@ mod tests {
 
         let res_stream = client
             .send_request_from_sql(
-                "SELECT id, name, data FROM {0}",
+                "SELECT id, name, data FROM ?0",
                 vec![Bindings::ROTableref(ro_tableref_cap)],
             )?
             .promise
@@ -1828,824 +2718,10 @@ mod tests {
             .get()?
             .get_res()?;
         let mut res = client
-            .send_request_from_sql("DELETE FROM {0}", vec![Bindings::Tableref(table_ref)])?
+            .send_request_from_sql("DELETE FROM ?0", vec![Bindings::Tableref(table_ref)])?
             .promise
             .await?;
 
         Ok(())
     }
-}
-
-//TODO maybe needs to be more specific, but potentially would reveal information that should stay private
-fn convert_rusqlite_error(err: rusqlite::Error) -> capnp::Error {
-    match err {
-        rusqlite::Error::SqliteFailure(_, _) => {
-            capnp::Error::failed("Error from underlying sqlite call".to_string())
-        }
-        rusqlite::Error::SqliteSingleThreadedMode => capnp::Error::failed(
-            "Attempting to open multiple connection when sqlite is in single threaded mode"
-                .to_string(),
-        ),
-        rusqlite::Error::FromSqlConversionFailure(_, _, _) => {
-            capnp::Error::failed("Error converting sql type to rust type".to_string())
-        }
-        rusqlite::Error::IntegralValueOutOfRange(_, _) => {
-            capnp::Error::failed("Integral value out of range".to_string())
-        }
-        rusqlite::Error::Utf8Error(e) => {
-            capnp::Error::from_kind(capnp::ErrorKind::TextContainsNonUtf8Data(e))
-        }
-        rusqlite::Error::NulError(_) => capnp::Error::failed(
-            "Error converting string to c-compatible strting, because it contains an embeded null"
-                .to_string(),
-        ),
-        rusqlite::Error::InvalidParameterName(_) => {
-            capnp::Error::failed("Invalid parameter name".to_string())
-        }
-        rusqlite::Error::InvalidPath(_) => capnp::Error::failed("Invalid path".to_string()),
-        rusqlite::Error::ExecuteReturnedResults => {
-            capnp::Error::failed("Execute call returned rows".to_string())
-        }
-        rusqlite::Error::QueryReturnedNoRows => capnp::Error::failed(
-            "Query that was expected to return rows returned no rows".to_string(),
-        ),
-        rusqlite::Error::InvalidColumnIndex(_) => {
-            capnp::Error::failed("Invalid column index".to_string())
-        }
-        rusqlite::Error::InvalidColumnName(_) => {
-            capnp::Error::failed("Invalid column name".to_string())
-        }
-        rusqlite::Error::InvalidColumnType(_, _, _) => {
-            capnp::Error::failed("Invalid column type".to_string())
-        }
-        rusqlite::Error::StatementChangedRows(_) => {
-            capnp::Error::failed("Query changed more/less rows than expected".to_string())
-        }
-        rusqlite::Error::ToSqlConversionFailure(_) => {
-            capnp::Error::failed("Failed to convert type to sql type".to_string())
-        }
-        rusqlite::Error::InvalidQuery => capnp::Error::failed("Invalid query".to_string()),
-        rusqlite::Error::MultipleStatement => {
-            capnp::Error::failed("Sql contains multiple statements".to_string())
-        }
-        rusqlite::Error::InvalidParameterCount(_, _) => {
-            capnp::Error::failed("Invalid parameter count".to_string())
-        }
-        _ => capnp::Error::failed("Sqlite error".to_string()),
-    }
-}
-impl add_d_b::Client {
-    pub fn send_request_from_sql(
-        &self,
-        sql: &str,
-        bindings: Vec<Bindings>,
-    ) -> eyre::Result<RemotePromise<statement_results::Owned>> {
-        match create_sqlite_params_struct_from_str(sql, bindings)? {
-            Statement::Insert(ins) => Ok(self
-                .clone()
-                .cast_to::<database::Client>()
-                .build_insert_request(Some(ins))
-                .send()),
-            Statement::Update(upd) => Ok(self
-                .clone()
-                .cast_to::<database::Client>()
-                .build_update_request(Some(upd))
-                .send()),
-            Statement::Delete(del) => Ok(self
-                .clone()
-                .cast_to::<database::Client>()
-                .build_delete_request(Some(del))
-                .send()),
-            Statement::Select(sel) => Ok(self
-                .clone()
-                .cast_to::<r_o_database::Client>()
-                .build_select_request(Some(sel))
-                .send()),
-        }
-    }
-    //TODO maybe some way to collapse all prepared statements to one?
-    pub fn send_prepare_insert_request(
-        &self,
-        sql: &str,
-        bindings: Vec<Bindings>,
-    ) -> eyre::Result<RemotePromise<prepare_insert_results::Owned>> {
-        let Statement::Insert(ins) = create_sqlite_params_struct_from_str(sql, bindings)? else {
-            todo!();
-        };
-        let mut request = self
-            .clone()
-            .cast_to::<database::Client>()
-            .prepare_insert_request();
-        let mut builder = request.get().init_ins();
-        let mut cols = builder.reborrow().init_cols(ins._cols.len() as u32);
-        for (i, c) in ins._cols.iter().enumerate() {
-            cols.set(i as u32, c.as_str().into());
-        }
-        builder.set_fallback(ins._fallback);
-        let source = builder.reborrow().get_source();
-        ins._source.build_capnp_struct(source);
-        let mut ret = builder
-            .reborrow()
-            .init_returning(ins._returning.len() as u32);
-        for (i, r) in ins._returning.into_iter().enumerate() {
-            r.build_capnp_struct(ret.reborrow().get(i as u32));
-        }
-        builder.set_target(ins._target);
-        return Ok(request.send());
-    }
-}
-impl database::Client {
-    pub fn send_request_from_sql(
-        &self,
-        sql: &str,
-        bindings: Vec<Bindings>,
-    ) -> eyre::Result<RemotePromise<statement_results::Owned>> {
-        match create_sqlite_params_struct_from_str(sql, bindings)? {
-            Statement::Insert(ins) => Ok(self.build_insert_request(Some(ins)).send()),
-            Statement::Update(upd) => Ok(self.build_update_request(Some(upd)).send()),
-            Statement::Delete(del) => Ok(self.build_delete_request(Some(del)).send()),
-            Statement::Select(sel) => Ok(self
-                .clone()
-                .cast_to::<r_o_database::Client>()
-                .build_select_request(Some(sel))
-                .send()),
-        }
-    }
-}
-impl r_o_database::Client {
-    pub fn send_request_from_sql(
-        &self,
-        sql: &str,
-        bindings: Vec<Bindings>,
-    ) -> eyre::Result<RemotePromise<statement_results::Owned>> {
-        match create_sqlite_params_struct_from_str(sql, bindings)? {
-            Statement::Select(sel) => Ok(self.clone().build_select_request(Some(sel)).send()),
-            _ => Err(eyre!("Cast r_o_database::Client to database::Client to use statements that require greater permissions"))
-        }
-    }
-}
-#[derive(Clone)]
-pub enum Bindings {
-    Bindparam,
-    DBAny(DBAnyBindings),
-    Tableref(table_ref::Client),
-    RATableref(r_a_table_ref::Client),
-    ROTableref(r_o_table_ref::Client),
-}
-#[derive(Clone)]
-pub enum DBAnyBindings {
-    UNINITIALIZED,
-    _Null(()),
-    _Integer(i64),
-    _Real(f64),
-    _Text(String),
-    _Blob(Vec<u8>),
-    _Pointer(Box<dyn ::capnp::private::capability::ClientHook>),
-}
-impl From<DBAnyBindings> for d_b_any::DBAny {
-    fn from(value: DBAnyBindings) -> Self {
-        match value {
-            DBAnyBindings::UNINITIALIZED => Self::UNINITIALIZED,
-            DBAnyBindings::_Null(_) => Self::_Null(()),
-            DBAnyBindings::_Integer(i) => Self::_Integer(i),
-            DBAnyBindings::_Real(r) => Self::_Real(r),
-            DBAnyBindings::_Text(t) => Self::_Text(t),
-            DBAnyBindings::_Blob(b) => Self::_Blob(b),
-            DBAnyBindings::_Pointer(p) => Self::_Pointer(p),
-        }
-    }
-}
-fn create_sqlite_params_struct_from_str(
-    sql: &str,
-    bindings: Vec<Bindings>,
-) -> eyre::Result<Statement> {
-    let mut iter = split_sql(sql).into_iter();
-    match iter.next().ok_or(eyre!("Statement is incomplete"))? {
-        "INSERT" => Ok(Statement::Insert(parse_insert_statement(
-            &mut iter, &bindings,
-        )?)),
-        "UPDATE" => Ok(Statement::Update(parse_update_statement(
-            &mut iter, &bindings,
-        )?)),
-        "DELETE" => Ok(Statement::Delete(parse_delete_statement(
-            &mut iter, &bindings,
-        )?)),
-        "SELECT" => Ok(Statement::Select(parse_select_statement(
-            &mut iter, &bindings,
-        )?)),
-        _ => {
-            todo!()
-        }
-    }
-}
-
-//TODO rewrite as an iterator
-fn split_sql(sql: &str) -> Vec<&str> {
-    let mut result = Vec::new();
-    let mut last = 0;
-    for (index, matched) in sql.match_indices(&[' ', ',', '(', ')', '{', '}']) {
-        if last != index {
-            result.push(&sql[last..index]);
-        }
-        if matched != " " {
-            result.push(matched);
-        }
-        last = index + matched.len();
-    }
-    if last < sql.len() {
-        result.push(&sql[last..]);
-    }
-    println!("{:?}", result);
-    result
-}
-fn parse_insert_statement(
-    iter: &mut std::vec::IntoIter<&str>,
-    bindings: &Vec<Bindings>,
-) -> eyre::Result<insert::Insert> {
-    let mut conflict_strat = insert::ConflictStrategy::Fail;
-
-    let mut cols = Vec::new();
-    let mut source = source::Source::UNINITIALIZED;
-    let mut returning = Vec::new();
-
-    let mut token = iter.next().ok_or(eyre!("Statement is incomplete"))?;
-    if token == "OR" {
-        token = iter.next().ok_or(eyre!("Statement is incomplete"))?;
-        conflict_strat = match token {
-            "ABORT" => insert::ConflictStrategy::Abort,
-            "FAIL" => insert::ConflictStrategy::Fail,
-            "IGNORE" => insert::ConflictStrategy::Ignore,
-            "ROLLBACK" => insert::ConflictStrategy::Rollback,
-            _ => return Err(eyre::eyre!("Unsupported conflict strategy specified")),
-        };
-    }
-    if iter.next().ok_or(eyre!("Statement is incomplete"))? != "INTO" {
-        todo!()
-    }
-    if iter.next().ok_or(eyre!("Statement is incomplete"))? != "{" {
-        todo!()
-    }
-    let Bindings::RATableref(tableref) = bindings[iter
-        .next()
-        .ok_or(eyre!("Statement is incomplete"))?
-        .parse::<usize>()?]
-    .clone() else {
-        todo!()
-    };
-    if iter.next().ok_or(eyre!("Statement is incomplete"))? != "}" {
-        todo!()
-    }
-
-    token = iter.next().ok_or(eyre!("Statement is incomplete"))?;
-
-    if token == "(" {
-        while let Some(next) = iter.next() {
-            if next == ")" {
-                break;
-            } else if next != "," {
-                cols.push(next.to_string());
-            }
-        }
-        token = iter.next().ok_or(eyre!("Statement is incomplete"))?;
-    }
-
-    if token == "VALUES" {
-        if iter.next().ok_or(eyre!("Statement is incomplete"))? != "(" {
-            todo!();
-        }
-        let mut outer = Vec::new();
-        let mut inner = Vec::new();
-        while let Some(next) = iter.next() {
-            if next == ")" {
-                outer.push(inner);
-                if let Some(next) = iter.next() {
-                    token = next;
-                }
-                if token == "," {
-                    inner = Vec::new();
-                    iter.next();
-                } else {
-                    break;
-                }
-            } else if next != "," {
-                if next == "{" {
-                    let Bindings::DBAny(bind) = bindings[iter
-                        .next()
-                        .ok_or(eyre!("Statement is incomplete"))?
-                        .parse::<usize>()?]
-                    .clone() else {
-                        todo!()
-                    };
-                    inner.push(bind.into());
-                    iter.next();
-                } else {
-                    inner.push(d_b_any::DBAny::_Text(next.to_string()));
-                }
-            }
-        }
-        source = source::Source::_Values(outer);
-    } else if token == "SELECT" {
-        //TODO optimize
-        if let Some(ret) = iter.clone().rfind(|s| *s == "RETURNING") {
-            token = ret;
-        }
-        source = source::Source::_Select(Box::new(parse_select_statement(iter, bindings)?));
-    } else if token == "DEFAULT" {
-        iter.next().ok_or(eyre!("Statement is incomplete"))?;
-        source = source::Source::_Defaults(());
-        if let Some(next) = iter.next() {
-            token = next;
-        }
-    }
-
-    if token == "RETURNING" {
-        while let Some(token) = iter.next() {
-            if token != "," {
-                if token == "{" {
-                    let bind = bindings[iter
-                        .next()
-                        .ok_or(eyre!("Statement is incomplete"))?
-                        .parse::<usize>()?]
-                    .clone();
-                    match bind {
-                        Bindings::Bindparam => returning.push(expr::Expr::_Bindparam(())),
-                        Bindings::DBAny(a) => returning.push(expr::Expr::_Literal(a.into())),
-                        _ => todo!(),
-                    }
-                    iter.next();
-                } else {
-                    returning.push(expr::Expr::_Literal(d_b_any::DBAny::_Text(
-                        token.to_string(),
-                    )));
-                }
-            }
-        }
-    }
-
-    Ok(insert::Insert {
-        _fallback: conflict_strat,
-        _target: tableref,
-        _cols: cols,
-        _source: source,
-        _returning: returning,
-    })
-}
-fn parse_update_statement(
-    iter: &mut std::vec::IntoIter<&str>,
-    bindings: &Vec<Bindings>,
-) -> eyre::Result<update::Update> {
-    let mut conflict_strat = update::ConflictStrategy::Fail;
-    let mut assign: Vec<assignment::Assignment> = Vec::new();
-    let mut join = join_clause::JoinClause {
-        _tableorsubquery: None,
-        _joinoperations: Vec::new(),
-    };
-    let mut where_clause = None;
-    let mut returning = Vec::new();
-
-    let mut token = iter.next().ok_or(eyre!("Statement is incomplete"))?;
-    if token == "OR" {
-        token = iter.next().ok_or(eyre!("Statement is incomplete"))?;
-        conflict_strat = match token {
-            "ABORT" => update::ConflictStrategy::Abort,
-            "FAIL" => update::ConflictStrategy::Fail,
-            "IGNORE" => update::ConflictStrategy::Ignore,
-            "ROLLBACK" => update::ConflictStrategy::Rollback,
-            _ => return Err(eyre::eyre!("Unsupported conflict strategy specified")),
-        };
-    }
-
-    if iter.next().ok_or(eyre!("Statement is incomplete"))? != "{" {
-        todo!()
-    }
-    let Bindings::ROTableref(tableref) = bindings[iter
-        .next()
-        .ok_or(eyre!("Statement is incomplete"))?
-        .parse::<usize>()?]
-    .clone() else {
-        todo!()
-    };
-    join._tableorsubquery = Some(table_or_subquery::TableOrSubquery::_Tableref(tableref));
-    if iter.next().ok_or(eyre!("Statement is incomplete"))? != "}" {
-        todo!()
-    }
-
-    if iter.next().ok_or(eyre!("Statement is incomplete"))? != "SET" {
-        todo!()
-    }
-    while let Some(next) = iter.next() {
-        if let Some(eq) = iter.next() {
-            if eq != "=" {
-                todo!()
-            }
-        }
-        let Some(ex) = iter.next() else {
-            todo!();
-        };
-        assign.push(assignment::Assignment {
-            _name: next.to_string(),
-            _expr: Some(expr::Expr::_Literal(d_b_any::DBAny::_Text(ex.to_string()))),
-        });
-        if let Some(n) = iter.next() {
-            if n != "," {
-                token = n;
-                break;
-            }
-        }
-    }
-    if token == "FROM" {
-        //TODO proper join
-        if iter.next().ok_or(eyre!("Statement is incomplete"))? != "{" {
-            todo!()
-        }
-        let Bindings::ROTableref(ro) = bindings[iter
-            .next()
-            .ok_or(eyre!("Statement is incomplete"))?
-            .parse::<usize>()?]
-        .clone() else {
-            todo!()
-        };
-        if iter.next().ok_or(eyre!("Statement is incomplete"))? != "}" {
-            todo!()
-        }
-        join._joinoperations.push(join_operation::JoinOperation {
-            _operator: None,
-            _tableorsubquery: Some(table_or_subquery::TableOrSubquery::_Tableref(ro)),
-            _joinconstraint: None,
-        });
-        if let Some(next) = iter.next() {
-            token = next;
-        }
-    } else if token == "WHERE" {
-        //TODO maybe change schema for where to support more stuff properly
-        let mut clause = where_expr::WhereExpr {
-            _cols: Vec::new(),
-            _operator_and_expr: Vec::new(),
-        };
-        token = iter.next().ok_or(eyre!("Statement is incomplete"))?;
-        let mut operator = iter.next().ok_or(eyre!("Statement is incomplete"))?;
-        let expr = {
-            let mut next = iter.next().ok_or(eyre!("Statement is incomplete"))?;
-            if next == "NOT" {
-                operator = "!=";
-                next = iter.next().ok_or(eyre!("Statement is incomplete"))?;
-            }
-            next
-        };
-        let operator = match operator {
-            "=" | "IS" => where_expr::Operator::Is,
-            "!=" => where_expr::Operator::IsNot,
-            "AND" => where_expr::Operator::And,
-            "OR" => where_expr::Operator::Or,
-            _ => todo!(),
-        };
-        clause._cols.push(token.to_string());
-        clause._operator_and_expr.push(op_and_expr::OpAndExpr {
-            _operator: operator,
-            _expr: Some(expr::Expr::_Literal(d_b_any::DBAny::_Text(
-                expr.to_string(),
-            ))),
-        });
-        where_clause = Some(clause);
-        if let Some(next) = iter.next() {
-            token = next;
-        }
-    }
-    if token == "RETURNING" {
-        while let Some(token) = iter.next() {
-            if token != "," {
-                if token == "{" {
-                    let bind = bindings[iter
-                        .next()
-                        .ok_or(eyre!("Statement is incomplete"))?
-                        .parse::<usize>()?]
-                    .clone();
-                    match bind {
-                        Bindings::Bindparam => returning.push(expr::Expr::_Bindparam(())),
-                        Bindings::DBAny(a) => returning.push(expr::Expr::_Literal(a.into())),
-                        _ => todo!(),
-                    }
-                    iter.next();
-                } else {
-                    returning.push(expr::Expr::_Literal(d_b_any::DBAny::_Text(
-                        token.to_string(),
-                    )));
-                }
-            }
-        }
-    }
-
-    Ok(update::Update {
-        _fallback: conflict_strat,
-        _assignments: assign,
-        _from: Some(join),
-        _sql_where: where_clause,
-        _returning: returning,
-    })
-}
-fn parse_delete_statement(
-    iter: &mut std::vec::IntoIter<&str>,
-    bindings: &Vec<Bindings>,
-) -> eyre::Result<delete::Delete> {
-    let mut where_clause = None;
-    let mut returning = Vec::new();
-    let mut token = "";
-
-    if iter.next().ok_or(eyre!("Statement is incomplete"))? != "FROM" {
-        todo!()
-    }
-
-    if iter.next().ok_or(eyre!("Statement is incomplete"))? != "{" {
-        todo!()
-    }
-    let Bindings::Tableref(tableref) = bindings[iter
-        .next()
-        .ok_or(eyre!("Statement is incomplete"))?
-        .parse::<usize>()?]
-    .clone() else {
-        todo!()
-    };
-    if iter.next().ok_or(eyre!("Statement is incomplete"))? != "}" {
-        todo!()
-    }
-
-    if let Some(next) = iter.next() {
-        token = next;
-    };
-    if token == "WHERE" {
-        //TODO maybe change schema for where to support more stuff properly
-        let mut clause = where_expr::WhereExpr {
-            _cols: Vec::new(),
-            _operator_and_expr: Vec::new(),
-        };
-        token = iter.next().ok_or(eyre!("Statement is incomplete"))?;
-        let mut operator = iter.next().ok_or(eyre!("Statement is incomplete"))?;
-        let expr = {
-            let mut next = iter.next().ok_or(eyre!("Statement is incomplete"))?;
-            if next == "NOT" {
-                operator = "!=";
-                next = iter.next().ok_or(eyre!("Statement is incomplete"))?;
-            }
-            next
-        };
-        let operator = match operator {
-            "=" | "IS" => where_expr::Operator::Is,
-            "!=" => where_expr::Operator::IsNot,
-            "AND" => where_expr::Operator::And,
-            "OR" => where_expr::Operator::Or,
-            _ => todo!(),
-        };
-        clause._cols.push(token.to_string());
-        clause._operator_and_expr.push(op_and_expr::OpAndExpr {
-            _operator: operator,
-            _expr: Some(expr::Expr::_Literal(d_b_any::DBAny::_Text(
-                expr.to_string(),
-            ))),
-        });
-        where_clause = Some(clause);
-        if let Some(next) = iter.next() {
-            token = next;
-        }
-    }
-    if token == "RETURNING" {
-        while let Some(token) = iter.next() {
-            if token != "," {
-                if token == "{" {
-                    let bind = bindings[iter
-                        .next()
-                        .ok_or(eyre!("Statement is incomplete"))?
-                        .parse::<usize>()?]
-                    .clone();
-                    match bind {
-                        Bindings::Bindparam => returning.push(expr::Expr::_Bindparam(())),
-                        Bindings::DBAny(a) => returning.push(expr::Expr::_Literal(a.into())),
-                        _ => todo!(),
-                    }
-                    iter.next();
-                } else {
-                    returning.push(expr::Expr::_Literal(d_b_any::DBAny::_Text(
-                        token.to_string(),
-                    )));
-                }
-            }
-        }
-    }
-
-    Ok(delete::Delete {
-        _from: tableref,
-        _sql_where: where_clause,
-        _returning: returning,
-    })
-}
-fn parse_select_statement(
-    iter: &mut std::vec::IntoIter<&str>,
-    bindings: &Vec<Bindings>,
-) -> eyre::Result<select::Select> {
-    let mut selectcore = Box::new(select_core::SelectCore {
-        _from: None,
-        _results: Vec::new(),
-        _sql_where: None,
-    });
-    let mut mergeoperations = Vec::new();
-    let mut conflict_strat = insert::ConflictStrategy::Fail;
-    let mut tableref: Option<r_a_table_ref::Client> = None;
-    let mut cols: Vec<String> = Vec::new();
-    let mut source = source::Source::UNINITIALIZED;
-    let mut names = Vec::new();
-    let mut orderby = Vec::new();
-    let mut limit = None;
-
-    let mut token = "";
-    while let Some(next) = iter.next() {
-        selectcore
-            ._results
-            .push(expr::Expr::_Literal(d_b_any::DBAny::_Text(
-                next.to_string(),
-            )));
-        if let Some(n) = iter.next() {
-            if n != "," {
-                token = n;
-                break;
-            }
-        }
-    }
-
-    if token == "FROM" {
-        //TODO join
-        if iter.next().ok_or(eyre!("Statement is incomplete"))? != "{" {
-            todo!()
-        }
-        let Bindings::ROTableref(ro) = bindings[iter
-            .next()
-            .ok_or(eyre!("Statement is incomplete"))?
-            .parse::<usize>()?]
-        .clone() else {
-            todo!()
-        };
-        if iter.next().ok_or(eyre!("Statement is incomplete"))? != "}" {
-            todo!()
-        }
-        selectcore._from = Some(join_clause::JoinClause {
-            _tableorsubquery: Some(table_or_subquery::TableOrSubquery::_Tableref(ro)),
-            _joinoperations: Vec::new(),
-        });
-        if let Some(next) = iter.next() {
-            token = next;
-        }
-    }
-
-    if token == "WHERE" {
-        //TODO maybe change schema for where to support more stuff properly
-        let mut clause = where_expr::WhereExpr {
-            _cols: Vec::new(),
-            _operator_and_expr: Vec::new(),
-        };
-        token = iter.next().ok_or(eyre!("Statement is incomplete"))?;
-        let mut operator = iter.next().ok_or(eyre!("Statement is incomplete"))?;
-        let expr = {
-            let mut next = iter.next().ok_or(eyre!("Statement is incomplete"))?;
-            if next == "NOT" {
-                operator = "!=";
-                next = iter.next().ok_or(eyre!("Statement is incomplete"))?;
-            }
-            next
-        };
-        let operator = match operator {
-            "=" | "IS" => where_expr::Operator::Is,
-            "!=" => where_expr::Operator::IsNot,
-            "AND" => where_expr::Operator::And,
-            "OR" => where_expr::Operator::Or,
-            _ => todo!(),
-        };
-        clause._cols.push(token.to_string());
-        clause._operator_and_expr.push(op_and_expr::OpAndExpr {
-            _operator: operator,
-            _expr: Some(expr::Expr::_Literal(d_b_any::DBAny::_Text(
-                expr.to_string(),
-            ))),
-        });
-        selectcore._sql_where = Some(clause);
-        if let Some(next) = iter.next() {
-            token = next;
-        }
-    }
-
-    if token == "UNION" {
-        let Some(next) = iter.clone().next() else {
-            todo!()
-        };
-
-        if next == "ALL" {
-            let Some(next) = iter.next() else {
-                todo!();
-            }; //SELECT
-            let select = parse_select_statement(iter, bindings)?;
-            orderby = select._orderby;
-            limit = select._limit;
-            mergeoperations.push(merge_operation::MergeOperation {
-                _operator: merge_operation::MergeOperator::Unionall,
-                _selectcore: Some(*select._selectcore.unwrap()),
-            });
-        } else {
-            let Some(next) = iter.next() else {
-                todo!();
-            }; //SELECT
-            let select = parse_select_statement(iter, bindings)?;
-            orderby = select._orderby;
-            limit = select._limit;
-            mergeoperations.push(merge_operation::MergeOperation {
-                _operator: merge_operation::MergeOperator::Union,
-                _selectcore: Some(*select._selectcore.unwrap()),
-            });
-        }
-        if let Some(next) = iter.next() {
-            token = next;
-        }
-    } else if token == "INTERSECT" {
-        let Some(next) = iter.next() else {
-            todo!();
-        }; //SELECT
-        let select = parse_select_statement(iter, bindings)?;
-        orderby = select._orderby;
-        limit = select._limit;
-        mergeoperations.push(merge_operation::MergeOperation {
-            _operator: merge_operation::MergeOperator::Intersect,
-            _selectcore: Some(*select._selectcore.unwrap()),
-        });
-        if let Some(next) = iter.next() {
-            token = next;
-        }
-    } else if token == "EXCEPT" {
-        let Some(next) = iter.next() else {
-            todo!();
-        }; //SELECT
-        let select = parse_select_statement(iter, bindings)?;
-        orderby = select._orderby;
-        limit = select._limit;
-        mergeoperations.push(merge_operation::MergeOperation {
-            _operator: merge_operation::MergeOperator::Except,
-            _selectcore: Some(*select._selectcore.unwrap()),
-        });
-        if let Some(next) = iter.next() {
-            token = next;
-        }
-    }
-
-    if token == "ORDER" {
-        if iter.next().ok_or(eyre!("Statement is incomplete"))? != "BY" {
-            todo!();
-        }
-        while let Some(next) = iter.next() {
-            let direction = match iter.next().ok_or(eyre!("Statement is incomplete"))? {
-                "ASC" => ordering_term::AscDesc::Asc,
-                "DESC" => ordering_term::AscDesc::Desc,
-                _ => todo!(),
-            };
-            //TODO {}
-            orderby.push(ordering_term::OrderingTerm {
-                _expr: Some(expr::Expr::_Literal(d_b_any::DBAny::_Text(
-                    next.to_string(),
-                ))),
-                _direction: direction,
-            });
-
-            if let Some(n) = iter.next() {
-                if n != "," {
-                    token = n;
-                    break;
-                }
-            }
-        }
-    }
-
-    if token == "LIMIT" {
-        let Some(expr) = iter.next() else { todo!() };
-        //TODO {}
-        let mut l = limit_operation::LimitOperation {
-            _limit: Some(expr::Expr::_Literal(d_b_any::DBAny::_Text(
-                expr.to_string(),
-            ))),
-            _offset: None,
-        };
-        if let Some(offset) = iter.next() {
-            l._offset = Some(expr::Expr::_Literal(d_b_any::DBAny::_Text(
-                offset.to_string(),
-            )));
-        }
-        limit = Some(l);
-    }
-
-    Ok(select::Select {
-        _selectcore: Some(selectcore),
-        _mergeoperations: mergeoperations,
-        _orderby: orderby,
-        _limit: limit,
-        _names: names,
-    })
-}
-enum Statement {
-    Insert(insert::Insert),
-    Update(update::Update),
-    Delete(delete::Delete),
-    Select(select::Select),
 }

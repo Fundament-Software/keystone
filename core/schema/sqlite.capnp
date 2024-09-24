@@ -57,7 +57,7 @@ struct IndexedColumn {
 struct IndexDef {
 	base @0 :TableRef;
 	cols @1 :List(IndexedColumn); # must be nonempty
-	sqlWhere @2 :WhereExpr; # may be null
+	sqlWhere @2 :List(Expr); # may be empty
 }
 
 interface Index {
@@ -72,7 +72,7 @@ interface AddDB extends(Database)  {
 	# It will have triggers instead of insert, update, and delete that forward the operations to the base table with the restricted fields set to the specified values.
 	# this can be used to share a subset of a data table in a secure manner.
 
-	createIndex @3 (base :TableRef, cols :List(IndexedColumn), sqlWhere :WhereExpr) -> (res :Index);
+	createIndex @3 (base :TableRef, cols :List(IndexedColumn), sqlWhere :List(Expr)) -> (res :Index);
 }
 
 interface Database extends(RODatabase) {
@@ -127,30 +127,20 @@ struct Expr {
 		colName @0 :Text;
 		reference @1 :UInt16; #debruijn level - comes from the preorder traversal of the join tree
 	}
-
-	union {
-		literal @0 :DBAny;
-		bindparam @1 :Void;
-		tablereference @2 :TableColumn;
-		functioninvocation @3 :FunctionInvocation;
-	}
-}
-
-struct WhereExpr {
 	enum Operator {
 		is @0;
 		isNot @1;
 		and @2;
 		or @3;
 	}
-	struct OpAndExpr {
-		operator @0 :Operator;
-		expr @1 :Expr;
+	union {
+		literal @0 :DBAny;
+		bindparam @1 :Void;
+		tablereference @2 :TableColumn;
+		functioninvocation @3 :FunctionInvocation;
+		op @4 :Operator;
 	}
-	cols @0 :List(Text);
-	operatorAndExpr @1 :List(OpAndExpr);
 }
-
 
 struct Select {
 	struct MergeOperation {
@@ -208,7 +198,7 @@ struct Select {
 struct SelectCore {
  	from @0 :JoinClause; # May be null; if null then the results must be constant expressions and generated select will not have a from clause
   results @1 :List(Expr); # Must be provided
-  sqlWhere @2 :WhereExpr; # may be null; if null then the generated select will not have a where clause; must be a boolean valued expression
+  sqlWhere @2 :List(Expr); # may be empty; if empty then the generated select will not have a where clause; must be a boolean valued expression
 }
 
 
@@ -303,12 +293,12 @@ struct Update {
 	fallback @0 :ConflictStrategy;
 	assignments @1 :List(Assignment);
 	from @2 :JoinClause;
-	sqlWhere @3 :WhereExpr;
+	sqlWhere @3 :List(Expr);
 	returning @4 :List(Expr);
 }
 
 struct Delete {
 	from @0 :TableRef;
-	sqlWhere @1 :WhereExpr;
+	sqlWhere @1 :List(Expr);
 	returning @2 :List(Expr);
 }

@@ -54,12 +54,7 @@ where
 
     let program = unsafe {
         let mut buf = [0_u16; 2048];
-        let num = GetFinalPathNameByHandleW(
-            source.as_raw_filelike() as *mut std::ffi::c_void,
-            buf.as_mut_ptr(),
-            2048,
-            0,
-        );
+        let num = GetFinalPathNameByHandleW(source.as_raw_filelike(), buf.as_mut_ptr(), 2048, 0);
         OsString::from_wide(&buf[0..num as usize])
     };
 
@@ -159,6 +154,7 @@ type DisconnectorSync = std::sync::Arc<
     std::sync::Mutex<Option<capnp_rpc::rpc::Disconnector<capnp_rpc::rpc_twoparty_capnp::Side>>>,
 >;
 
+#[allow(clippy::type_complexity)]
 pub struct PosixProcessImpl {
     pub cancellation_token: CancellationToken,
     stdin: Rc<Mutex<Option<ChildStdin>>>,
@@ -170,6 +166,7 @@ pub struct PosixProcessImpl {
     pub disconnector: DisconnectorSync,
 }
 
+#[allow(clippy::type_complexity)]
 impl PosixProcessImpl {
     fn new(
         cancellation_token: CancellationToken,
@@ -199,7 +196,7 @@ impl PosixProcessImpl {
         program: &cap_std::fs::File,
         args_iter: I,
         stdout_stream: ByteStreamClient,
-        stderr_stream: ByteStreamClient,
+        _stderr_stream: ByteStreamClient,
     ) -> Result<PosixProcessImpl>
     where
         I: IntoIterator<Item = capnp::Result<&'i str>>,

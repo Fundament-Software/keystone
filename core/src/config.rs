@@ -544,6 +544,7 @@ where
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 #[inline]
 fn build_cap_method<'a, F>(
     name: &str,
@@ -605,6 +606,7 @@ where
     Ok(Err(expr))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn eval_toml_capability<'a, F>(
     k: &str,
     v: &Table,

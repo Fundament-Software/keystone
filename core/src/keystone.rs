@@ -231,7 +231,7 @@ impl Keystone {
         let caplog_config = config.get_caplog()?;
         let db = crate::database::open_database(
             Path::new(config.get_database()?.to_str()?),
-            |conn| SqliteDatabase::new_connection(conn),
+            SqliteDatabase::new_connection,
             crate::database::OpenOptions::Create,
         )?;
 
@@ -265,7 +265,7 @@ impl Keystone {
         let namemap: HashMap<String, u64> = modules
             .iter()
             .map(|(id, m)| (m.name.clone(), *id))
-            .chain(builtin.into_iter())
+            .chain(builtin)
             .collect();
 
         {
@@ -816,6 +816,7 @@ impl crate::keystone_capnp::root::Server for KeystoneRoot {
     }
 }
 
+#[allow(clippy::type_complexity)]
 pub(crate) fn init_rpc_system<
     T: tokio::io::AsyncRead + 'static + Unpin,
     U: tokio::io::AsyncWrite + 'static + Unpin,

@@ -183,7 +183,7 @@ use tempfile::NamedTempFile;
 fn test_sqlite_usage() -> eyre::Result<()> {
     //console_subscriber::init();
 
-    //#[cfg(feature = "tracing")]
+    #[cfg(feature = "tracing")]
     tracing_subscriber::fmt()
         .with_max_level(tracing::Level::DEBUG)
         .with_writer(std::io::stderr)

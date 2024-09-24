@@ -1,7 +1,6 @@
 {
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs";
-    nixpkgs-21.url = "github:NixOS/nixpkgs/nixos-21.11";
     rust-overlay.url = "github:oxalica/rust-overlay";
     flake-utils.url = "github:numtide/flake-utils";
 
@@ -13,108 +12,105 @@
       url = "github:rustsec/advisory-db";
       flake = false;
     };
-
-    capstone = {
-      url = "github:Fundament-Software/capstone?ref=v2";
-      flake = false;
-    };
   };
 
-  outputs = inputs@{ self, flake-utils, nixpkgs, rust-overlay, nixpkgs-21, crane
-    , advisory-db, ... }:
+  outputs =
+    inputs@{ self
+    , flake-utils
+    , nixpkgs
+    , rust-overlay
+    , crane
+    , advisory-db
+    , ...
+    }:
     flake-utils.lib.eachSystem [ flake-utils.lib.system.x86_64-linux ] (system:
-      let
-        overlays = [ (import rust-overlay) ];
-        pkgs = import nixpkgs { inherit system overlays; };
+    let
+      overlays = [ (import rust-overlay) ];
+      pkgs = import nixpkgs { inherit system overlays; };
 
-        rust-custom-toolchain = (pkgs.rust-bin.stable.latest.default.override {
-          extensions = [
-            "rust-src"
-            "rustfmt"
-            "llvm-tools-preview"
-            "rust-analyzer-preview"
+      rust-custom-toolchain = (pkgs.rust-bin.stable.latest.default.override {
+        extensions = [
+          "rust-src"
+          "rustfmt"
+          "llvm-tools-preview"
+          "rust-analyzer-preview"
+        ];
+      });
+    in
+    rec {
+      devShells.default =
+        (pkgs.mkShell.override { stdenv = pkgs.llvmPackages.stdenv; }) {
+          buildInputs = with pkgs; [ openssl pkg-config ];
+
+          nativeBuildInputs = with pkgs; [
+            # get current rust toolchain defaults (this includes clippy and rustfmt)
+            rust-custom-toolchain
+
+            cargo-edit
           ];
-        });
 
-        capnproto = (pkgs.clangStdenv.mkDerivation {
-          pname = "capnproto";
-          version = "v2";
-          src = inputs.capstone;
-          nativeBuildInputs = [ pkgs.cmake ];
-          propagatedBuildInputs = [ pkgs.openssl pkgs.zlib ];
-        });
+          # fetch with cli instead of native
+          CARGO_NET_GIT_FETCH_WITH_CLI = "true";
+          RUST_BACKTRACE = 1;
+        };
 
-      in rec {
-        devShells.default =
-          (pkgs.mkShell.override { stdenv = pkgs.llvmPackages.stdenv; }) {
-            buildInputs = with pkgs; [ openssl pkg-config ];
+      default = { };
 
-            nativeBuildInputs = with pkgs; [
-              # get current rust toolchain defaults (this includes clippy and rustfmt)
-              rust-custom-toolchain
-
-              cargo-edit
-
-              capnproto
-
-              cmake
-            ];
-
-            # fetch with cli instead of native
-            CARGO_NET_GIT_FETCH_WITH_CLI = "true";
-            RUST_BACKTRACE = 1;
-          };
-
-        default = { };
-
-        checks = let
+      checks =
+        let
           craneLib =
             (inputs.crane.mkLib pkgs).overrideToolchain rust-custom-toolchain;
-          src = ./.;
+          commonArgs = {
+            src = ./.;
+            buildInputs = with pkgs; [ pkg-config openssl zlib ];
+            strictDeps = true;
+            version = "0.1.0";
+            stdenv = pkgs.stdenvAdapters.useMoldLinker pkgs.llvmPackages_15.stdenv;
+            CARGO_BUILD_RUSTFLAGS = "-C linker=clang -C link-arg=-fuse-ld=${pkgs.mold}/bin/mold";
+          };
+          pname = "capnp-checks";
 
-          cargoArtifacts = craneLib.buildDepsOnly {
-            inherit src;
-            buildInputs = with pkgs; [ openssl pkg-config capnproto ];
-          };
-          build-tests = craneLib.buildPackage {
-            inherit cargoArtifacts src;
-            buildInputs = with pkgs; [ openssl pkg-config capnproto ];
-          };
-        in {
+          cargoArtifacts = craneLib.buildDepsOnly (commonArgs // {
+            inherit pname;
+          });
+          build-tests = craneLib.buildPackage (commonArgs // {
+            inherit cargoArtifacts pname;
+          });
+        in
+        {
           inherit build-tests;
 
           # Run clippy (and deny all warnings) on the crate source,
-          # again, resuing the dependency artifacts from above.
+          # again, reusing the dependency artifacts from above.
           #
           # Note that this is done as a separate derivation so that
           # we can block the CI if there are issues here, but not
           # prevent downstream consumers from building our crate by itself.
-          my-crate-clippy = craneLib.cargoClippy {
-            inherit cargoArtifacts src;
+          capnp-clippy = craneLib.cargoClippy (commonArgs // {
+            inherit cargoArtifacts;
+            pname = "${pname}-clippy";
             cargoClippyExtraArgs = "-- --deny warnings";
-
-            buildInputs = with pkgs; [ openssl pkg-config capnproto ];
-          };
+          });
 
           # Check formatting
-          my-crate-fmt = craneLib.cargoFmt { inherit src; };
+          capnp-fmt = craneLib.cargoFmt (commonArgs // {
+            pname = "${pname}-fmt";
+          });
 
           # Audit dependencies
-          my-crate-audit = craneLib.cargoAudit {
-            inherit src;
+          capnp-audit = craneLib.cargoAudit (commonArgs // {
+            pname = "${pname}-audit";
             advisory-db = inputs.advisory-db;
             cargoAuditExtraArgs = "--ignore RUSTSEC-2020-0071";
-          };
+          });
 
           # Run tests with cargo-nextest
-          my-crate-nextest = craneLib.cargoNextest {
-            inherit cargoArtifacts src;
+          capnp-nextest = craneLib.cargoNextest (commonArgs // {
+            inherit cargoArtifacts;
+            pname = "${pname}-nextest";
             partitions = 1;
             partitionType = "count";
-
-            buildInputs = with pkgs; [ openssl pkg-config capnproto ];
-          };
+          });
         };
-
-      });
+    });
 }

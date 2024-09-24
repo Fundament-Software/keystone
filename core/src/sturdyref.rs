@@ -52,7 +52,7 @@ impl Drop for SturdyRefImpl {
     fn drop(&mut self) {
         if let Err(e) = self.db.drop_sturdyref(self.id) {
             // We can't allow a failure here to crash the program, so we do nothing
-            eprintln!("Failed to drop SturdyRef! {}", e.to_string());
+            eprintln!("Failed to drop SturdyRef! {}", e);
         }
     }
 }

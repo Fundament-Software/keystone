@@ -34,7 +34,7 @@ pub fn get_capnp_id(file: &std::path::Path) -> u64 {
             .unwrap_or_else(|| panic!("{} ID missing ; suffix", file.display())),
         16,
     )
-    .expect(format!("{} ID not valid u64", file.display()).as_str())
+    .unwrap_or_else(|_| panic!("{} ID not valid u64", file.display()))
 }
 
 pub fn extended(

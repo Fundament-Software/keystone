@@ -301,7 +301,9 @@ impl SqliteDatabase {
                 .statement
                 .truncate(statement_and_params.statement.len() - 2);
         }
+        #[cfg(test)]
         println!("{}", statement_and_params.statement);
+
         Ok(statement_and_params)
     }
 
@@ -364,7 +366,9 @@ impl SqliteDatabase {
                 .statement
                 .truncate(statement_and_params.statement.len() - 2);
         }
+        #[cfg(test)]
         println!("{}", statement_and_params.statement);
+
         Ok(statement_and_params)
     }
 
@@ -520,7 +524,9 @@ impl SqliteDatabase {
                 .statement
                 .truncate(statement_and_params.statement.len() - 2);
         }
+        #[cfg(test)]
         println!("{}", statement_and_params.statement);
+
         Ok(statement_and_params)
     }
 
@@ -690,7 +696,9 @@ impl SqliteDatabase {
                 .await?;
             statement_and_params.statement.push(' ');
         }
+        #[cfg(test)]
         println!("{}", statement_and_params.statement);
+
         Ok(statement_and_params)
     }
     async fn build_function_invocation<'a>(
@@ -1969,7 +1977,6 @@ fn split_sql(sql: &str) -> Vec<&str> {
     if last < sql.len() {
         result.push(&sql[last..]);
     }
-    println!("{:?}", result);
     result
 }
 fn create_sqlite_params_struct_from_str(

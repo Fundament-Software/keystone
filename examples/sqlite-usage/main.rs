@@ -48,7 +48,7 @@ impl root::Server for SqliteUsageImpl {
                         _joinoperations: vec![],
                     }),
                     _results: vec![Expr::_Literal(d_b_any::DBAny::_Text("last".to_string()))],
-                    _sql_where: None,
+                    _sql_where: Vec::new(),
                 })),
                 _mergeoperations: vec![],
                 _orderby: vec![OrderingTerm {

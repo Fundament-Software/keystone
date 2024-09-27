@@ -34,6 +34,7 @@ keystone.workspace = true
 eyre.workspace = true
 tempfile.workspace = true
 async-byte-channel.workspace = true
+keystone = { path = "../../core", features = ["testing"] }
 
 [build-dependencies]
 capstone-gen.workspace = true

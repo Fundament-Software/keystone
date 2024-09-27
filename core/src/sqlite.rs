@@ -2044,10 +2044,10 @@ mod tests {
 
 fn convert_rusqlite_error(err: rusqlite::Error) -> capnp::Error {
     // When we are testing things, output the actual sqlite error
-    #[cfg(test)]
+    #[cfg(feature = "testing")]
     return capnp::Error::failed(err.to_string());
 
-    #[cfg(not(test))]
+    #[cfg(not(feature = "testing"))]
     match err {
         rusqlite::Error::SqliteFailure(_, _) => {
             capnp::Error::failed("Error from underlying sqlite call".to_string())

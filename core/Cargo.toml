@@ -87,3 +87,4 @@ wax = "0.6.0"
 [features]
 default = ["wasm"]
 wasm = ["wasmparser"]
+testing = []

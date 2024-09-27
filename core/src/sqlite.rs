@@ -509,6 +509,7 @@ impl SqliteDatabase {
         }
 
         if upd.has_sql_where() {
+            statement_and_params.statement.push_str(" ");
             self.match_where(upd.get_sql_where()?, &mut statement_and_params)
                 .await?;
         }

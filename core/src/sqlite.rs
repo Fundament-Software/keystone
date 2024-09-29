@@ -536,6 +536,82 @@ impl SqliteDatabase {
         select: select::Reader<'a>,
         mut statement_and_params: StatementAndParams,
     ) -> Result<StatementAndParams, capnp::Error> {
+        capnp_let!({names, selectcore, mergeoperations, orderby, limit} = select);
+
+        let mut names_iter = names.iter();
+        statement_and_params = self
+            .build_select_core(&mut names_iter, selectcore, statement_and_params)
+            .await?;
+
+        for merge_operation in mergeoperations.iter() {
+            match merge_operation.reborrow().get_operator()? {
+                select::merge_operation::MergeOperator::Union => {
+                    statement_and_params.statement.push_str(" UNION ")
+                }
+                select::merge_operation::MergeOperator::Unionall => {
+                    statement_and_params.statement.push_str(" UNION ALL ")
+                }
+                select::merge_operation::MergeOperator::Intersect => {
+                    statement_and_params.statement.push_str(" INTERSECT ")
+                }
+                select::merge_operation::MergeOperator::Except => {
+                    statement_and_params.statement.push_str(" EXCEPT ")
+                }
+            }
+            statement_and_params = self
+                .build_select_core(
+                    &mut names_iter,
+                    merge_operation.get_selectcore()?,
+                    statement_and_params,
+                )
+                .await?;
+        }
+        if !orderby.is_empty() {
+            statement_and_params.statement.push_str(" ORDER BY ");
+            for term in orderby.iter() {
+                self.match_expr(term.get_expr()?, &mut statement_and_params)
+                    .await?;
+
+                match term.get_direction()? {
+                    select::ordering_term::AscDesc::Asc => {
+                        statement_and_params.statement.push_str(" ASC")
+                    }
+                    select::ordering_term::AscDesc::Desc => {
+                        statement_and_params.statement.push_str(" DESC")
+                    }
+                }
+                statement_and_params.statement.push_str(", ");
+            }
+            statement_and_params
+                .statement
+                .truncate(statement_and_params.statement.len() - 2);
+        }
+        if limit.has_limit() {
+            statement_and_params.statement.push_str("LIMIT ");
+            self.match_expr(limit.get_limit()?, &mut statement_and_params)
+                .await?;
+            statement_and_params.statement.push(' ');
+        }
+        if limit.has_offset() {
+            statement_and_params.statement.push_str("OFFSET ");
+            self.match_expr(limit.get_offset()?, &mut statement_and_params)
+                .await?;
+            statement_and_params.statement.push(' ');
+        }
+        #[cfg(test)]
+        println!("{}", statement_and_params.statement);
+
+        Ok(statement_and_params)
+    }
+    async fn build_select_core<'a>(
+        &self,
+        names_iter: &mut capnp::traits::ListIter<
+            capnp::text_list::Reader<'a>,
+            Result<capnp::text::Reader<'a>, capnp::Error>,
+        >,
+        selectcore: select_core::Reader<'a>,
+        mut statement_and_params: StatementAndParams,
+    ) -> Result<StatementAndParams, capnp::Error> {
         fn inner(
             db: &SqliteDatabase,
             statement_and_params: &mut StatementAndParams,
@@ -551,11 +627,8 @@ impl SqliteDatabase {
                 .push_str(format!("{}, ", t).as_str());
             Ok(())
         }
-
-        capnp_let!({names, selectcore : {from, results}, mergeoperations, orderby, limit} = select);
         statement_and_params.statement.push_str("SELECT ");
-        let mut names_iter = names.iter();
-        for expr in results.iter() {
+        for expr in selectcore.reborrow().get_results()?.iter() {
             match expr.which()? {
                 expr::Which::Literal(dbany) => match dbany?.which()? {
                     d_b_any::Which::Null(_) => inner(self, &mut statement_and_params, "null")?,
@@ -634,7 +707,7 @@ impl SqliteDatabase {
                 .statement
                 .truncate(statement_and_params.statement.len() - 2);
         }
-
+        let from = selectcore.get_from()?;
         if from.has_tableorsubquery() || from.has_joinoperations() {
             statement_and_params.statement.push_str(" FROM ");
             statement_and_params =
@@ -645,61 +718,6 @@ impl SqliteDatabase {
                 .await?;
             statement_and_params.statement.push(' ');
         }
-
-        for merge_operation in mergeoperations.iter() {
-            match merge_operation.get_operator()? {
-                select::merge_operation::MergeOperator::Union => {
-                    statement_and_params.statement.push_str(" UNION ")
-                }
-                select::merge_operation::MergeOperator::Unionall => {
-                    statement_and_params.statement.push_str(" UNION ALL ")
-                }
-                select::merge_operation::MergeOperator::Intersect => {
-                    statement_and_params.statement.push_str(" INTERSECT ")
-                }
-                select::merge_operation::MergeOperator::Except => {
-                    statement_and_params.statement.push_str(" EXCEPT ")
-                }
-            }
-            statement_and_params =
-                Box::pin(self.build_select_statement(select, statement_and_params)).await?;
-        }
-        if !orderby.is_empty() {
-            statement_and_params.statement.push_str(" ORDER BY ");
-            for term in orderby.iter() {
-                self.match_expr(term.get_expr()?, &mut statement_and_params)
-                    .await?;
-                //statement_and_params.statement.push_str(" last");
-
-                match term.get_direction()? {
-                    select::ordering_term::AscDesc::Asc => {
-                        statement_and_params.statement.push_str(" ASC")
-                    }
-                    select::ordering_term::AscDesc::Desc => {
-                        statement_and_params.statement.push_str(" DESC")
-                    }
-                }
-                statement_and_params.statement.push_str(", ");
-            }
-            statement_and_params
-                .statement
-                .truncate(statement_and_params.statement.len() - 2);
-        }
-        if limit.has_limit() {
-            statement_and_params.statement.push_str("LIMIT ");
-            self.match_expr(limit.get_limit()?, &mut statement_and_params)
-                .await?;
-            statement_and_params.statement.push(' ');
-        }
-        if limit.has_offset() {
-            statement_and_params.statement.push_str("OFFSET ");
-            self.match_expr(limit.get_offset()?, &mut statement_and_params)
-                .await?;
-            statement_and_params.statement.push(' ');
-        }
-        #[cfg(test)]
-        println!("{}", statement_and_params.statement);
-
         Ok(statement_and_params)
     }
     async fn build_function_invocation<'a>(
@@ -2454,11 +2472,7 @@ fn parse_select_statement(
         _sql_where: Vec::new(),
     });
     let mut mergeoperations = Vec::new();
-    let mut conflict_strat = insert::ConflictStrategy::Fail;
-    let mut tableref: Option<r_a_table_ref::Client> = None;
-    let mut cols: Vec<String> = Vec::new();
-    let mut source = insert::source::Source::UNINITIALIZED;
-    let mut names = Vec::new();
+    let mut names = Vec::new(); //TODO AS names
     let mut orderby = Vec::new();
     let mut limit = None;
 
@@ -3083,6 +3097,16 @@ mod tests {
             .get(0)
             .set_text("meow".into());
         run_request.send().promise.await?;
+
+        let checking = client //TODO this is doing nothing currently just checking if intersect implodes
+            .send_request_from_sql(
+                "SELECT name FROM ?0 INTERSECT SELECT name FROM ?0",
+                vec![Bindings::ROTableref(ro_tableref_cap.clone())],
+            )?
+            .promise
+            .await?
+            .get()?
+            .get_res()?;
 
         let res_stream = client
             .send_request_from_sql(

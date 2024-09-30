@@ -138,6 +138,7 @@ struct Expr {
 		isNot @1;
 		and @2;
 		or @3;
+		between @4;
 	}
 
 	union {

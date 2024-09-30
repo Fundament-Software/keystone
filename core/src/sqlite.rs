@@ -897,6 +897,7 @@ impl SqliteDatabase {
                 expr::Operator::IsNot => statement_and_params.statement.push_str(" IS NOT "),
                 expr::Operator::And => statement_and_params.statement.push_str(" AND "),
                 expr::Operator::Or => statement_and_params.statement.push_str(" OR "),
+                expr::Operator::Between => statement_and_params.statement.push_str(" BETWEEN ")
             },
         }
         Ok(())
@@ -997,6 +998,8 @@ impl SqliteDatabase {
 
 fn create_column_set(conn: &Connection) -> capnp::Result<HashSet<String>> {
     let mut columns = HashSet::new();
+    columns.insert("id".to_string());
+    columns.insert("*".to_string());
     let mut table_list_statement = conn
         .prepare("PRAGMA table_list")
         .map_err(|_| capnp::Error::failed("Failed to query for table names".to_string()))?;
@@ -1588,6 +1591,7 @@ impl add_d_b::Server for SqliteDatabase {
             .as_str(),
         );
         self.column_set.borrow_mut().insert("id".to_string());
+        self.column_set.borrow_mut().insert("*".to_string());
 
         for field in def.iter() {
             let field_name = field.get_name()?.to_string()?;
@@ -2293,6 +2297,7 @@ fn parse_update_statement(
                     "!=" => where_clause.push(expr::Expr::_Op(expr::Operator::IsNot)),
                     "AND" => where_clause.push(expr::Expr::_Op(expr::Operator::And)),
                     "OR" => where_clause.push(expr::Expr::_Op(expr::Operator::Or)),
+                    "BETWEEN" => where_clause.push(expr::Expr::_Op(expr::Operator::Between)),
                     _ => return Err(eyre!("Unsupported operator".to_string())),
                 }
             }
@@ -2418,6 +2423,7 @@ fn parse_delete_statement(
                     "!=" => where_clause.push(expr::Expr::_Op(expr::Operator::IsNot)),
                     "AND" => where_clause.push(expr::Expr::_Op(expr::Operator::And)),
                     "OR" => where_clause.push(expr::Expr::_Op(expr::Operator::Or)),
+                    "BETWEEN" => where_clause.push(expr::Expr::_Op(expr::Operator::Between)),
                     _ => return Err(eyre!("Unsupported operator".to_string())),
                 }
             }
@@ -2577,6 +2583,7 @@ fn parse_select_statement(
                     "OR" => selectcore
                         ._sql_where
                         .push(expr::Expr::_Op(expr::Operator::Or)),
+                    "BETWEEN" => selectcore._sql_where.push(expr::Expr::_Op(expr::Operator::Between)),
                     _ => {
                         token = next;
                         break;
@@ -3102,6 +3109,16 @@ mod tests {
             .send_request_from_sql(
                 "SELECT name FROM ?0 INTERSECT SELECT name FROM ?0",
                 vec![Bindings::ROTableref(ro_tableref_cap.clone())],
+            )?
+            .promise
+            .await?
+            .get()?
+            .get_res()?;
+        let checking2 = client //TODO this is doing nothing currently just checking if BETWEEN implodes
+            .send_request_from_sql(
+                "SELECT name FROM ?0 WHERE ?1 BETWEEN ?2 AND ?3",
+                vec![Bindings::ROTableref(ro_tableref_cap.clone()), Bindings::Column(Col{ debruinin_level: 0, name: "id".to_string()}),
+                Bindings::DBAny(DBAnyBindings::_Integer(0)), Bindings::DBAny(DBAnyBindings::_Integer(2))],
             )?
             .promise
             .await?

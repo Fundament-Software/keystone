@@ -2498,7 +2498,7 @@ fn parse_select_statement(
     }
 
     if token == "FROM" {
-        //TODO join
+        //TODO proper join
         if iter.next().ok_or(eyre!("Statement is incomplete"))? != "?" {
             return Err(eyre!(
                 "Table names have to be passed in as tablerefs".to_string()
@@ -2517,8 +2517,13 @@ fn parse_select_statement(
             _tableorsubquery: Some(table_or_subquery::TableOrSubquery::_Tableref(ro)),
             _joinoperations: Vec::new(),
         });
-        if let Some(next) = iter.next() {
-            token = next;
+        while let Some(mut next) = iter.next() {
+            if next == "," {
+                todo!(); //Maybe change the schema to make it make sense
+            } else {
+                token = next;
+                break;
+            }
         }
     }
 
@@ -3116,7 +3121,7 @@ mod tests {
             .get_res()?;
         let checking2 = client //TODO this is doing nothing currently just checking if BETWEEN implodes
             .send_request_from_sql(
-                "SELECT name FROM ?0 WHERE ?1 BETWEEN ?2 AND ?3",
+                "SELECT * FROM ?0 WHERE ?1 BETWEEN ?2 AND ?3",
                 vec![Bindings::ROTableref(ro_tableref_cap.clone()), Bindings::Column(Col{ debruinin_level: 0, name: "id".to_string()}),
                 Bindings::DBAny(DBAnyBindings::_Integer(0)), Bindings::DBAny(DBAnyBindings::_Integer(2))],
             )?

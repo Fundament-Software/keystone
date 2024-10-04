@@ -236,8 +236,8 @@ struct JoinClause {
     }
 
     operator @0 :JoinOperator;
-		tableorsubquery @1 :TableOrSubquery;
-		joinconstraint @2 :JoinConstraint;
+	tableorsubquery @1 :TableOrSubquery;
+	joinconstraint @2 :JoinConstraint;
   }
 
   tableorsubquery @0 :TableOrSubquery;

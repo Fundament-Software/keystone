@@ -301,8 +301,6 @@ impl SqliteDatabase {
                 .statement
                 .truncate(statement_and_params.statement.len() - 2);
         }
-        #[cfg(test)]
-        println!("{}", statement_and_params.statement);
 
         Ok(statement_and_params)
     }
@@ -366,8 +364,6 @@ impl SqliteDatabase {
                 .statement
                 .truncate(statement_and_params.statement.len() - 2);
         }
-        #[cfg(test)]
-        println!("{}", statement_and_params.statement);
 
         Ok(statement_and_params)
     }
@@ -525,8 +521,6 @@ impl SqliteDatabase {
                 .statement
                 .truncate(statement_and_params.statement.len() - 2);
         }
-        #[cfg(test)]
-        println!("{}", statement_and_params.statement);
 
         Ok(statement_and_params)
     }
@@ -598,8 +592,6 @@ impl SqliteDatabase {
                 .await?;
             statement_and_params.statement.push(' ');
         }
-        #[cfg(test)]
-        println!("{}", statement_and_params.statement);
 
         Ok(statement_and_params)
     }
@@ -897,7 +889,7 @@ impl SqliteDatabase {
                 expr::Operator::IsNot => statement_and_params.statement.push_str(" IS NOT "),
                 expr::Operator::And => statement_and_params.statement.push_str(" AND "),
                 expr::Operator::Or => statement_and_params.statement.push_str(" OR "),
-                expr::Operator::Between => statement_and_params.statement.push_str(" BETWEEN ")
+                expr::Operator::Between => statement_and_params.statement.push_str(" BETWEEN "),
             },
         }
         Ok(())
@@ -2007,7 +1999,7 @@ fn create_sqlite_params_struct_from_str(
     bindings: Vec<Bindings>,
 ) -> eyre::Result<Statement> {
     let mut iter = split_sql(sql).into_iter();
-    match iter.next().ok_or(eyre!("Statement is incomplete"))? {
+    match iter.next().ok_or(ParseError::IncompleteStatement)? {
         "INSERT" => Ok(Statement::Insert(parse_insert_statement(
             &mut iter, &bindings,
         )?)),
@@ -2036,9 +2028,9 @@ fn parse_insert_statement(
     let mut source = insert::source::Source::UNINITIALIZED;
     let mut returning = Vec::new();
 
-    let mut token = iter.next().ok_or(eyre!("Statement is incomplete"))?;
+    let mut token = iter.next().ok_or(ParseError::IncompleteStatement)?;
     if token == "OR" {
-        token = iter.next().ok_or(eyre!("Statement is incomplete"))?;
+        token = iter.next().ok_or(ParseError::IncompleteStatement)?;
         conflict_strat = match token {
             "ABORT" => insert::ConflictStrategy::Abort,
             "FAIL" => insert::ConflictStrategy::Fail,
@@ -2047,17 +2039,17 @@ fn parse_insert_statement(
             _ => return Err(eyre::eyre!("Unsupported conflict strategy specified")),
         };
     }
-    if iter.next().ok_or(eyre!("Statement is incomplete"))? != "INTO" {
+    if iter.next().ok_or(ParseError::IncompleteStatement)? != "INTO" {
         return Err(eyre!("INTO missing"));
     }
-    if iter.next().ok_or(eyre!("Statement is incomplete"))? != "?" {
+    if iter.next().ok_or(ParseError::IncompleteStatement)? != "?" {
         return Err(eyre!(
-            "Table names need to be passed by binding a tableref with {{}}"
+            "Table names need to be passed by binding a tableref with ?"
         ));
     }
     let Bindings::RATableref(tableref) = bindings[iter
         .next()
-        .ok_or(eyre!("Statement is incomplete"))?
+        .ok_or(ParseError::IncompleteStatement)?
         .parse::<usize>()?]
     .clone() else {
         return Err(eyre!(
@@ -2065,7 +2057,7 @@ fn parse_insert_statement(
         ));
     };
 
-    token = iter.next().ok_or(eyre!("Statement is incomplete"))?;
+    token = iter.next().ok_or(ParseError::IncompleteStatement)?;
 
     if token == "(" {
         while let Some(next) = iter.next() {
@@ -2075,11 +2067,11 @@ fn parse_insert_statement(
                 cols.push(next.to_string());
             }
         }
-        token = iter.next().ok_or(eyre!("Statement is incomplete"))?;
+        token = iter.next().ok_or(ParseError::IncompleteStatement)?;
     }
 
     if token == "VALUES" {
-        if iter.next().ok_or(eyre!("Statement is incomplete"))? != "(" {
+        if iter.next().ok_or(ParseError::IncompleteStatement)? != "(" {
             return Err(eyre!("Values clause needs to start with a ("));
         }
         let mut outer = Vec::new();
@@ -2100,7 +2092,7 @@ fn parse_insert_statement(
                 if next == "?" {
                     let Bindings::DBAny(bind) = bindings[iter
                         .next()
-                        .ok_or(eyre!("Statement is incomplete"))?
+                        .ok_or(ParseError::IncompleteStatement)?
                         .parse::<usize>()?]
                     .clone() else {
                         return Err(eyre!("Only dbany bindings allowed here"));
@@ -2119,7 +2111,7 @@ fn parse_insert_statement(
         }
         source = insert::source::Source::_Select(Box::new(parse_select_statement(iter, bindings)?));
     } else if token == "DEFAULT" {
-        iter.next().ok_or(eyre!("Statement is incomplete"))?;
+        iter.next().ok_or(ParseError::IncompleteStatement)?;
         source = insert::source::Source::_Defaults(());
         if let Some(next) = iter.next() {
             token = next;
@@ -2132,7 +2124,7 @@ fn parse_insert_statement(
                 if token == "?" {
                     let bind = bindings[iter
                         .next()
-                        .ok_or(eyre!("Statement is incomplete"))?
+                        .ok_or(ParseError::IncompleteStatement)?
                         .parse::<usize>()?]
                     .clone();
                     match bind {
@@ -2144,7 +2136,7 @@ fn parse_insert_statement(
                                 _reference: c.debruinin_level,
                             }));
                         }
-                        _ => return Err(eyre!("Unsupported type in returning clause")),
+                        _ => return Err(ParseError::UnsupportedBindingType.into()),
                     }
                 } else {
                     returning.push(expr::Expr::_Literal(d_b_any::DBAny::_Text(
@@ -2176,9 +2168,9 @@ fn parse_update_statement(
     let mut where_clause = Vec::new();
     let mut returning = Vec::new();
 
-    let mut token = iter.next().ok_or(eyre!("Statement is incomplete"))?;
+    let mut token = iter.next().ok_or(ParseError::IncompleteStatement)?;
     if token == "OR" {
-        token = iter.next().ok_or(eyre!("Statement is incomplete"))?;
+        token = iter.next().ok_or(ParseError::IncompleteStatement)?;
         conflict_strat = match token {
             "ABORT" => update::ConflictStrategy::Abort,
             "FAIL" => update::ConflictStrategy::Fail,
@@ -2188,14 +2180,14 @@ fn parse_update_statement(
         };
     }
 
-    if iter.next().ok_or(eyre!("Statement is incomplete"))? != "?" {
+    if iter.next().ok_or(ParseError::IncompleteStatement)? != "?" {
         return Err(eyre!(
             "Table names have to be passed in as tablerefs".to_string()
         ));
     }
     let Bindings::ROTableref(tableref) = bindings[iter
         .next()
-        .ok_or(eyre!("Statement is incomplete"))?
+        .ok_or(ParseError::IncompleteStatement)?
         .parse::<usize>()?]
     .clone() else {
         return Err(eyre!(
@@ -2204,16 +2196,16 @@ fn parse_update_statement(
     };
     join._tableorsubquery = Some(table_or_subquery::TableOrSubquery::_Tableref(tableref));
 
-    if iter.next().ok_or(eyre!("Statement is incomplete"))? != "SET" {
+    if iter.next().ok_or(ParseError::IncompleteStatement)? != "SET" {
         return Err(eyre!(
             "SET clause non optional in update statements".to_string()
         ));
     }
     while let Some(next) = iter.next() {
-        if iter.next().ok_or(eyre!("Statement is incomplete"))? != "=" {
+        if iter.next().ok_or(ParseError::IncompleteStatement)? != "=" {
             return Err(eyre!("Missing = sign in SET clause statement".to_string()));
         }
-        let ex = iter.next().ok_or(eyre!("Statement is incomplete"))?;
+        let ex = iter.next().ok_or(ParseError::IncompleteStatement)?;
         assign.push(assignment::Assignment {
             _name: next.to_string(),
             _expr: Some(expr::Expr::_Literal(d_b_any::DBAny::_Text(ex.to_string()))),
@@ -2227,14 +2219,14 @@ fn parse_update_statement(
     }
     if token == "FROM" {
         //TODO proper join
-        if iter.next().ok_or(eyre!("Statement is incomplete"))? != "?" {
+        if iter.next().ok_or(ParseError::IncompleteStatement)? != "?" {
             return Err(eyre!(
                 "Table names have to be passed in as tablerefs".to_string()
             ));
         }
         let Bindings::ROTableref(ro) = bindings[iter
             .next()
-            .ok_or(eyre!("Statement is incomplete"))?
+            .ok_or(ParseError::IncompleteStatement)?
             .parse::<usize>()?]
         .clone() else {
             return Err(eyre!(
@@ -2255,7 +2247,7 @@ fn parse_update_statement(
             if next == "?" {
                 match bindings[iter
                     .next()
-                    .ok_or(eyre!("Statement is incomplete"))?
+                    .ok_or(ParseError::IncompleteStatement)?
                     .parse::<usize>()?]
                 .clone()
                 {
@@ -2267,7 +2259,7 @@ fn parse_update_statement(
                             _reference: c.debruinin_level,
                         }));
                     }
-                    _ => return Err(eyre!("Unsupported binding type".to_string())),
+                    _ => return Err(ParseError::UnsupportedBindingType.into()),
                 }
             } else {
                 where_clause.push(expr::Expr::_Literal(d_b_any::DBAny::_Text(
@@ -2282,12 +2274,7 @@ fn parse_update_statement(
                     }
                     "=" => where_clause.push(expr::Expr::_Op(expr::Operator::Is)),
                     "IS" => {
-                        if iter
-                            .clone()
-                            .next()
-                            .ok_or(eyre!("Statement is incomplete"))?
-                            == "NOT"
-                        {
+                        if iter.clone().next().ok_or(ParseError::IncompleteStatement)? == "NOT" {
                             iter.next();
                             where_clause.push(expr::Expr::_Op(expr::Operator::IsNot));
                         } else {
@@ -2309,7 +2296,7 @@ fn parse_update_statement(
                 if token == "?" {
                     let bind = bindings[iter
                         .next()
-                        .ok_or(eyre!("Statement is incomplete"))?
+                        .ok_or(ParseError::IncompleteStatement)?
                         .parse::<usize>()?]
                     .clone();
                     match bind {
@@ -2352,20 +2339,20 @@ fn parse_delete_statement(
     let mut returning = Vec::new();
     let mut token = "";
 
-    if iter.next().ok_or(eyre!("Statement is incomplete"))? != "FROM" {
+    if iter.next().ok_or(ParseError::IncompleteStatement)? != "FROM" {
         return Err(eyre!(
             "From clause non optional in delete statements".to_string()
         ));
     }
 
-    if iter.next().ok_or(eyre!("Statement is incomplete"))? != "?" {
+    if iter.next().ok_or(ParseError::IncompleteStatement)? != "?" {
         return Err(eyre!(
             "Table names have to be passed in as tablerefs".to_string()
         ));
     }
     let Bindings::Tableref(tableref) = bindings[iter
         .next()
-        .ok_or(eyre!("Statement is incomplete"))?
+        .ok_or(ParseError::IncompleteStatement)?
         .parse::<usize>()?]
     .clone() else {
         return Err(eyre!(
@@ -2381,7 +2368,7 @@ fn parse_delete_statement(
             if next == "?" {
                 match bindings[iter
                     .next()
-                    .ok_or(eyre!("Statement is incomplete"))?
+                    .ok_or(ParseError::IncompleteStatement)?
                     .parse::<usize>()?]
                 .clone()
                 {
@@ -2393,7 +2380,7 @@ fn parse_delete_statement(
                             _reference: c.debruinin_level,
                         }));
                     }
-                    _ => return Err(eyre!("Unsupported binding type".to_string())),
+                    _ => return Err(ParseError::UnsupportedBindingType.into()),
                 }
             } else {
                 where_clause.push(expr::Expr::_Literal(d_b_any::DBAny::_Text(
@@ -2408,12 +2395,7 @@ fn parse_delete_statement(
                     }
                     "=" => where_clause.push(expr::Expr::_Op(expr::Operator::Is)),
                     "IS" => {
-                        if iter
-                            .clone()
-                            .next()
-                            .ok_or(eyre!("Statement is incomplete"))?
-                            == "NOT"
-                        {
+                        if iter.clone().next().ok_or(ParseError::IncompleteStatement)? == "NOT" {
                             iter.next();
                             where_clause.push(expr::Expr::_Op(expr::Operator::IsNot));
                         } else {
@@ -2435,7 +2417,7 @@ fn parse_delete_statement(
                 if token == "?" {
                     let bind = bindings[iter
                         .next()
-                        .ok_or(eyre!("Statement is incomplete"))?
+                        .ok_or(ParseError::IncompleteStatement)?
                         .parse::<usize>()?]
                     .clone();
                     match bind {
@@ -2499,14 +2481,14 @@ fn parse_select_statement(
 
     if token == "FROM" {
         //TODO proper join
-        if iter.next().ok_or(eyre!("Statement is incomplete"))? != "?" {
+        if iter.next().ok_or(ParseError::IncompleteStatement)? != "?" {
             return Err(eyre!(
                 "Table names have to be passed in as tablerefs".to_string()
             ));
         }
         let Bindings::ROTableref(ro) = bindings[iter
             .next()
-            .ok_or(eyre!("Statement is incomplete"))?
+            .ok_or(ParseError::IncompleteStatement)?
             .parse::<usize>()?]
         .clone() else {
             return Err(eyre!(
@@ -2532,7 +2514,7 @@ fn parse_select_statement(
             if next == "?" {
                 match bindings[iter
                     .next()
-                    .ok_or(eyre!("Statement is incomplete"))?
+                    .ok_or(ParseError::IncompleteStatement)?
                     .parse::<usize>()?]
                 .clone()
                 {
@@ -2548,7 +2530,7 @@ fn parse_select_statement(
                             },
                         ));
                     }
-                    _ => return Err(eyre!("Unsupported binding type".to_string())),
+                    _ => return Err(ParseError::UnsupportedBindingType.into()),
                 }
             } else {
                 selectcore
@@ -2563,12 +2545,7 @@ fn parse_select_statement(
                         ._sql_where
                         .push(expr::Expr::_Op(expr::Operator::Is)),
                     "IS" => {
-                        if iter
-                            .clone()
-                            .next()
-                            .ok_or(eyre!("Statement is incomplete"))?
-                            == "NOT"
-                        {
+                        if iter.clone().next().ok_or(ParseError::IncompleteStatement)? == "NOT" {
                             iter.next();
                             selectcore
                                 ._sql_where
@@ -2588,7 +2565,9 @@ fn parse_select_statement(
                     "OR" => selectcore
                         ._sql_where
                         .push(expr::Expr::_Op(expr::Operator::Or)),
-                    "BETWEEN" => selectcore._sql_where.push(expr::Expr::_Op(expr::Operator::Between)),
+                    "BETWEEN" => selectcore
+                        ._sql_where
+                        .push(expr::Expr::_Op(expr::Operator::Between)),
                     _ => {
                         token = next;
                         break;
@@ -2599,13 +2578,10 @@ fn parse_select_statement(
     }
 
     if token == "UNION" {
-        let next = iter
-            .clone()
-            .next()
-            .ok_or(eyre!("Statement is incomplete"))?;
+        let next = iter.clone().next().ok_or(ParseError::IncompleteStatement)?;
 
         if next == "ALL" {
-            iter.next().ok_or(eyre!("Statement is incomplete"))?; //SELECT
+            iter.next().ok_or(ParseError::IncompleteStatement)?; //SELECT
             let select = parse_select_statement(iter, bindings)?;
             orderby = select._orderby;
             limit = select._limit;
@@ -2614,7 +2590,7 @@ fn parse_select_statement(
                 _selectcore: Some(*select._selectcore.unwrap()),
             });
         } else {
-            iter.next().ok_or(eyre!("Statement is incomplete"))?; //SELECT
+            iter.next().ok_or(ParseError::IncompleteStatement)?; //SELECT
             let select = parse_select_statement(iter, bindings)?;
             orderby = select._orderby;
             limit = select._limit;
@@ -2627,7 +2603,7 @@ fn parse_select_statement(
             token = next;
         }
     } else if token == "INTERSECT" {
-        iter.next().ok_or(eyre!("Statement is incomplete"))?; //SELECT
+        iter.next().ok_or(ParseError::IncompleteStatement)?; //SELECT
         let select = parse_select_statement(iter, bindings)?;
         orderby = select._orderby;
         limit = select._limit;
@@ -2639,7 +2615,7 @@ fn parse_select_statement(
             token = next;
         }
     } else if token == "EXCEPT" {
-        iter.next().ok_or(eyre!("Statement is incomplete"))?; //SELECT
+        iter.next().ok_or(ParseError::IncompleteStatement)?; //SELECT
         let select = parse_select_statement(iter, bindings)?;
         orderby = select._orderby;
         limit = select._limit;
@@ -2653,11 +2629,11 @@ fn parse_select_statement(
     }
 
     if token == "ORDER" {
-        if iter.next().ok_or(eyre!("Statement is incomplete"))? != "BY" {
+        if iter.next().ok_or(ParseError::IncompleteStatement)? != "BY" {
             return Err(eyre!("ORDER not followed by BY".to_string()));
         }
         while let Some(next) = iter.next() {
-            let direction = match iter.next().ok_or(eyre!("Statement is incomplete"))? {
+            let direction = match iter.next().ok_or(ParseError::IncompleteStatement)? {
                 "ASC" => ordering_term::AscDesc::Asc,
                 "DESC" => ordering_term::AscDesc::Desc,
                 _ => return Err(eyre!("Direction in order clause non optional".to_string())),
@@ -2665,7 +2641,7 @@ fn parse_select_statement(
             if next == "?" {
                 match bindings[iter
                     .next()
-                    .ok_or(eyre!("Statement is incomplete"))?
+                    .ok_or(ParseError::IncompleteStatement)?
                     .parse::<usize>()?]
                 .clone()
                 {
@@ -2688,7 +2664,7 @@ fn parse_select_statement(
                             _direction: direction,
                         });
                     }
-                    _ => return Err(eyre!("Unsupported binding type".to_string())),
+                    _ => return Err(ParseError::UnsupportedBindingType.into()),
                 }
             } else {
                 orderby.push(ordering_term::OrderingTerm {
@@ -2709,11 +2685,11 @@ fn parse_select_statement(
     }
 
     if token == "LIMIT" {
-        let expr = iter.next().ok_or(eyre!("Statement is incomplete"))?;
+        let expr = iter.next().ok_or(ParseError::IncompleteStatement)?;
         let mut l = if expr == "?" {
             match bindings[iter
                 .next()
-                .ok_or(eyre!("Statement is incomplete"))?
+                .ok_or(ParseError::IncompleteStatement)?
                 .parse::<usize>()?]
             .clone()
             {
@@ -2732,7 +2708,7 @@ fn parse_select_statement(
                     })),
                     _offset: None,
                 },
-                _ => return Err(eyre!("Unsupported binding type".to_string())),
+                _ => return Err(ParseError::UnsupportedBindingType.into()),
             }
         } else {
             limit_operation::LimitOperation {
@@ -2746,7 +2722,7 @@ fn parse_select_statement(
             if offset == "?" {
                 match bindings[iter
                     .next()
-                    .ok_or(eyre!("Statement is incomplete"))?
+                    .ok_or(ParseError::IncompleteStatement)?
                     .parse::<usize>()?]
                 .clone()
                 {
@@ -2758,7 +2734,7 @@ fn parse_select_statement(
                             _reference: c.debruinin_level,
                         }));
                     }
-                    _ => return Err(eyre!("Unsupported binding type".to_string())),
+                    _ => return Err(ParseError::UnsupportedBindingType.into()),
                 }
             } else {
                 l._offset = Some(expr::Expr::_Literal(d_b_any::DBAny::_Text(
@@ -2782,6 +2758,13 @@ enum Statement {
     Update(update::Update),
     Delete(delete::Delete),
     Select(select::Select),
+}
+#[derive(thiserror::Error, Debug)]
+pub enum ParseError {
+    #[error("Statement is incomplete.")]
+    IncompleteStatement,
+    #[error("Unsupported binding type for this slot.")]
+    UnsupportedBindingType,
 }
 
 #[cfg(test)]
@@ -3122,8 +3105,15 @@ mod tests {
         let checking2 = client //TODO this is doing nothing currently just checking if BETWEEN implodes
             .send_request_from_sql(
                 "SELECT * FROM ?0 WHERE ?1 BETWEEN ?2 AND ?3",
-                vec![Bindings::ROTableref(ro_tableref_cap.clone()), Bindings::Column(Col{ debruinin_level: 0, name: "id".to_string()}),
-                Bindings::DBAny(DBAnyBindings::_Integer(0)), Bindings::DBAny(DBAnyBindings::_Integer(2))],
+                vec![
+                    Bindings::ROTableref(ro_tableref_cap.clone()),
+                    Bindings::Column(Col {
+                        debruinin_level: 0,
+                        name: "id".to_string(),
+                    }),
+                    Bindings::DBAny(DBAnyBindings::_Integer(0)),
+                    Bindings::DBAny(DBAnyBindings::_Integer(2)),
+                ],
             )?
             .promise
             .await?

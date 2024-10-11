@@ -2,7 +2,7 @@ use super::Path;
 use capnp_macros::capnproto_rpc;
 use http_body_util::BodyExt;
 use hyper::{http::uri::Authority, HeaderMap};
-use hyper_tls::HttpsConnector;
+use hyper_rustls::HttpsConnector;
 use hyper_util::client::legacy::{connect::HttpConnector, Client as HttpClient, ResponseFuture};
 
 use Path::HttpVerb;
@@ -303,7 +303,12 @@ mod tests {
 
     #[tokio::test]
     async fn get_test() -> capnp::Result<()> {
-        let connector = HttpsConnector::new();
+        let connector = hyper_rustls::HttpsConnectorBuilder::new()
+            .with_webpki_roots()
+            .https_only()
+            .enable_http1()
+            .build();
+
         let https_client = HttpClient::builder(TokioExecutor::new()).build::<_, String>(connector);
         let mut path_client: Path::Client =
             capnp_rpc::new_client(PathImpl::new("httpbin.org", vec!["".into()], https_client)?);
@@ -333,7 +338,12 @@ mod tests {
     #[tokio::test]
     async fn whitelist_test() -> capnp::Result<()> {
         // Set url as example.org
-        let connector = HttpsConnector::new();
+        let connector = hyper_rustls::HttpsConnectorBuilder::new()
+            .with_webpki_roots()
+            .https_only()
+            .enable_http1()
+            .build();
+
         let https_client = HttpClient::builder(TokioExecutor::new()).build::<_, String>(connector);
         let mut path_client: Path::Client =
             capnp_rpc::new_client(PathImpl::new("example.org", vec!["".into()], https_client)?);
@@ -371,7 +381,12 @@ mod tests {
 
     #[tokio::test]
     async fn post_test() -> capnp::Result<()> {
-        let connector = HttpsConnector::new();
+        let connector = hyper_rustls::HttpsConnectorBuilder::new()
+            .with_webpki_roots()
+            .https_only()
+            .enable_http1()
+            .build();
+
         let https_client = HttpClient::builder(TokioExecutor::new()).build::<_, String>(connector);
         let mut path_client: Path::Client = capnp_rpc::new_client(PathImpl::new(
             "httpbin.org",
@@ -430,7 +445,12 @@ mod tests {
     #[tokio::test]
     async fn header_test() -> capnp::Result<()> {
         // Current way to run it and see results: cargo test -- --nocapture
-        let connector = HttpsConnector::new();
+        let connector = hyper_rustls::HttpsConnectorBuilder::new()
+            .with_webpki_roots()
+            .https_only()
+            .enable_http1()
+            .build();
+
         let https_client = HttpClient::builder(TokioExecutor::new()).build::<_, String>(connector);
         let mut path_client: Path::Client = capnp_rpc::new_client(PathImpl::new(
             "httpbin.org",

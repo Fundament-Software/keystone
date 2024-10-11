@@ -42,8 +42,8 @@ color-eyre.workspace = true
 eyre.workspace = true
 hyper = { version = "1", features = ["full"] }
 hyper-util = { version = "0.1", features = ["full"] }
+hyper-rustls = { version = "0.27.3", features = ["webpki-roots", "http2"] }
 http-body-util = "0.1"
-hyper-tls = "0.6"
 serde = { version = "1.0", features = ["derive"] }
 tokio.workspace = true
 tokio-util.workspace = true

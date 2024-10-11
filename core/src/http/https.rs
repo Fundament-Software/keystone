@@ -1,7 +1,7 @@
 use super::domain::DomainImpl;
 use super::{Domain, Https};
 use capnp_macros::capnproto_rpc;
-use hyper_tls::HttpsConnector;
+use hyper_rustls::{HttpsConnector, HttpsConnectorBuilder};
 use hyper_util::client::legacy::{connect::HttpConnector, Client as HttpClient};
 use hyper_util::rt::TokioExecutor;
 
@@ -11,7 +11,11 @@ pub struct HttpsImpl {
 
 impl HttpsImpl {
     pub fn new() -> Self {
-        let connector = HttpsConnector::new();
+        let connector = HttpsConnectorBuilder::new()
+            .with_webpki_roots()
+            .https_only()
+            .enable_all_versions()
+            .build();
         let https_client = HttpClient::builder(TokioExecutor::new()).build::<_, String>(connector);
         HttpsImpl { https_client }
     }

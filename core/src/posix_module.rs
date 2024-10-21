@@ -12,6 +12,7 @@ use crate::spawn_capnp::program::SpawnParams;
 use crate::spawn_capnp::program::SpawnResults;
 use capnp::any_pointer::Owned as any_pointer;
 use capnp::any_pointer::Owned as cap_pointer;
+use capnp::capability::FromServer;
 use capnp::capability::RemotePromise;
 use capnp_macros::capnproto_rpc;
 use capnp_rpc::rpc_twoparty_capnp;
@@ -21,10 +22,12 @@ use std::{cell::RefCell, rc::Rc};
 
 pub struct PosixModuleProcessImpl {
     posix_process: process::Client<ByteStream, PosixError>,
-    _handle: tokio::task::JoinHandle<Result<(), capnp::Error>>,
-    pub(crate) _disconnector: Disconnector<rpc_twoparty_capnp::Side>,
+    handle: tokio::task::AbortHandle,
+    pub(crate) disconnector: Disconnector<rpc_twoparty_capnp::Side>,
     pub(crate) bootstrap: module_start::Client<any_pointer, cap_pointer>,
     api: RemotePromise<module_start::start_results::Owned<any_pointer, cap_pointer>>,
+    error: Option<eyre::Report>,
+    debug_name: Option<String>,
 }
 
 type AnyPointerClient = process::Client<cap_pointer, module_error::Owned<any_pointer>>;
@@ -148,27 +151,52 @@ impl
                                             "Couldn't get process implementation!".into(),
                                         ))?;
 
-                                    if let Ok(mut lock) = process_impl.as_ref().disconnector.lock()
-                                    {
-                                        lock.replace(rpc_system.get_disconnector());
-                                    }
+                                    process_impl
+                                        .as_ref()
+                                        .disconnector
+                                        .borrow_mut()
+                                        .replace(rpc_system.get_disconnector());
+
                                     Ok(())
                                 },
                             )?;
 
-                        let module_process = PosixModuleProcessImpl {
-                            posix_process: process,
-                            _handle: tokio::task::spawn_local(rpc_system),
-                            _disconnector: disconnector,
-                            bootstrap,
-                            api,
-                        };
+                        let module_process = Rc::new_cyclic(|this| {
+                            let this = this.clone();
+                            AnyPointerClient::from_server(RefCell::new(PosixModuleProcessImpl {
+                                posix_process: process,
+                                handle: self.module.join_set.borrow_mut().spawn_local(async move {
+                                    {
+                                        // We must be exceedingly careful that the async block itself only borrows the weak reference, so
+                                        // that when we upgrade it here, it will go out of scope after we're finished and not cause a cycle.
+                                        let handle: Rc<
+                                            process::ServerDispatch<
+                                                RefCell<PosixModuleProcessImpl>,
+                                                any_pointer,
+                                                module_error::Owned<any_pointer>,
+                                            >,
+                                        > = this.upgrade().unwrap();
+                                        if let Err(e) = rpc_system.await {
+                                            let copy = e.clone();
+                                            handle.borrow_mut().error = Some(e.into());
+                                            return Err((copy, handle.borrow().debug_name.clone()));
+                                        }
+                                    }
+                                    Ok(())
+                                }),
+                                disconnector,
+                                bootstrap,
+                                api,
+                                error: None,
+                                debug_name: None,
+                            }))
+                        });
 
                         let module_process_client: AnyPointerClient = self
                             .module
                             .module_process_set
                             .borrow_mut()
-                            .new_client(RefCell::new(module_process));
+                            .from_rc(module_process);
                         results.get().set_result(module_process_client);
                         Ok(())
                     }
@@ -185,6 +213,7 @@ pub struct PosixModuleImpl {
     pub host: crate::keystone_capnp::host::Client<any_pointer>,
     pub module_process_set: Rc<RefCell<ModuleProcessCapSet>>,
     pub process_set: Rc<RefCell<crate::posix_process::ProcessCapSet>>,
+    pub join_set: crate::keystone::ModuleJoinSet,
 }
 
 #[capnproto_rpc(posix_module)]

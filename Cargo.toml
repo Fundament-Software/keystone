@@ -62,3 +62,14 @@ stateful = { path = "examples/stateful" }
 complex-config = { path = "examples/complex-config" }
 tempfile = "3"
 test-binary = "3.0"
+
+[patch."https://github.com/Fundament-Software/capstone-rs"]
+capstone = { path = "../capstone-rs/capnp" }
+capstone-futures = { path = "../capstone-rs/capnp-futures" }
+capstone-rpc = { path = "../capstone-rs/capnp-rpc" }
+capstone-macros = { path = "../capstone-rs/capnp-macros" }
+capstone-gen = { path = "../capstone-rs/capnpc" }
+async-byte-channel = { path = "../capstone-rs/async-byte-channel" }
+
+[patch."https://github.com/Fundament-Software/caplog"]
+caplog = { path = "../caplog" }

@@ -1,3 +1,5 @@
+#![warn(clippy::large_futures)]
+
 mod binary_embed;
 mod buffer_allocator;
 mod byte_stream;
@@ -16,11 +18,22 @@ mod proxy;
 mod sqlite;
 mod sturdyref;
 
+use atomic_take::AtomicTake;
+use capnp::any_pointer::Owned as any_pointer;
+use capnp::capability::FromServer;
+use capnp::traits::Owned;
+use capnp_macros::capnproto_rpc;
+use capnp_rpc::{rpc_twoparty_capnp, twoparty, RpcSystem};
 use eyre::Result;
 pub use keystone::*;
 use keystone_capnp::keystone_config;
+use module_capnp::module_start;
+use std::cell::RefCell;
 use std::future::Future;
+use std::marker::PhantomData;
+use std::rc::Rc;
 use tempfile::NamedTempFile;
+use tokio::sync::oneshot;
 use tracing_subscriber::filter::LevelFilter;
 
 include!(concat!(env!("OUT_DIR"), "/capnproto.rs"));
@@ -43,16 +56,6 @@ pub fn fmt(filter: impl Into<LevelFilter>) -> impl Into<tracing::Dispatch> {
         .with_writer(std::io::stderr)
         .with_ansi(true)
 }
-
-use capnp::any_pointer::Owned as any_pointer;
-use capnp::capability::FromServer;
-use capnp::traits::Owned;
-use capnp_macros::capnproto_rpc;
-use capnp_rpc::{rpc_twoparty_capnp, twoparty, RpcSystem};
-use module_capnp::module_start;
-use std::cell::RefCell;
-use std::marker::PhantomData;
-use std::rc::Rc;
 
 /// Trait that describes a keystone module
 #[allow(async_fn_in_trait)]
@@ -79,6 +82,7 @@ pub struct ModuleImpl<
     disconnector: RefCell<Option<capnp_rpc::Disconnector<rpc_twoparty_capnp::Side>>>,
     inner: RefCell<Option<Rc<<API::Reader<'static> as FromServer<Impl>>::Dispatch>>>,
     phantom: PhantomData<Config>,
+    sender: AtomicTake<oneshot::Sender<()>>,
 }
 
 #[capnproto_rpc(module_start)]
@@ -89,6 +93,9 @@ impl<
     > module_start::Server<Config, API> for ModuleImpl<Config, Impl, API>
 {
     async fn start(&self, config: Reader) -> capnp::Result<()> {
+        if let Some(sender) = self.sender.take() {
+            let _ = sender.send(());
+        }
         tracing::debug!("Constructing module implementation");
         let bootstrap_ref = self.bootstrap.borrow_mut().as_ref().map(|x| x.clone());
         if let Some(bootstrap) = bootstrap_ref {
@@ -131,6 +138,7 @@ pub async fn start<
     writer: U,
 ) -> capnp::Result<()> {
     tracing::info!("Module starting up...");
+    let (sender, recv) = oneshot::channel::<()>();
 
     let server = Rc::new(module_start::Client::<Config, API>::from_server(
         ModuleImpl {
@@ -138,6 +146,7 @@ pub async fn start<
             disconnector: None.into(),
             inner: None.into(),
             phantom: PhantomData,
+            sender: AtomicTake::new(sender),
         },
     ));
 
@@ -157,12 +166,26 @@ pub async fn start<
     *borrow.bootstrap.borrow_mut() = Some(rpc_system.bootstrap(rpc_twoparty_capnp::Side::Client));
     *borrow.disconnector.borrow_mut() = Some(rpc_system.get_disconnector());
 
+    tokio::task::spawn_local(async move {
+        if tokio::time::timeout(tokio::time::Duration::from_secs(5), recv)
+            .await
+            .is_err()
+        {
+            eprintln!("The RPC system hasn't received a bootstrap response in 5 seconds! Did you try to start this module directly instead of from inside a keystone instance? It has to be started from inside a keystone configuration!");
+        }
+    });
     tracing::debug!("Spawning RPC system");
-    rpc_system
+    let err = rpc_system
         .await
-        .map_err(|e| capnp::Error::failed(e.to_string()))?;
+        .map_err(|e| capnp::Error::failed(e.to_string()));
 
-    tracing::debug!("RPC callback returned");
+    if let Err(e) = err {
+        tracing::error!("RPC callback FAILED!");
+        return Err(e);
+    } else {
+        tracing::debug!("RPC callback returned successfully.");
+    }
+
     Ok(())
 }
 
@@ -188,7 +211,7 @@ pub async fn main<
         })
         .await??;
 
-    tracing::info!("Exiting module");
+    tracing::info!("Module exiting gracefully.");
     Ok(())
 }
 

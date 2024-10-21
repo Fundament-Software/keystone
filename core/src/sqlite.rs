@@ -505,7 +505,7 @@ impl SqliteDatabase {
         }
 
         if upd.has_sql_where() {
-            statement_and_params.statement.push_str(" ");
+            statement_and_params.statement.push(' ');
             self.match_where(upd.get_sql_where()?, &mut statement_and_params)
                 .await?;
         }
@@ -1880,7 +1880,7 @@ impl add_d_b::Client {
             r.build_capnp_struct(ret.reborrow().get(i as u32));
         }
         builder.set_target(ins._target);
-        return Ok(request.send());
+        Ok(request.send())
     }
 }
 impl database::Client {
@@ -1924,7 +1924,7 @@ impl database::Client {
             r.build_capnp_struct(ret.reborrow().get(i as u32));
         }
         builder.set_target(ins._target);
-        return Ok(request.send());
+        Ok(request.send())
     }
 }
 impl r_o_database::Client {
@@ -2157,7 +2157,7 @@ fn parse_insert_statement(
 }
 fn parse_update_statement(
     iter: &mut std::vec::IntoIter<&str>,
-    bindings: &Vec<Bindings>,
+    bindings: &[Bindings],
 ) -> eyre::Result<update::Update> {
     let mut conflict_strat = update::ConflictStrategy::Fail;
     let mut assign: Vec<assignment::Assignment> = Vec::new();
@@ -2333,7 +2333,7 @@ fn parse_update_statement(
 }
 fn parse_delete_statement(
     iter: &mut std::vec::IntoIter<&str>,
-    bindings: &Vec<Bindings>,
+    bindings: &[Bindings],
 ) -> eyre::Result<delete::Delete> {
     let mut where_clause = Vec::new();
     let mut returning = Vec::new();
@@ -2460,7 +2460,7 @@ fn parse_select_statement(
         _sql_where: Vec::new(),
     });
     let mut mergeoperations = Vec::new();
-    let mut names = Vec::new(); //TODO AS names
+    let names = Vec::new(); //TODO AS names
     let mut orderby = Vec::new();
     let mut limit = None;
 
@@ -2499,7 +2499,7 @@ fn parse_select_statement(
             _tableorsubquery: Some(table_or_subquery::TableOrSubquery::_Tableref(ro)),
             _joinoperations: Vec::new(),
         });
-        while let Some(mut next) = iter.next() {
+        while let Some(next) = iter.next() {
             if next == "," {
                 todo!(); //Maybe change the schema to make it make sense
             } else {

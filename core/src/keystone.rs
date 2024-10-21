@@ -117,6 +117,9 @@ pub struct ModuleInstance {
     pub queue: capnp_rpc::queued::Client,
 }
 
+pub type ModuleJoinSet =
+    Rc<RefCell<tokio::task::JoinSet<Result<(), (capnp::Error, Option<String>)>>>>;
+
 pub struct Keystone {
     db: Rc<crate::sqlite_capnp::root::ServerDispatch<SqliteDatabase>>,
     log: CapLog<MAX_BUFFER_SIZE>,
@@ -128,6 +131,7 @@ pub struct Keystone {
     pub proxy_set: Rc<RefCell<crate::proxy::CapSet>>, // Set of all untyped proxies
     module_process_set: Rc<RefCell<crate::posix_module::ModuleProcessCapSet>>,
     process_set: Rc<RefCell<crate::posix_process::ProcessCapSet>>,
+    join_set: ModuleJoinSet,
 }
 
 pub const BUILTIN_KEYSTONE: &str = "keystone";
@@ -303,7 +307,7 @@ impl Keystone {
         Ok(Self {
             db,
             log: caplog,
-            file_server: Rc::new(RefCell::new(AmbientAuthorityImpl::new())),
+            file_server: Default::default(),
             modules,
             timeout: Duration::from_millis(config.get_ms_timeout()),
             cells: Rc::new(RefCell::new(CapabilityServerSet::new())),
@@ -313,6 +317,7 @@ impl Keystone {
             )),
             process_set: Rc::new(RefCell::new(crate::posix_process::ProcessCapSet::new())),
             namemap,
+            join_set: Default::default(),
         })
     }
 
@@ -331,6 +336,7 @@ impl Keystone {
             host,
             module_process_set: self.module_process_set.clone(),
             process_set: self.process_set.clone(),
+            join_set: self.join_set.clone(),
         };
         let wrapper_client: posix_module::Client = capnp_rpc::new_client(wrapper_server);
 
@@ -625,6 +631,37 @@ impl Keystone {
         }
 
         Ok(())
+    }
+
+    pub async fn run(&self) -> Result<(), Vec<eyre::ErrReport>> {
+        let mut output: Vec<eyre::ErrReport> = Vec::new();
+        while let Some(res) = self.join_set.borrow_mut().join_next() {
+            let res = res.await;
+            match res {
+                Ok(Ok(())) => (),
+                Ok(Err((e, name))) => {
+                    tracing::error!(
+                        "{} RPC error: {}",
+                        name.unwrap_or("[Unknown Module]".to_string()),
+                        e
+                    );
+                    output.push(e.into());
+                }
+                Err(err) => {
+                    tracing::error!(
+                        "Join error occured when awaiting a module's RPC system: {}",
+                        err
+                    );
+                    output.push(err.into());
+                }
+            };
+        }
+
+        if output.is_empty() {
+            Ok(())
+        } else {
+            Err(output)
+        }
     }
 
     async fn kill_module(module: &mut ModuleInstance) {

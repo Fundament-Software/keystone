@@ -86,3 +86,7 @@ interface Host(State) {
   setState @1 (state :State) -> ();
   log @2 [T] (level :LogLevel, obj :T) -> ();
 }
+
+interface LogAttenuate(T) {
+  delegate @0 (name :Text) -> (self :T);
+}

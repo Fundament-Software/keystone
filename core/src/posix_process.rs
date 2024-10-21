@@ -140,26 +140,36 @@ fn spawn_iostream_task(
     mut stream: impl AsyncRead + Unpin + 'static, // In this case, 'static means an owned type. Also required for spawn_local
     bytestream: ByteStreamClient,
     cancellation_token: CancellationToken,
+    disconnect: DisconnectorSync,
 ) -> JoinHandle<Result<Option<usize>>> {
     spawn_local(async move {
-        tokio::select! {
+        match tokio::select! {
             _ = cancellation_token.cancelled() => Ok(None),
             result = bytestream.copy(&mut stream) => result.map(Some)
+        } {
+            Ok(v) => Ok(v),
+            Err(e) => {
+                tracing::error!("Disconnecting RPC because of stream failure: {}", e);
+                let opt = disconnect.borrow_mut().take();
+                if let Some(call) = opt {
+                    let _ = call.await;
+                }
+                Err(e)
+            }
         }
     })
 }
 
 pub type ProcessCapSet = CapabilityServerSet<PosixProcessImpl, PosixProcessClient>;
-type DisconnectorSync = std::sync::Arc<
-    std::sync::Mutex<Option<capnp_rpc::rpc::Disconnector<capnp_rpc::rpc_twoparty_capnp::Side>>>,
->;
+type DisconnectorSync =
+    Rc<RefCell<Option<capnp_rpc::rpc::Disconnector<capnp_rpc::rpc_twoparty_capnp::Side>>>>;
 
 #[allow(clippy::type_complexity)]
 pub struct PosixProcessImpl {
     pub cancellation_token: CancellationToken,
-    stdin: Rc<Mutex<Option<ChildStdin>>>,
-    _stdout_task: JoinHandle<Result<Option<usize>>>,
-    _stderr_task: JoinHandle<Result<Option<usize>>>,
+    pub stdin: Rc<Mutex<Option<ChildStdin>>>,
+    pub stdout_task: JoinHandle<Result<Option<usize>>>,
+    pub stderr_task: JoinHandle<Result<Option<usize>>>,
     child_task: Mutex<Option<JoinHandle<Result<Option<ExitStatus>, std::io::Error>>>>,
     killsender: AtomicTake<tokio::sync::oneshot::Sender<()>>,
     exitcode: AtomicI32,
@@ -171,8 +181,8 @@ impl PosixProcessImpl {
     fn new(
         cancellation_token: CancellationToken,
         stdin: Option<ChildStdin>,
-        _stdout_task: JoinHandle<Result<Option<usize>>>,
-        _stderr_task: JoinHandle<Result<Option<usize>>>,
+        stdout_task: JoinHandle<Result<Option<usize>>>,
+        stderr_task: JoinHandle<Result<Option<usize>>>,
         child_task: JoinHandle<Result<Option<ExitStatus>, std::io::Error>>,
         killsender: tokio::sync::oneshot::Sender<()>,
         disconnector: DisconnectorSync,
@@ -180,8 +190,8 @@ impl PosixProcessImpl {
         Self {
             cancellation_token,
             stdin: Rc::new(Mutex::new(stdin)),
-            _stdout_task,
-            _stderr_task,
+            stdout_task,
+            stderr_task,
             child_task: Mutex::new(Some(child_task)),
             killsender: AtomicTake::new(killsender),
             exitcode: AtomicI32::new(0),
@@ -210,11 +220,15 @@ impl PosixProcessImpl {
         // Create a cancellation token to allow us to kill ("cancel") the process.
         let cancellation_token = CancellationToken::new();
 
+        let (killsender, recv) = oneshot::channel::<()>();
+        let disconnector: DisconnectorSync = Default::default();
+
         // Create the tasks to read stdout and stderr to the byte stream
         let stdout_task = spawn_iostream_task(
             child.stdout.take().unwrap(),
             stdout_stream,
             cancellation_token.child_token(),
+            disconnector.clone(),
         );
 
         // TODO: Technically we should be forwarding the child's stderr so it can be redirected,
@@ -227,8 +241,9 @@ impl PosixProcessImpl {
         let mut stderr = std::io::stderr();
         let mut child_stderr = child.stderr.take().unwrap();
         let new_token = cancellation_token.child_token();
+        let disconnect = disconnector.clone();
         let stderr_task = spawn_local(async move {
-            tokio::select! {
+            match tokio::select! {
                 _ = new_token.cancelled() => Ok(None),
                 result = async {
                     let mut count = 0;
@@ -244,13 +259,20 @@ impl PosixProcessImpl {
                       }
                       Ok::<usize, eyre::Report>(count)
                 } => result.map(Some)
+            } {
+                Ok(v) => Ok(v),
+                Err(e) => {
+                    tracing::error!("Disconnecting RPC because of stderr failure: {}", e);
+                    let opt = disconnect.borrow_mut().take();
+                    if let Some(call) = opt {
+                        let _ = call.await;
+                    }
+                    Err(e)
+                }
             }
         });
 
-        let (killsender, recv) = oneshot::channel::<()>();
-        let disconnector = std::sync::Arc::new(std::sync::Mutex::new(None));
         let disconnect = disconnector.clone();
-
         let child_task = spawn_local(async move {
             let r = tokio::select! {
                 result = child.wait() => result.map(Some),
@@ -258,11 +280,7 @@ impl PosixProcessImpl {
             };
 
             tracing::debug!("Process terminated");
-            let opt = if let Ok(mut lock) = disconnect.lock() {
-                lock.take()
-            } else {
-                None
-            };
+            let opt = disconnect.borrow_mut().take();
 
             if let Some(call) = opt {
                 tracing::debug!("disconnecting RPC");

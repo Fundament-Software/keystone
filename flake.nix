@@ -62,7 +62,8 @@
             (inputs.crane.mkLib pkgs).overrideToolchain rust-custom-toolchain;
           commonArgs = {
             src = ./.;
-            buildInputs = with pkgs; [ pkg-config openssl zlib ];
+            nativeBuildInputs = with pkgs; [ pkg-config ];
+            buildInputs = with pkgs; [ openssl zlib ];
             strictDeps = true;
             version = "0.1.0";
             stdenv = pkgs.stdenvAdapters.useMoldLinker pkgs.llvmPackages_15.stdenv;

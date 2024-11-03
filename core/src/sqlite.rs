@@ -1,6 +1,7 @@
 use crate::buffer_allocator::BufferAllocator;
 use crate::database::DatabaseExt;
 use crate::keystone::CapabilityServerSetExt;
+use crate::keystone::CapnpResult;
 use crate::sqlite_capnp::database::prepare_insert_results;
 use crate::sqlite_capnp::join_clause::join_operation;
 use crate::sqlite_capnp::root::ServerDispatch;
@@ -14,7 +15,6 @@ use crate::sqlite_capnp::{
 };
 use crate::storage_capnp::{saveable, sturdy_ref};
 use crate::sturdyref::SturdyRefImpl;
-use crate::keystone::CapnpResult;
 use capnp::capability::FromServer;
 use capnp::capability::{FromClientHook, RemotePromise};
 use capnp_macros::{capnp_let, capnproto_rpc};

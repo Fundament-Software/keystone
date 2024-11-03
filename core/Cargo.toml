@@ -64,6 +64,7 @@ append-only-vec = "0.1.5"
 rand.workspace = true
 atomic-take = "1.1.0"
 num_enum = "0.7.3"
+async-byte-channel.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2"

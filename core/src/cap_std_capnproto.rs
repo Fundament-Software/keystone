@@ -1565,8 +1565,8 @@ pub mod tests {
         let nanos = duration_since_unix_epoch.get_nanos();
         print!("\nDuration since unix epoch to now: secs:{secs} nanos:{nanos}");
 
-        print!(" waiting 5 seconds ");
-        std::thread::sleep(std::time::Duration::from_secs(5));
+        print!(" waiting 2 seconds ");
+        std::thread::sleep(std::time::Duration::from_secs(2));
 
         let mut elapsed_request = system_clock.elapsed_request();
         let mut dur_param = elapsed_request.get().init_duration_since_unix_epoch();

@@ -10,44 +10,51 @@ fn test_stateful() -> Result<()> {
                 let stateful_client: stateful::stateful_capnp::root::Client =
                     instance.get_api_pipe("Stateful").unwrap();
 
-                {
-                    let mut echo = stateful_client.echo_last_request();
-                    echo.get().init_request().set_name("Keystone".into());
-                    let echo_response = echo.send().promise.await?;
+                let fut = async move {
+                    {
+                        let mut echo = stateful_client.echo_last_request();
+                        echo.get().init_request().set_name("Keystone".into());
+                        let echo_response = echo.send().promise.await?;
 
-                    let msg = echo_response.get()?.get_reply()?.get_message()?;
+                        let msg = echo_response.get()?.get_reply()?.get_message()?;
 
-                    assert_eq!(msg, "echo ");
-                }
+                        assert_eq!(msg, "echo ");
+                    }
 
-                {
-                    let mut echo = stateful_client.echo_last_request();
-                    echo.get().init_request().set_name("Replace".into());
-                    let echo_response = echo.send().promise.await?;
+                    {
+                        let mut echo = stateful_client.echo_last_request();
+                        echo.get().init_request().set_name("Replace".into());
+                        let echo_response = echo.send().promise.await?;
 
-                    let msg = echo_response.get()?.get_reply()?.get_message()?;
+                        let msg = echo_response.get()?.get_reply()?.get_message()?;
 
-                    assert_eq!(msg, "echo Keystone");
-                }
+                        assert_eq!(msg, "echo Keystone");
+                    }
 
-                {
-                    let mut echo = stateful_client.echo_last_request();
-                    echo.get().init_request().set_name("Reload".into());
-                    let echo_response = echo.send().promise.await?;
+                    {
+                        let mut echo = stateful_client.echo_last_request();
+                        echo.get().init_request().set_name("Reload".into());
+                        let echo_response = echo.send().promise.await?;
 
-                    let msg = echo_response.get()?.get_reply()?.get_message()?;
+                        let msg = echo_response.get()?.get_reply()?.get_message()?;
 
-                    assert_eq!(msg, "echo Replace");
-                }
+                        assert_eq!(msg, "echo Replace");
+                    }
+                    Ok::<(), eyre::Error>(())
+                };
 
-                instance.shutdown().await;
+                tokio::select! {
+                    r = keystone::test_runner(&mut instance) => Ok(r?),
+                    r = fut => r,
+                }?;
+                keystone::test_shutdown(&mut instance).await?;
             }
 
             let mut instance = keystone::test_create_keystone(&message).await.unwrap();
             let stateful_client: stateful::stateful_capnp::root::Client =
                 instance.get_api_pipe("Stateful").unwrap();
 
-            {
+            let fut = async move {
                 let mut echo = stateful_client.echo_last_request();
                 echo.get().init_request().set_name("Keystone".into());
                 let echo_response = echo.send().promise.await?;
@@ -55,10 +62,15 @@ fn test_stateful() -> Result<()> {
                 let msg = echo_response.get()?.get_reply()?.get_message()?;
 
                 assert_eq!(msg, "echo Reload");
-            }
+                Ok::<(), eyre::Error>(())
+            };
 
-            instance.shutdown().await;
-            Ok::<(), capnp::Error>(())
+            tokio::select! {
+                r = keystone::test_runner(&mut instance) => Ok(r?),
+                r = fut => r,
+            }?;
+            keystone::test_shutdown(&mut instance).await?;
+            Ok::<(), eyre::Error>(())
         },
     )
 }

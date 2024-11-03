@@ -4,6 +4,7 @@ use crate::cap_replacement::CapReplacement;
 use crate::cap_replacement::GetPointerBuilder;
 use crate::sqlite::SqliteDatabase;
 use crate::storage_capnp::restore::restore_results;
+use crate::keystone::CapnpResult;
 use capnp::any_pointer::Owned as any_pointer;
 use capnp::capability::FromClientHook;
 use capnp::message::{ReaderOptions, TypedReader};
@@ -165,9 +166,7 @@ fn get_replacement(
     index: u64,
     mut builder: capnp::any_pointer::Builder,
 ) -> capnp::Result<()> {
-    let result = db
-        .get_sturdyref(index as i64)
-        .map_err(|e| capnp::Error::failed(e.to_string()))?;
+    let result = db.get_sturdyref(index as i64).to_capnp()?;
 
     builder.set_as_capability(result.pipeline.get_cap().as_cap());
     Ok(())

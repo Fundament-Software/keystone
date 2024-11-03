@@ -41,3 +41,4 @@ keystone-build.workspace = true
 eyre.workspace = true
 tempfile.workspace = true
 async-byte-channel.workspace = true
+futures-util.workspace = true

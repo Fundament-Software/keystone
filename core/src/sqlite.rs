@@ -14,6 +14,7 @@ use crate::sqlite_capnp::{
 };
 use crate::storage_capnp::{saveable, sturdy_ref};
 use crate::sturdyref::SturdyRefImpl;
+use crate::keystone::CapnpResult;
 use capnp::capability::FromServer;
 use capnp::capability::{FromClientHook, RemotePromise};
 use capnp_macros::{capnp_let, capnproto_rpc};
@@ -79,10 +80,7 @@ impl result_stream::Server for PlaceholderResults {
                         .set_text(str.as_str().into()),
                     SqlDBAny::Blob(blob) => dbany_builder.reborrow().get(j as u32).set_blob(blob),
                     SqlDBAny::Pointer(key) => {
-                        let result = self
-                            .db
-                            .get_sturdyref(*key)
-                            .map_err(|e| capnp::Error::failed(e.to_string()))?;
+                        let result = self.db.get_sturdyref(*key).to_capnp()?;
 
                         dbany_builder
                             .reborrow()
@@ -1044,8 +1042,7 @@ impl restore::Server<crate::sqlite_capnp::storage::Owned> for SqliteDatabase {
                 .client
                 .hook
         } else {
-            let access_level = AccessLevel::try_from(data.get_id())
-                .map_err(|e| capnp::Error::failed(e.to_string()))?;
+            let access_level = AccessLevel::try_from(data.get_id()).to_capnp()?;
 
             let cap = TableRefImpl {
                 access: access_level,
@@ -1413,7 +1410,7 @@ impl TableRefImpl {
         let id = self
             .db
             .get_string_index(crate::keystone::BUILTIN_SQLITE)
-            .map_err(|e| capnp::Error::failed(e.to_string()))?;
+            .to_capnp()?;
         let mut msg = capnp::message::Builder::new_default();
         let mut builder = msg.init_root::<crate::sqlite_capnp::storage::Builder>();
         builder.set_id(self.access.into());
@@ -1424,7 +1421,7 @@ impl TableRefImpl {
             self.db.clone(),
         )
         .await
-        .map_err(|e| capnp::Error::failed(e.to_string()))?;
+        .to_capnp()?;
 
         let cap: sturdy_ref::Client<T> = self
             .db
@@ -1540,7 +1537,7 @@ impl saveable::Server<index::Owned> for IndexImpl {
         let id = self
             .db
             .get_string_index(crate::keystone::BUILTIN_SQLITE)
-            .map_err(|e| capnp::Error::failed(e.to_string()))?;
+            .to_capnp()?;
 
         let mut msg = capnp::message::Builder::new_default();
         let mut builder = msg.init_root::<crate::sqlite_capnp::storage::Builder>();
@@ -1553,7 +1550,7 @@ impl saveable::Server<index::Owned> for IndexImpl {
             self.db.clone(),
         )
         .await
-        .map_err(|e| capnp::Error::failed(e.to_string()))?;
+        .to_capnp()?;
 
         let cap: sturdy_ref::Client<index::Owned> = self
             .db

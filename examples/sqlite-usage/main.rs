@@ -190,97 +190,53 @@ fn test_sqlite_usage() -> eyre::Result<()> {
         .with_ansi(true)
         .init();
 
-    let temp_db = NamedTempFile::new().unwrap().into_temp_path();
-    let temp_log = NamedTempFile::new().unwrap().into_temp_path();
-    let temp_prefix = NamedTempFile::new().unwrap().into_temp_path();
-    let mut source = keystone::build_temp_config(&temp_db, &temp_log, &temp_prefix);
-
-    source.push_str(&keystone::build_module_config(
-        "Sqlite Usage",
-        "sqlite-usage-module",
-        r#"{ sqlite = [ "@sqlite" ], outer = [ "@keystone", "initCell", {id = "OuterTableRef", default = ["@sqlite", "createTable", { def = [{ name="state", baseType="text", nullable=false }] }, "res"]}, "result" ], inner = [ "@keystone", "initCell", {id = "InnerTableRef"}, "result" ] }"#
-    ));
-
-    let (client_writer, server_reader) = async_byte_channel::channel();
-    let (server_writer, client_reader) = async_byte_channel::channel();
-
-    let pool = tokio::task::LocalSet::new();
-    let a = pool.run_until(pool.spawn_local(keystone::start::<
+    keystone::test_module_harness::<
         crate::sqlite_usage_capnp::config::Owned,
         SqliteUsageImpl,
         crate::sqlite_usage_capnp::root::Owned,
-        async_byte_channel::Receiver,
-        async_byte_channel::Sender,
-    >(client_reader, client_writer)));
-
-    let b = pool.run_until(pool.spawn_local(async move {
-        let (mut instance, rpc, _disconnect, api) = keystone::Keystone::init_single_module(
-            &source,
+        _,
+    >(
+        &keystone::build_module_config(
             "Sqlite Usage",
-            server_reader,
-            server_writer,
-        )
-        .await
-        .unwrap();
+            "sqlite-usage-module",
+            r#"{ sqlite = [ "@sqlite" ], outer = [ "@keystone", "initCell", {id = "OuterTableRef", default = ["@sqlite", "createTable", { def = [{ name="state", baseType="text", nullable=false }] }, "res"]}, "result" ], inner = [ "@keystone", "initCell", {id = "InnerTableRef"}, "result" ] }"#,
+        ),
+        "Sqlite Usage",
+        |api| async move {
+            let usage_client: crate::sqlite_usage_capnp::root::Client = api;
 
-        let handle = tokio::task::spawn_local(rpc);
-        let usage_client: crate::sqlite_usage_capnp::root::Client = api;
+            {
+                let mut echo = usage_client.echo_alphabetical_request();
+                echo.get().init_request().set_name("3 Keystone".into());
+                let echo_response = echo.send().promise.await?;
 
-        {
-            let mut echo = usage_client.echo_alphabetical_request();
-            echo.get().init_request().set_name("3 Keystone".into());
-            let echo_response = echo.send().promise.await?;
+                let msg = echo_response.get()?.get_reply()?.get_message()?;
 
-            let msg = echo_response.get()?.get_reply()?.get_message()?;
+                assert_eq!(msg, "usage <No Previous Message>");
+            }
 
-            assert_eq!(msg, "usage <No Previous Message>");
-        }
+            {
+                let mut echo = usage_client.echo_alphabetical_request();
+                echo.get().init_request().set_name("2 Replace".into());
+                let echo_response = echo.send().promise.await?;
 
-        {
-            let mut echo = usage_client.echo_alphabetical_request();
-            echo.get().init_request().set_name("2 Replace".into());
-            let echo_response = echo.send().promise.await?;
+                let msg = echo_response.get()?.get_reply()?.get_message()?;
 
-            let msg = echo_response.get()?.get_reply()?.get_message()?;
+                assert_eq!(msg, "usage 3 Keystone");
+            }
 
-            assert_eq!(msg, "usage 3 Keystone");
-        }
+            {
+                let mut echo = usage_client.echo_alphabetical_request();
+                echo.get().init_request().set_name("1 Reload".into());
+                let echo_response = echo.send().promise.await?;
 
-        {
-            let mut echo = usage_client.echo_alphabetical_request();
-            echo.get().init_request().set_name("1 Reload".into());
-            let echo_response = echo.send().promise.await?;
+                let msg = echo_response.get()?.get_reply()?.get_message()?;
 
-            let msg = echo_response.get()?.get_reply()?.get_message()?;
-
-            assert_eq!(msg, "usage 2 Replace");
-        }
-
-        tokio::select! {
-            r = handle => r,
-            _ = instance.shutdown() => Ok(Ok(())),
-        }
-        .unwrap()
-        .unwrap();
-        Ok::<(), capnp::Error>(())
-    }));
-
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()?;
-    let result = runtime.block_on(async move {
-        tokio::select! {
-            r = a => r,
-            r = b => r,
-            r = tokio::signal::ctrl_c() => {
-                eprintln!("Ctrl-C detected, aborting!");
-                Ok(Ok(r.expect("failed to capture ctrl-c")))
-            },
-        }
-    });
-
-    runtime.shutdown_timeout(std::time::Duration::from_millis(1));
-    result.unwrap().unwrap();
+                assert_eq!(msg, "usage 2 Replace");
+            }
+            Ok::<(), eyre::Error>(())
+        },
+    )?;
 
     Ok(())
 }

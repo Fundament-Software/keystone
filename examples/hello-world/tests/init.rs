@@ -23,16 +23,22 @@ fn test_hello_world_init() -> eyre::Result<()> {
             let mut instance = keystone::test_create_keystone(&message).await.unwrap();
             let hello_client: root::Client = instance.get_api_pipe("Hello World").unwrap();
 
-            let mut sayhello = hello_client.say_hello_request();
-            sayhello.get().init_request().set_name("Keystone".into());
-            let hello_response = sayhello.send().promise.await?;
+            let fut = async move {
+                let mut sayhello = hello_client.say_hello_request();
+                sayhello.get().init_request().set_name("Keystone".into());
+                let hello_response = sayhello.send().promise.await?;
 
-            let msg = hello_response.get()?.get_reply()?.get_message()?;
+                let msg = hello_response.get()?.get_reply()?.get_message()?;
 
-            assert_eq!(msg, "Bonjour, Keystone!");
+                assert_eq!(msg, "Bonjour, Keystone!");
+                Ok::<(), capnp::Error>(())
+            };
 
-            instance.shutdown().await;
-            Ok(())
+            tokio::select! {
+                r = keystone::test_runner(&mut instance) => Ok(r?),
+                r = fut => r,
+            }?;
+            keystone::test_shutdown(&mut instance).await
         },
     )
 }

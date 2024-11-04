@@ -1,5 +1,6 @@
 use crate::database::DatabaseExt;
 use crate::keystone::CapabilityServerSetExt;
+use crate::keystone::CapnpResult;
 use crate::keystone_capnp::host;
 use crate::sqlite::SqliteDatabase;
 use crate::storage_capnp::save;
@@ -72,7 +73,7 @@ where
             self.db.clone(),
         )
         .await
-        .map_err(|e| capnp::Error::failed(e.to_string()))?;
+        .to_capnp()?;
 
         let cap: sturdy_ref::Client<capnp::any_pointer::Owned> = self
             .db
@@ -100,7 +101,7 @@ where
         self.db
             .server
             .get_state(self.module_id as i64, results.get().init_state().into())
-            .map_err(|e| capnp::Error::failed(e.to_string()))?;
+            .to_capnp()?;
 
         Ok(())
     }
@@ -117,7 +118,7 @@ where
             .server
             .set_state(self.module_id as i64, params.get()?.get_state()?)
             .await
-            .map_err(|e| capnp::Error::failed(e.to_string()))?;
+            .to_capnp()?;
         Ok(())
     }
 

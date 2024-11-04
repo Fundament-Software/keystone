@@ -1,6 +1,7 @@
 use crate::buffer_allocator::BufferAllocator;
 use crate::database::DatabaseExt;
 use crate::keystone::CapabilityServerSetExt;
+use crate::keystone::CapnpResult;
 use crate::sqlite_capnp::database::prepare_insert_results;
 use crate::sqlite_capnp::join_clause::join_operation;
 use crate::sqlite_capnp::root::ServerDispatch;
@@ -79,10 +80,7 @@ impl result_stream::Server for PlaceholderResults {
                         .set_text(str.as_str().into()),
                     SqlDBAny::Blob(blob) => dbany_builder.reborrow().get(j as u32).set_blob(blob),
                     SqlDBAny::Pointer(key) => {
-                        let result = self
-                            .db
-                            .get_sturdyref(*key)
-                            .map_err(|e| capnp::Error::failed(e.to_string()))?;
+                        let result = self.db.get_sturdyref(*key).to_capnp()?;
 
                         dbany_builder
                             .reborrow()
@@ -505,7 +503,7 @@ impl SqliteDatabase {
         }
 
         if upd.has_sql_where() {
-            statement_and_params.statement.push_str(" ");
+            statement_and_params.statement.push(' ');
             self.match_where(upd.get_sql_where()?, &mut statement_and_params)
                 .await?;
         }
@@ -1044,8 +1042,7 @@ impl restore::Server<crate::sqlite_capnp::storage::Owned> for SqliteDatabase {
                 .client
                 .hook
         } else {
-            let access_level = AccessLevel::try_from(data.get_id())
-                .map_err(|e| capnp::Error::failed(e.to_string()))?;
+            let access_level = AccessLevel::try_from(data.get_id()).to_capnp()?;
 
             let cap = TableRefImpl {
                 access: access_level,
@@ -1413,7 +1410,7 @@ impl TableRefImpl {
         let id = self
             .db
             .get_string_index(crate::keystone::BUILTIN_SQLITE)
-            .map_err(|e| capnp::Error::failed(e.to_string()))?;
+            .to_capnp()?;
         let mut msg = capnp::message::Builder::new_default();
         let mut builder = msg.init_root::<crate::sqlite_capnp::storage::Builder>();
         builder.set_id(self.access.into());
@@ -1424,7 +1421,7 @@ impl TableRefImpl {
             self.db.clone(),
         )
         .await
-        .map_err(|e| capnp::Error::failed(e.to_string()))?;
+        .to_capnp()?;
 
         let cap: sturdy_ref::Client<T> = self
             .db
@@ -1540,7 +1537,7 @@ impl saveable::Server<index::Owned> for IndexImpl {
         let id = self
             .db
             .get_string_index(crate::keystone::BUILTIN_SQLITE)
-            .map_err(|e| capnp::Error::failed(e.to_string()))?;
+            .to_capnp()?;
 
         let mut msg = capnp::message::Builder::new_default();
         let mut builder = msg.init_root::<crate::sqlite_capnp::storage::Builder>();
@@ -1553,7 +1550,7 @@ impl saveable::Server<index::Owned> for IndexImpl {
             self.db.clone(),
         )
         .await
-        .map_err(|e| capnp::Error::failed(e.to_string()))?;
+        .to_capnp()?;
 
         let cap: sturdy_ref::Client<index::Owned> = self
             .db
@@ -1880,7 +1877,7 @@ impl add_d_b::Client {
             r.build_capnp_struct(ret.reborrow().get(i as u32));
         }
         builder.set_target(ins._target);
-        return Ok(request.send());
+        Ok(request.send())
     }
 }
 impl database::Client {
@@ -1924,7 +1921,7 @@ impl database::Client {
             r.build_capnp_struct(ret.reborrow().get(i as u32));
         }
         builder.set_target(ins._target);
-        return Ok(request.send());
+        Ok(request.send())
     }
 }
 impl r_o_database::Client {
@@ -2157,7 +2154,7 @@ fn parse_insert_statement(
 }
 fn parse_update_statement(
     iter: &mut std::vec::IntoIter<&str>,
-    bindings: &Vec<Bindings>,
+    bindings: &[Bindings],
 ) -> eyre::Result<update::Update> {
     let mut conflict_strat = update::ConflictStrategy::Fail;
     let mut assign: Vec<assignment::Assignment> = Vec::new();
@@ -2333,7 +2330,7 @@ fn parse_update_statement(
 }
 fn parse_delete_statement(
     iter: &mut std::vec::IntoIter<&str>,
-    bindings: &Vec<Bindings>,
+    bindings: &[Bindings],
 ) -> eyre::Result<delete::Delete> {
     let mut where_clause = Vec::new();
     let mut returning = Vec::new();
@@ -2460,7 +2457,7 @@ fn parse_select_statement(
         _sql_where: Vec::new(),
     });
     let mut mergeoperations = Vec::new();
-    let mut names = Vec::new(); //TODO AS names
+    let names = Vec::new(); //TODO AS names
     let mut orderby = Vec::new();
     let mut limit = None;
 
@@ -2499,7 +2496,7 @@ fn parse_select_statement(
             _tableorsubquery: Some(table_or_subquery::TableOrSubquery::_Tableref(ro)),
             _joinoperations: Vec::new(),
         });
-        while let Some(mut next) = iter.next() {
+        while let Some(next) = iter.next() {
             if next == "," {
                 todo!(); //Maybe change the schema to make it make sense
             } else {

@@ -1,5 +1,6 @@
 use crate::byte_stream::ByteStreamBufferImpl;
 use crate::byte_stream_capnp::byte_stream::Owned as ByteStream;
+use crate::keystone::CapnpResult;
 use crate::module_capnp::module_error;
 use crate::module_capnp::module_start;
 use crate::posix_module_capnp::posix_module;
@@ -12,19 +13,21 @@ use crate::spawn_capnp::program::SpawnParams;
 use crate::spawn_capnp::program::SpawnResults;
 use capnp::any_pointer::Owned as any_pointer;
 use capnp::any_pointer::Owned as cap_pointer;
+use capnp::capability::FromServer;
 use capnp::capability::RemotePromise;
 use capnp_macros::capnproto_rpc;
-use capnp_rpc::rpc_twoparty_capnp;
 use capnp_rpc::CapabilityServerSet;
-use capnp_rpc::Disconnector;
+use eyre::Context;
+use futures_util::future::LocalBoxFuture;
+use futures_util::FutureExt;
 use std::{cell::RefCell, rc::Rc};
 
 pub struct PosixModuleProcessImpl {
     posix_process: process::Client<ByteStream, PosixError>,
-    _handle: tokio::task::JoinHandle<Result<(), capnp::Error>>,
-    pub(crate) _disconnector: Disconnector<rpc_twoparty_capnp::Side>,
-    pub(crate) bootstrap: module_start::Client<any_pointer, cap_pointer>,
+    pub(crate) rpc_future: Option<LocalBoxFuture<'static, eyre::Result<()>>>,
+    pub(crate) bootstrap: Option<module_start::Client<any_pointer, cap_pointer>>,
     api: RemotePromise<module_start::start_results::Owned<any_pointer, cap_pointer>>,
+    pub(crate) debug_name: Option<String>,
 }
 
 type AnyPointerClient = process::Client<cap_pointer, module_error::Owned<any_pointer>>;
@@ -41,9 +44,9 @@ impl process::Server<cap_pointer, module_error::Owned<any_pointer>>
         _: process::GetErrorParams<cap_pointer, module_error::Owned<any_pointer>>,
         mut results: process::GetErrorResults<cap_pointer, module_error::Owned<any_pointer>>,
     ) -> Result<(), capnp::Error> {
-        let span = tracing::debug_span!("posix_module_process");
+        let span = tracing::trace_span!("posix_module_process");
         let _enter = span.enter();
-        tracing::debug!("get_error()");
+        tracing::trace!("get_error()");
         let request = self.borrow_mut().posix_process.get_error_request();
         let posix_err = request.send().promise.await?;
         let builder = results.get().init_result();
@@ -58,9 +61,9 @@ impl process::Server<cap_pointer, module_error::Owned<any_pointer>>
         _: process::KillParams<cap_pointer, module_error::Owned<any_pointer>>,
         _: process::KillResults<cap_pointer, module_error::Owned<any_pointer>>,
     ) -> Result<(), capnp::Error> {
-        let span = tracing::debug_span!("posix_module_process");
+        let span = tracing::trace_span!("posix_module_process");
         let _enter = span.enter();
-        tracing::debug!("kill()");
+        tracing::trace!("kill()");
         let request = self.borrow_mut().posix_process.kill_request();
         request.send().promise.await?;
         Ok(())
@@ -71,13 +74,30 @@ impl process::Server<cap_pointer, module_error::Owned<any_pointer>>
         _: process::GetApiParams<cap_pointer, module_error::Owned<any_pointer>>,
         mut results: process::GetApiResults<cap_pointer, module_error::Owned<any_pointer>>,
     ) -> Result<(), capnp::Error> {
-        let span = tracing::debug_span!("posix_module_process");
+        let span = tracing::trace_span!("posix_module_process");
         let _enter = span.enter();
-        tracing::debug!("get_api()");
+        tracing::trace!("get_api()");
         results
             .get()
             .init_api()
             .set_as_capability(self.borrow_mut().api.pipeline.get_api().as_cap());
+        Ok(())
+    }
+
+    async fn join(
+        &self,
+        _: process::JoinParams<cap_pointer, module_error::Owned<any_pointer>>,
+        mut results: process::JoinResults<cap_pointer, module_error::Owned<any_pointer>>,
+    ) -> Result<(), ::capnp::Error> {
+        let span = tracing::trace_span!("posix_module_process");
+        let _enter = span.enter();
+        tracing::trace!("join()");
+        let request = self.borrow_mut().posix_process.join_request();
+        let posix_err = request.send().promise.await?;
+        let builder = results.get().init_result();
+        builder
+            .init_backing()
+            .set_as(posix_err.get()?.get_result()?)?;
         Ok(())
     }
 }
@@ -85,6 +105,17 @@ impl process::Server<cap_pointer, module_error::Owned<any_pointer>>
 pub struct PosixModuleProgramImpl {
     posix_program: program::Client<PosixArgs, ByteStream, PosixError>,
     module: PosixModuleImpl,
+}
+
+// Flattens nested results into a capnp::Result
+fn flatten_to_capnp<T, E: ToString, E2: ToString>(
+    result: Result<Result<T, E>, E2>,
+) -> capnp::Result<T> {
+    match result {
+        Ok(Ok(r)) => Ok(r),
+        Ok(Err(e)) => Err(e).to_capnp(),
+        Err(e) => Err(e).to_capnp(),
+    }
 }
 
 impl
@@ -138,37 +169,100 @@ impl
                                 stdin,
                                 self.module.host.clone().client,
                                 pair.get_config()?,
-                                |rpc_system| -> capnp::Result<()> {
-                                    let process_impl = self
-                                        .module
-                                        .process_set
-                                        .borrow_mut()
-                                        .get_local_server_of_resolved(&process)
-                                        .ok_or(capnp::Error::failed(
-                                            "Couldn't get process implementation!".into(),
-                                        ))?;
-
-                                    if let Ok(mut lock) = process_impl.as_ref().disconnector.lock()
-                                    {
-                                        lock.replace(rpc_system.get_disconnector());
-                                    }
-                                    Ok(())
-                                },
                             )?;
 
-                        let module_process = PosixModuleProcessImpl {
-                            posix_process: process,
-                            _handle: tokio::task::spawn_local(rpc_system),
-                            _disconnector: disconnector,
-                            bootstrap,
-                            api,
+                        let (process_future, killsender) = {
+                            let process_impl = self
+                                .module
+                                .process_set
+                                .borrow_mut()
+                                .get_local_server_of_resolved(&process)
+                                .ok_or(capnp::Error::failed(
+                                    "Couldn't get process implementation!".into(),
+                                ))?;
+
+                            (
+                                process_impl
+                                    .future
+                                    .take()
+                                    .expect("Process had no future to wait on!"),
+                                process_impl
+                                    .killsender
+                                    .take()
+                                    .expect("Process had no killsender!"),
+                            )
                         };
+
+                        let mut process_handle = tokio::task::spawn_local(process_future);
+
+                        let module_process = Rc::new_cyclic(|this| {
+                            let this = this.clone();
+                            let bootstrap_hook = bootstrap.client.hook.add_ref();
+                            let fut = async move {
+                                let kill = killsender;
+                                let disconnect = disconnector;
+                                {
+                                    // We must be exceedingly careful that the async block itself only borrows the weak reference, so
+                                    // that when we upgrade it here, it will go out of scope after we're finished and not cause a cycle.
+                                    let handle: Rc<
+                                        process::ServerDispatch<
+                                            RefCell<PosixModuleProcessImpl>,
+                                            any_pointer,
+                                            module_error::Owned<any_pointer>,
+                                        >,
+                                    > = this.upgrade().unwrap();
+
+                                    let mut rpc_handle = tokio::task::spawn_local(rpc_system);
+
+                                    // Here, we await both joinhandles to see which returns first. If one returns an error, we kill the other one, otherwise
+                                    // we await the other handle. This is done carefully so that we never await a handle twice
+
+                                    let result = tokio::select! {
+                                        r = &mut rpc_handle => {
+                                            if let Err(e) = flatten_to_capnp(r) {
+                                                let _ = kill.send(()); Err(e)
+                                            } else {
+                                                process_handle.await.to_capnp()
+                                            }
+                                        },
+                                        r = &mut process_handle => {
+                                            if let Err(e) = r {
+                                                let _ = disconnect.await;
+                                                Err(e).to_capnp()
+                                            } else {
+                                                flatten_to_capnp(rpc_handle.await)
+                                            }
+                                         },
+                                    };
+
+                                    result.wrap_err_with(move || {
+                                        let name = handle.borrow().debug_name.clone();
+                                        if let Some(n) = name {
+                                            format!("Error from {}", n)
+                                        } else {
+                                            format!(
+                                                "Error from Unknown Module {}",
+                                                bootstrap_hook.get_brand()
+                                            )
+                                        }
+                                    })
+                                }
+                            };
+
+                            AnyPointerClient::from_server(RefCell::new(PosixModuleProcessImpl {
+                                posix_process: process,
+                                rpc_future: Some(fut.boxed_local()),
+                                bootstrap: Some(bootstrap),
+                                api,
+                                debug_name: None,
+                            }))
+                        });
 
                         let module_process_client: AnyPointerClient = self
                             .module
                             .module_process_set
                             .borrow_mut()
-                            .new_client(RefCell::new(module_process));
+                            .from_rc(module_process);
                         results.get().set_result(module_process_client);
                         Ok(())
                     }
@@ -247,7 +341,7 @@ mod tests {
                     Ok(_) => stdin
                         .flush()
                         .await
-                        .map_err(|e| capnp::Error::failed(e.to_string())),
+                        .to_capnp(),
                     Err(e) => Err(capnp::Error::failed(e.to_string())),
                 }
             }

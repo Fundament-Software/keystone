@@ -99,13 +99,13 @@ pub struct ByteStreamBufferImpl(Rc<RefCell<ByteStreamBufferInternal>>);
 
 impl ByteStreamBufferImpl {
     pub fn new() -> Self {
-        Default::default()
+        Self(Rc::new(RefCell::new(Default::default())))
     }
 }
 
 impl Default for ByteStreamBufferImpl {
     fn default() -> Self {
-        Self(Rc::new(RefCell::new(Default::default())))
+        Self::new()
     }
 }
 

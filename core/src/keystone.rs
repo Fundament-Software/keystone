@@ -1,7 +1,6 @@
 use crate::cap_replacement::CapReplacement;
 use crate::cell::SimpleCellImpl;
 use crate::database::DatabaseExt;
-use crate::posix_module::ModuleProcessCapSet;
 pub use crate::proxy::ProxyServer;
 use caplog::{CapLog, MAX_BUFFER_SIZE};
 use capnp::any_pointer::Owned as any_pointer;
@@ -11,8 +10,28 @@ use capnp::traits::SetPointerBuilder;
 use capnp_rpc::twoparty::VatNetwork;
 use capnp_rpc::{rpc_twoparty_capnp, CapabilityServerSet, RpcSystem};
 use eyre::Result;
+use eyre::WrapErr;
+use futures_util::stream::FuturesUnordered;
+use futures_util::FutureExt;
+use futures_util::StreamExt;
+use std::future::Future;
+use std::pin::Pin;
 use std::time::Duration;
 use std::{cell::RefCell, collections::HashMap, path::Path, rc::Rc};
+
+pub trait CapnpResult<T> {
+    fn to_capnp(self) -> capnp::Result<T>;
+}
+
+impl<T, E: ToString> CapnpResult<T> for Result<T, E> {
+    fn to_capnp(self) -> capnp::Result<T> {
+        if self.is_err() {
+            self.map_err(|e| capnp::Error::failed(e.to_string()))
+        } else {
+            self.map_err(|e| capnp::Error::failed(e.to_string()))
+        }
+    }
+}
 
 use super::{
     keystone_capnp::cap_expr,
@@ -84,6 +103,8 @@ pub enum Error {
     DeferredNotFound(String),
     #[error("Invalid config, {0}!")]
     InvalidConfig(String),
+    #[error("Bootstrap interface for {0} is either missing or it was already closed!")]
+    MissingBootstrap(String),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -103,8 +124,9 @@ pub enum ModuleState {
 pub struct ModuleInstance {
     module_id: u64,
     name: String,
-    client: Option<SpawnProgram>,
+    program: Option<SpawnProgram>,
     process: Option<SpawnProcess>,
+    bootstrap: Option<module_start::Client<any_pointer, any_pointer>>,
     pub api: Option<
         RemotePromise<
             crate::spawn_capnp::process::get_api_results::Owned<
@@ -117,6 +139,8 @@ pub struct ModuleInstance {
     pub queue: capnp_rpc::queued::Client,
 }
 
+pub type ModuleJoinSet = Rc<RefCell<tokio::task::JoinSet<Result<()>>>>;
+
 pub struct Keystone {
     db: Rc<crate::sqlite_capnp::root::ServerDispatch<SqliteDatabase>>,
     log: CapLog<MAX_BUFFER_SIZE>,
@@ -128,6 +152,7 @@ pub struct Keystone {
     pub proxy_set: Rc<RefCell<crate::proxy::CapSet>>, // Set of all untyped proxies
     module_process_set: Rc<RefCell<crate::posix_module::ModuleProcessCapSet>>,
     process_set: Rc<RefCell<crate::posix_process::ProcessCapSet>>,
+    rpc_systems: FuturesUnordered<Pin<Box<dyn Future<Output = Result<()>>>>>,
 }
 
 pub const BUILTIN_KEYSTONE: &str = "keystone";
@@ -144,12 +169,7 @@ impl Keystone {
         module: impl AsRef<str>,
         reader: T,
         writer: U,
-    ) -> Result<(
-        Self,
-        RpcSystem<rpc_twoparty_capnp::Side>,
-        capnp_rpc::Disconnector<rpc_twoparty_capnp::Side>,
-        API,
-    )> {
+    ) -> Result<(Self, API)> {
         let mut message = ::capnp::message::Builder::new_default();
         let mut msg = message.init_root::<keystone_config::Builder>();
         crate::config::to_capnp(&config.as_ref().parse::<toml::Table>()?, msg.reborrow())?;
@@ -175,7 +195,7 @@ impl Keystone {
         let _enter = span.enter();
 
         let cap_table = config.get_cap_table()?;
-        let (rpc_system, api, id, disconnector) = if let Some(s) = target {
+        let (rpc_system, api, id, bootstrap) = if let Some(s) = target {
             tracing::debug!("Found target module, initializing in current thread");
             let id = instance.get_id(s)?;
 
@@ -192,13 +212,15 @@ impl Keystone {
                 capnp_rpc::new_client(HostImpl::new(id, instance.db.clone()));
 
             tracing::debug!("Initializing RPC system");
-            let (rpc_system, _, disconnector, api) =
-                init_rpc_system(reader, writer, host.client, replacement, |_| Ok(()))?;
+            let (rpc_system, bootstrap, _, api) =
+                init_rpc_system(reader, writer, host.client, replacement)?;
 
-            Ok((rpc_system, api, id, disconnector))
+            Ok((rpc_system, api, id, bootstrap))
         } else {
             Err(Error::ModuleNameNotFound(module.as_ref().to_string()))
         }?;
+
+        let module_name = module.as_ref().to_string();
 
         tracing::debug!("Resolving API proxy");
         let module = instance
@@ -210,11 +232,13 @@ impl Keystone {
             Ok(api.pipeline.get_api().as_cap()),
         );
         module.state = ModuleState::Ready;
+        module.bootstrap = Some(bootstrap);
 
+        let fut = async move { rpc_system.await.wrap_err(module_name) };
+
+        instance.rpc_systems.push(fut.boxed_local());
         Ok((
             instance,
-            rpc_system,
-            disconnector,
             capnp::capability::FromClientHook::new(api.pipeline.get_api().as_cap()),
         ))
     }
@@ -251,8 +275,9 @@ impl Keystone {
                         ModuleInstance {
                             name: name.to_owned(),
                             module_id: id,
-                            client: None,
+                            program: None,
                             process: None,
+                            bootstrap: None,
                             api: None,
                             state: ModuleState::NotStarted,
                             queue: capnp_rpc::queued::Client::new(None),
@@ -303,7 +328,7 @@ impl Keystone {
         Ok(Self {
             db,
             log: caplog,
-            file_server: Rc::new(RefCell::new(AmbientAuthorityImpl::new())),
+            file_server: Default::default(),
             modules,
             timeout: Duration::from_millis(config.get_ms_timeout()),
             cells: Rc::new(RefCell::new(CapabilityServerSet::new())),
@@ -313,6 +338,7 @@ impl Keystone {
             )),
             process_set: Rc::new(RefCell::new(crate::posix_process::ProcessCapSet::new())),
             namemap,
+            rpc_systems: Default::default(),
         })
     }
 
@@ -478,10 +504,7 @@ impl Keystone {
                     .cells
                     .borrow_mut()
                     // Very important to use ::init() here so it gets initialized to a default value
-                    .new_client(
-                        SimpleCellImpl::init(id as i64, self.db.clone())
-                            .map_err(|e| capnp::Error::failed(e.to_string()))?,
-                    );
+                    .new_client(SimpleCellImpl::init(id as i64, self.db.clone()).to_capnp()?);
                 builder.set_as_capability(client.into_client_hook());
                 return Ok(true);
             }
@@ -504,9 +527,15 @@ impl Keystone {
         let _enter = span.enter();
         tracing::debug!("Set Initialized flag");
 
-        let host: crate::keystone_capnp::host::Client<any_pointer> =
+        let keystone_host: crate::keystone_capnp::host::Client<any_pointer> =
             capnp_rpc::new_client(HostImpl::new(id, self.db.clone()));
-        let client = self.posix_spawn(host.clone(), config).await.ok();
+        let Ok(program) = self.posix_spawn(keystone_host.clone(), config).await else {
+            return Self::failed_start(
+                &mut self.modules,
+                id,
+                capnp::Error::failed("Failed to spawn program!".to_string()),
+            );
+        };
 
         let (conf, workpath) = match Self::extract_config_pair(config) {
             Ok((c, d)) => (c, d),
@@ -530,51 +559,62 @@ impl Keystone {
         let dirclient = AmbientAuthorityImpl::new_dir(&self.file_server, dir);
 
         // Pass our pair of arguments to the spawn request
-        if let Some(client) = client {
-            let mut spawn_request = client.spawn_request();
-            let builder = spawn_request.get();
-            let replacement = CapReplacement::new(conf, |index, mut builder| {
-                if self.autoinit_check(cap_table, builder.reborrow(), index as u32, id)? {
-                    Ok(())
-                } else {
-                    self.resolve_cap_expr(cap_table.get(index as u32), cap_table, builder)
-                }
-            });
+        let mut spawn_request = program.spawn_request();
+        let builder = spawn_request.get();
+        let replacement = CapReplacement::new(conf, |index, mut builder| {
+            if self.autoinit_check(cap_table, builder.reborrow(), index as u32, id)? {
+                Ok(())
+            } else {
+                self.resolve_cap_expr(cap_table.get(index as u32), cap_table, builder)
+            }
+        });
 
-            let mut pair = builder.init_args();
-            let mut anybuild: capnp::any_pointer::Builder = pair.reborrow().init_config();
-            if let Err(e) = anybuild.set_as(replacement) {
+        let mut pair = builder.init_args();
+        let mut anybuild: capnp::any_pointer::Builder = pair.reborrow().init_config();
+        if let Err(e) = anybuild.set_as(replacement) {
+            return Self::failed_start(&mut self.modules, id, e);
+        }
+        pair.set_workdir(dirclient);
+
+        tracing::debug!("Sending spawn request inside {}", workpath.display());
+        let response = spawn_request.send().promise.await;
+        let process = match Self::process_spawn_request(response) {
+            Ok(x) => x,
+            Err(e) => {
                 return Self::failed_start(&mut self.modules, id, e);
             }
-            pair.set_workdir(dirclient);
+        };
 
-            tracing::debug!("Sending spawn request inside {}", workpath.display());
-            let response = spawn_request.send().promise.await;
-            let process = match Self::process_spawn_request(response) {
-                Ok(x) => x,
-                Err(e) => {
-                    return Self::failed_start(&mut self.modules, id, e);
-                }
-            };
+        let inner = self
+            .module_process_set
+            .borrow()
+            .get_local_server_of_resolved(&process)
+            .expect("Could not get inner process dispatch?");
 
-            tracing::debug!("Sending API request");
-            let module = self.modules.get_mut(&id).ok_or(Error::ModuleNotFound(id))?;
-            let p = process.get_api_request().send();
-            capnp_rpc::queued::ClientInner::resolve(
-                &module.queue.inner,
-                Ok(p.pipeline.get_api().as_cap()),
-            );
-            module.process = Some(process);
-            module.client = Some(client);
-            module.api = Some(p);
-            module.state = ModuleState::Ready;
-        } else {
-            return Self::failed_start(
-                &mut self.modules,
-                id,
-                capnp::Error::failed("Failed to acquire client!".to_string()),
-            );
-        }
+        self.rpc_systems.push(
+            inner
+                .server
+                .borrow_mut()
+                .rpc_future
+                .take()
+                .expect("Lost rpc_future???"),
+        );
+
+        tracing::debug!("Sending API request");
+        let module = self.modules.get_mut(&id).ok_or(Error::ModuleNotFound(id))?;
+        let p = process.get_api_request().send();
+        capnp_rpc::queued::ClientInner::resolve(
+            &module.queue.inner,
+            Ok(p.pipeline.get_api().as_cap()),
+        );
+
+        inner.server.borrow_mut().debug_name = Some(module.name.clone());
+
+        module.process = Some(process);
+        module.program = Some(program);
+        module.bootstrap = inner.server.borrow_mut().bootstrap.take();
+        module.api = Some(p);
+        module.state = ModuleState::Ready;
 
         Ok(())
     }
@@ -590,9 +630,10 @@ impl Keystone {
     }
 
     fn check_error(
+        name: &str,
         result: Result<
             capnp::capability::Response<
-                crate::spawn_capnp::process::get_error_results::Owned<
+                crate::spawn_capnp::process::join_results::Owned<
                     any_pointer,
                     module_error::Owned<any_pointer>,
                 >,
@@ -600,12 +641,24 @@ impl Keystone {
             capnp::Error,
         >,
     ) -> Result<ModuleState> {
-        let r = result?;
+        let r = match result {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::error!("{} process returned error: {}", name, e.to_string());
+                return Err(e.into());
+            }
+        };
+
         let moderr: module_error::Reader<any_pointer> = r.get()?.get_result()?;
         Ok(match moderr.which()? {
             module_error::Which::Backing(e) => {
                 let e: crate::posix_spawn_capnp::posix_error::Reader = e?.get_as()?;
                 if e.get_error_code() != 0 {
+                    tracing::error!(
+                        "{} process returned error code: {}",
+                        name,
+                        e.get_error_code()
+                    );
                     ModuleState::CloseFailure
                 } else {
                     ModuleState::Closed
@@ -627,6 +680,54 @@ impl Keystone {
         Ok(())
     }
 
+    pub fn next<'a>(
+        &'a mut self,
+    ) -> futures_util::stream::Next<'a, FuturesUnordered<Pin<Box<dyn Future<Output = Result<()>>>>>>
+    {
+        self.rpc_systems.next()
+    }
+
+    /*pub fn run<'a>(
+        &'a mut self,
+    ) -> (
+        impl std::future::Future<Output = Result<(), Vec<eyre::ErrReport>>> + 'a,
+        CancellationToken,
+    ) {
+        let cancel = CancellationToken::new();
+        let cloned = cancel.clone();
+
+        let fut = async move {
+            let mut output: Vec<eyre::ErrReport> = Vec::new();
+            tracing::info!("Keystone running");
+            while !self.rpc_systems.is_empty() {
+                let res = tokio::select! {
+                    r = self.rpc_systems.next() => r,
+                    _ = cloned.cancelled() => break,
+                };
+                match res {
+                    Some(Ok(())) => (),
+                    Some(Err((e, name))) => {
+                        tracing::error!(
+                            "{} RPC error: {}",
+                            name.unwrap_or("[Unknown Module]".to_string()),
+                            e
+                        );
+                        output.push(e.into());
+                    }
+                    None => (),
+                };
+            }
+
+            if output.is_empty() {
+                Ok(())
+            } else {
+                Err(output)
+            }
+        };
+
+        (fut, cancel)
+    }*/
+
     async fn kill_module(module: &mut ModuleInstance) {
         if let Some(p) = module.process.as_ref() {
             let _ = p.kill_request().send().promise.await;
@@ -646,29 +747,20 @@ impl Keystone {
         )
     }
 
-    pub async fn stop_module(
-        module_process_set: Rc<RefCell<ModuleProcessCapSet>>,
-        module: &mut ModuleInstance,
-        timeout: Duration,
-    ) -> Result<()> {
+    pub async fn stop_module(module: &mut ModuleInstance, timeout: Duration) -> Result<()> {
         if Self::halted(&module.state) {
             return Ok(());
         }
         // TODO: If a race condition here is possible, this must be made atomic and checked to see if it was already set to closing by another thread.
         module.state = ModuleState::Closing;
 
-        // Acquire the underlying process object
-        let process = module
-            .process
-            .as_ref()
-            .and_then(|p| module_process_set.borrow().get_local_server_of_resolved(p));
+        // Send the stop request to the bootstrap interface
 
-        let stop_request = if let Some(p) = process {
-            let borrow = p.as_ref().server.borrow_mut();
-            borrow.bootstrap.stop_request().send()
-        } else {
-            return Err(capnp::Error::from_kind(capnp::ErrorKind::Disconnected).into());
+        let Some(bootstrap) = module.bootstrap.as_ref() else {
+            return Err(Error::MissingBootstrap(module.name.clone()).into());
         };
+
+        let stop_request = bootstrap.stop_request().send();
 
         // Call the stop method with some timeout
         if (tokio::time::timeout(timeout, stop_request.promise).await).is_err() {
@@ -677,11 +769,20 @@ impl Keystone {
             Ok(())
         } else {
             if let Some(p) = module.process.as_ref() {
-                // Now call the get error message with the same timeout
-                match tokio::time::timeout(timeout, p.get_error_request().send().promise).await {
+                // Now join the process with the same timeout
+                match tokio::time::timeout(timeout, p.join_request().send().promise).await {
                     Ok(result) => {
-                        module.state =
-                            Self::check_error(result).unwrap_or(ModuleState::CloseFailure);
+                        module.state = match Self::check_error(&module.name, result) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                tracing::error!(
+                                    "Failure during {} error lookup: {}",
+                                    &module.name,
+                                    e.to_string()
+                                );
+                                ModuleState::CloseFailure
+                            }
+                        };
                     }
                     Err(_) => Self::kill_module(module).await,
                 }
@@ -690,14 +791,25 @@ impl Keystone {
         }
     }
 
-    pub async fn shutdown(&mut self) {
-        for v in self.modules.values_mut() {
-            // TODO: initiate all module closing attempts in parallel before awaiting
-            let _ = match v.state {
-                ModuleState::Closing => Ok(()),
-                _ => Self::stop_module(self.module_process_set.clone(), v, self.timeout).await,
-            };
-        }
+    pub fn shutdown<'a>(
+        &'a mut self,
+    ) -> (
+        FuturesUnordered<impl Future<Output = Result<()>> + use<'a>>,
+        &'a mut FuturesUnordered<Pin<Box<dyn Future<Output = Result<()>>>>>,
+    ) {
+        let set: FuturesUnordered<_> = self
+            .modules
+            .values_mut()
+            .filter_map(|v| {
+                if v.state != ModuleState::Closing {
+                    Some(Self::stop_module(v, self.timeout))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        (set, &mut self.rpc_systems)
     }
 
     pub fn get_api_pipe<T: FromClientHook>(&self, module: &str) -> Result<T> {
@@ -792,23 +904,20 @@ impl crate::keystone_capnp::root::Server for KeystoneRoot {
             .db
             .server
             .get_string_index(params.get_id()?.to_str()?)
-            .map_err(|e| capnp::Error::failed(e.to_string()))?;
+            .to_capnp()?;
 
         let client = self
             .cells
             .borrow_mut()
             // Very important to use ::init() here so it gets initialized to a default value
-            .new_client(
-                SimpleCellImpl::init(id, self.db.clone())
-                    .map_err(|e| capnp::Error::failed(e.to_string()))?,
-            );
+            .new_client(SimpleCellImpl::init(id, self.db.clone()).to_capnp()?);
 
         if params.has_default() {
             self.db
                 .server
                 .set_state(id, params.get_default()?)
                 .await
-                .map_err(|e| capnp::Error::failed(e.to_string()))?;
+                .to_capnp()?;
         }
 
         results.get().set_result(client);
@@ -820,14 +929,12 @@ impl crate::keystone_capnp::root::Server for KeystoneRoot {
 pub(crate) fn init_rpc_system<
     T: tokio::io::AsyncRead + 'static + Unpin,
     U: tokio::io::AsyncWrite + 'static + Unpin,
-    F: FnOnce(&mut RpcSystem<rpc_twoparty_capnp::Side>) -> capnp::Result<()>,
     From: SetPointerBuilder,
 >(
     reader: T,
     writer: U,
     bootstrap: capnp::capability::Client,
     config: From,
-    f: F,
 ) -> capnp::Result<(
     RpcSystem<rpc_twoparty_capnp::Side>,
     module_start::Client<any_pointer, any_pointer>,
@@ -842,8 +949,6 @@ pub(crate) fn init_rpc_system<
     );
 
     let mut rpc_system = RpcSystem::new(Box::new(network), Some(bootstrap));
-
-    f(&mut rpc_system)?;
 
     let disconnector = rpc_system.get_disconnector();
     let bootstrap: module_start::Client<any_pointer, any_pointer> =

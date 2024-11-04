@@ -1,7 +1,9 @@
 use crate::database::DatabaseExt;
+use crate::keystone::CapnpResult;
 use crate::sqlite::SqliteDatabase;
 use crate::sqlite_capnp::root::ServerDispatch;
 use crate::storage_capnp::sturdy_ref;
+use capnp::any_pointer::Owned as any_pointer;
 use capnp::traits::SetPointerBuilder;
 use std::rc::Rc;
 
@@ -16,10 +18,7 @@ impl SturdyRefImpl {
         data: R,
         db: Rc<ServerDispatch<SqliteDatabase>>,
     ) -> eyre::Result<Self> {
-        let id = db
-            .add_sturdyref(module_id, data, None)
-            .await
-            .map_err(|e| capnp::Error::failed(e.to_string()))?;
+        let id = db.add_sturdyref(module_id, data, None).await.to_capnp()?;
 
         Ok(Self { id, db })
     }
@@ -29,16 +28,13 @@ impl SturdyRefImpl {
     }
 }
 
-impl sturdy_ref::Server<capnp::any_pointer::Owned> for SturdyRefImpl {
+impl sturdy_ref::Server<any_pointer> for SturdyRefImpl {
     async fn restore(
         &self,
-        _: sturdy_ref::RestoreParams<capnp::any_pointer::Owned>,
-        mut results: sturdy_ref::RestoreResults<capnp::any_pointer::Owned>,
+        _: sturdy_ref::RestoreParams<any_pointer>,
+        mut results: sturdy_ref::RestoreResults<any_pointer>,
     ) -> Result<(), ::capnp::Error> {
-        let promise = self
-            .db
-            .get_sturdyref(self.id)
-            .map_err(|e| capnp::Error::failed(e.to_string()))?;
+        let promise = self.db.get_sturdyref(self.id).to_capnp()?;
 
         results
             .get()
@@ -72,7 +68,7 @@ where
         let promise = self
             .db
             .get_sturdyref(self.id)
-            .map_err(|e| capnp::Error::failed(e.to_string()))?;
+            .to_capnp()?;
 
         let reader: <T as capnp::traits::Owned>::Reader<'_> =
             capnp::capability::FromClientHook::new(promise.pipeline.get_cap().as_cap());

@@ -3033,7 +3033,7 @@ mod tests {
             .get()?
             .get_res()?;
 
-        let res = client
+        let _ = client
             .send_request_from_sql(
                 "INSERT OR ABORT INTO ?0 (name, data) VALUES (Steven, NULL)",
                 vec![Bindings::RATableref(ra_table_ref_cap.clone())],
@@ -3099,7 +3099,7 @@ mod tests {
             .await?
             .get()?
             .get_res()?;
-        let checking2 = client //TODO this is doing nothing currently just checking if BETWEEN implodes
+        let _ = client //TODO this is doing nothing currently just checking if BETWEEN implodes
             .send_request_from_sql(
                 "SELECT * FROM ?0 WHERE ?1 BETWEEN ?2 AND ?3",
                 vec![
@@ -3151,7 +3151,7 @@ mod tests {
             .await?
             .get()?
             .get_res()?;
-        let mut res = client
+        let _ = client
             .send_request_from_sql("DELETE FROM ?0", vec![Bindings::Tableref(table_ref)])?
             .promise
             .await?;

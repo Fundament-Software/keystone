@@ -7,6 +7,7 @@ members = [
   "examples/stateful",
   "examples/complex-config",
   "examples/sqlite-usage",
+  "examples/scheduler-usage",
 ]
 resolver = "2"
 default-members = ["core"]
@@ -62,3 +63,9 @@ stateful = { path = "examples/stateful" }
 complex-config = { path = "examples/complex-config" }
 tempfile = "3"
 test-binary = "3.0"
+chrono = { version = "0.4", default-features = false, features = [
+  "std",
+  "alloc",
+  "clock",
+] }
+atomic-take = "1.1.0"

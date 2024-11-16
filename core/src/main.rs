@@ -14,6 +14,7 @@ mod posix_module;
 mod posix_process;
 mod posix_spawn;
 mod proxy;
+pub mod scheduler;
 pub mod sqlite;
 mod sturdyref;
 

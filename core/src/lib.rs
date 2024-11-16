@@ -15,7 +15,8 @@ mod posix_module;
 mod posix_process;
 mod posix_spawn;
 mod proxy;
-mod sqlite;
+pub mod scheduler;
+pub mod sqlite;
 mod sturdyref;
 
 use atomic_take::AtomicTake;

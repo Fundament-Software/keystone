@@ -2,6 +2,7 @@
 
 using TOML = import "std/toml.capnp";
 using Cell = import "storage.capnp".Cell;
+using Save = import "storage.capnp".Save;
 
 enum LogLevel {
   trace @0;
@@ -78,9 +79,8 @@ interface Root {
   # Returns the new cell, or an existing one if it already existed.
 }
 
-interface Host(State) {
-  # Per-module keystone interface, used as the bootstrap interface for each module's RPC system. Keystone's implementation
-  # also implements Save(Storage), even though it is not inherited here.
+interface Host(State) extends(Save(AnyPointer)) {
+  # Per-module keystone interface, used as the bootstrap interface for each module's RPC system.
 
   getState @0 () -> (state :State);
   setState @1 (state :State) -> ();

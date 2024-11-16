@@ -1,4 +1,5 @@
 use eyre::Result;
+use stateful::stateful_capnp::root::echo_request::EchoRequest;
 
 #[test]
 fn test_stateful() -> Result<()> {
@@ -12,9 +13,13 @@ fn test_stateful() -> Result<()> {
 
                 let fut = async move {
                     {
-                        let mut echo = stateful_client.echo_last_request();
-                        echo.get().init_request().set_name("Keystone".into());
-                        let echo_response = echo.send().promise.await?;
+                        let mut echo_response = stateful_client
+                            .build_echo_last_request(Some(EchoRequest {
+                                _name: "Keystone".into(),
+                            }))
+                            .send()
+                            .promise
+                            .await?;
 
                         let msg = echo_response.get()?.get_reply()?.get_message()?;
 
@@ -22,9 +27,13 @@ fn test_stateful() -> Result<()> {
                     }
 
                     {
-                        let mut echo = stateful_client.echo_last_request();
-                        echo.get().init_request().set_name("Replace".into());
-                        let echo_response = echo.send().promise.await?;
+                        let mut echo_response = stateful_client
+                            .build_echo_last_request(Some(EchoRequest {
+                                _name: "Replace".into(),
+                            }))
+                            .send()
+                            .promise
+                            .await?;
 
                         let msg = echo_response.get()?.get_reply()?.get_message()?;
 
@@ -32,9 +41,13 @@ fn test_stateful() -> Result<()> {
                     }
 
                     {
-                        let mut echo = stateful_client.echo_last_request();
-                        echo.get().init_request().set_name("Reload".into());
-                        let echo_response = echo.send().promise.await?;
+                        let mut echo_response = stateful_client
+                            .build_echo_last_request(Some(EchoRequest {
+                                _name: "Reload".into(),
+                            }))
+                            .send()
+                            .promise
+                            .await?;
 
                         let msg = echo_response.get()?.get_reply()?.get_message()?;
 

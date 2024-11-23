@@ -4,12 +4,17 @@ use chrono::DateTime;
 use chrono::Datelike;
 use chrono::TimeZone;
 use chrono::Timelike;
+use rusqlite::CachedStatement;
 use rusqlite::OptionalExtension;
 
 use crate::database::DatabaseExt;
 use crate::keystone::CapnpResult;
+use crate::scheduler_capnp::MissBehavior;
 use crate::sqlite::SqliteDatabase;
 use crate::sqlite_capnp::root::ServerDispatch;
+use atomicbox::AtomicOptionBox;
+use capnp::any_pointer::Owned as any_pointer;
+use capnp::private::capability::ClientHook;
 use chrono_tz::Tz;
 use eyre::Result;
 use futures_util::TryFutureExt;
@@ -60,6 +65,7 @@ pub fn gen_tz_map<const SIZE: usize>() -> [Tz; SIZE] {
 
 use std::sync::LazyLock;
 const TZ_MAP: LazyLock<[Tz; 596]> = LazyLock::new(|| gen_tz_map());
+static LAST_ERROR: AtomicOptionBox<eyre::ErrReport> = AtomicOptionBox::none();
 
 enum Queue {
     Cancel(i64),
@@ -91,7 +97,7 @@ pub struct Scheduler {
 const TIMER_EPSILON: i64 = 20; // ms
 
 #[inline]
-fn from_ymh_hms_ms(
+fn from_ymd_hms_ms(
     t: crate::scheduler_capnp::calendar_time::Reader<'_>,
     tz_index: crate::tz_capnp::Tz,
     offset: i16,
@@ -116,11 +122,11 @@ fn from_ymh_hms_ms(
 
 fn get_timestamp(t: crate::scheduler_capnp::calendar_time::Reader<'_>) -> capnp::Result<i64> {
     let tz_index = t.get_tz()?;
-    if let Some(t) = from_ymh_hms_ms(t, tz_index, 0)?.earliest() {
+    if let Some(t) = from_ymd_hms_ms(t, tz_index, 0)?.earliest() {
         Ok(t.timestamp_millis())
-    } else if let Some(t) = from_ymh_hms_ms(t, tz_index, 1)?.earliest() {
+    } else if let Some(t) = from_ymd_hms_ms(t, tz_index, 1)?.earliest() {
         Ok(t.timestamp_millis())
-    } else if let Some(t) = from_ymh_hms_ms(t, crate::tz_capnp::Tz::Utc, 0)?.earliest() {
+    } else if let Some(t) = from_ymd_hms_ms(t, crate::tz_capnp::Tz::Utc, 0)?.earliest() {
         Ok(t.timestamp_millis())
     } else {
         Err(capnp::Error::failed(
@@ -186,26 +192,78 @@ impl Scheduler {
         }
     }
 
-    pub fn run(db: &Rc<ServerDispatch<SqliteDatabase>>, action: i64) {
-        let Ok(sturdyref) = db.get_sturdyref(action) else {
-            eprintln!("Error retrieving sturdyref with ID {}", action);
-            return;
-        };
+    pub async fn run(
+        db: Rc<ServerDispatch<SqliteDatabase>>,
+        action: i64,
+    ) -> Result<crate::scheduler_capnp::action::Client> {
+        let sturdyref = db.get_sturdyref(action)?;
 
         let action: crate::scheduler_capnp::action::Client =
             capnp::capability::FromClientHook::new(sturdyref.pipeline.get_cap().as_cap());
 
-        // The RPC system will send this immediately, regardless of whether we await the future, but we spawn something for it anyway so we can print an error message if it fails.
-        let promise: capnp::capability::Promise<
-            capnp::capability::Response<crate::scheduler_capnp::action::run_results::Owned>,
-            capnp::Error,
-        > = action.run_request().send().promise;
-        tokio::task::spawn_local(promise.or_else(|e| async move {
-            eprintln!("Error running action: {}", e.to_string());
-            Err(e)
-        }));
+        // The RPC system will send this immediately, regardless of whether we await the future
+        action.run_request().send().promise.await?;
+
+        Ok(action)
     }
 
+    async fn run_and_save(
+        db: &Rc<ServerDispatch<SqliteDatabase>>,
+        id: i64,
+        action: i64,
+        update: &mut CachedStatement<'_>,
+    ) -> Result<()> {
+        let client = Self::run(db.clone(), action).await?;
+        let action = db_save_action(db.clone(), client.client.hook).await?;
+        update.execute(params![id, action])?;
+        Ok(())
+    }
+
+    async fn catch_error<T>(e: eyre::ErrReport) -> capnp::Result<T> {
+        eprintln!("Error when executing action: {}", e.to_string());
+        let r = capnp::Error::failed(e.to_string());
+        LAST_ERROR.store(Some(Box::new(e)), std::sync::atomic::Ordering::AcqRel);
+        Err(r)
+    }
+
+    async fn catchup(
+        db: Rc<ServerDispatch<SqliteDatabase>>,
+        miss: MissBehavior,
+        id: i64,
+        count: i64,
+        action: i64,
+    ) {
+        if miss != MissBehavior::None {
+            let mut update = match db
+                .server
+                .connection
+                .prepare_cached("UPDATE scheduler SET action = ?2 WHERE id = ?1")
+            {
+                Ok(a) => a,
+                Err(e) => {
+                    let _ = Self::catch_error::<()>(e.into());
+                    return;
+                }
+            };
+
+            match miss {
+                MissBehavior::One => {
+                    let _ = Self::run_and_save(&db, id, action, &mut update)
+                        .or_else(Self::catch_error)
+                        .await;
+                }
+                MissBehavior::All => {
+                    for _ in 0..count {
+                        let _ = Self::run_and_save(&db, id, action, &mut update)
+                            .or_else(Self::catch_error)
+                            .await;
+                    }
+                }
+                MissBehavior::None => (),
+            }
+        }
+    }
+    #[allow(private_bounds)]
     pub fn new<TS: TimeSource + 'static>(
         db: Rc<ServerDispatch<SqliteDatabase>>,
         mut ts: TS,
@@ -228,28 +286,24 @@ CREATE TABLE IF NOT EXISTS scheduler (
             (),
         )?;
 
-        let add_complex = db.connection.prepare_cached(
-            "INSERT INTO scheduler (timestamp, action, every_months, every_days, every_hours, every_millis, tz, repeat, miss) VALUES(?1, ?2, 0, 0, 0, 0, 0, ?4, ?3)",
-        )?;
-
         let db2 = db.clone();
         // We allow buffering messages because we can deal with all the pending database changes in one query.
         let (send, mut recv) = mpsc::channel(20);
 
         // This absolutely must be in a spawn() call of some kind because a multithreaded runtime must be able to give it as much wakeup granularity as possible.
         let handle = tokio::task::spawn_local(async move {
-            let mut get_range = db2.server.connection.prepare_cached(
+            let mut get_range = db.server.connection.prepare_cached(
                 "SELECT id, timestamp, action, every_months, every_days, every_hours, every_millis, tz, repeat FROM scheduler WHERE timestamp <= ?1",
             )?;
-            let mut remove = db2
+            let mut remove = db
                 .server
                 .connection
                 .prepare_cached("DELETE FROM scheduler WHERE id = ?1")?;
-            let mut set = db2
+            let mut set = db
                 .server
                 .connection
                 .prepare_cached("UPDATE scheduler SET timestamp = ?2 WHERE id = ?1")?;
-            let mut get_time = db2
+            let mut get_time = db
                 .server
                 .connection
                 .prepare_cached("SELECT timestamp FROM scheduler ORDER BY timestamp ASC LIMIT 1")?;
@@ -270,16 +324,17 @@ CREATE TABLE IF NOT EXISTS scheduler (
                     let every_millis: i64 = row.get(6)?;
                     let tz_index: i64 = row.get(7)?;
                     let repeater: i64 = row.get(8)?;
-                    let miss: crate::scheduler_capnp::MissBehavior =
-                        row.get::<usize, u16>(9)?.try_into()?;
+                    let miss: MissBehavior = row.get::<usize, u16>(9)?.try_into()?;
 
                     // We can do a small trick here. We only have to repeat manually if it involves days or months, or a custom function.
-                    let repeat = if every_months != 0 || every_days != 0 || repeater != 0 {
+                    if every_months != 0 || every_days != 0 || repeater != 0 {
                         let mut next = timestamp;
+                        let mut count = 0;
 
                         while next <= now {
+                            count += 1;
                             next = Self::repeat(
-                                &db2,
+                                &db,
                                 next,
                                 every_months as u32,
                                 every_days as u32,
@@ -290,50 +345,44 @@ CREATE TABLE IF NOT EXISTS scheduler (
                             )
                             .await?
                             .timestamp_millis();
-
-                            if miss == crate::scheduler_capnp::MissBehavior::All {
-                                Self::run(&db2, action);
-                            }
                         }
 
-                        if miss == crate::scheduler_capnp::MissBehavior::One {
-                            Self::run(&db2, action);
-                        }
+                        tokio::task::spawn_local(Self::catchup(
+                            db.clone(),
+                            miss,
+                            id,
+                            count,
+                            action,
+                        ));
 
-                        Some(next)
+                        set.execute(params![id, next])?;
                     } else if every_hours != 0 || every_millis != 0 {
                         // Otherwise, this interval isn't affected by DST and we can calculate it directly
                         let skip = (every_hours * 3600000) + every_millis;
                         let diff = now - timestamp;
                         let count = (skip / diff) + 1;
 
-                        match miss {
-                            crate::scheduler_capnp::MissBehavior::One => {
-                                Self::run(&db2, action);
-                            }
-                            crate::scheduler_capnp::MissBehavior::All => {
-                                for _ in 0..count {
-                                    Self::run(&db2, action);
-                                }
-                            }
-                            crate::scheduler_capnp::MissBehavior::None => (),
-                        }
+                        tokio::task::spawn_local(Self::catchup(
+                            db.clone(),
+                            miss,
+                            id,
+                            count,
+                            action,
+                        ));
 
-                        Some(timestamp + (skip * count))
-                    } else {
-                        // If there's no repeat information at all, this is a oneshot
-                        Self::run(&db2, action);
-                        None
-                    };
-
-                    if let Some(new_timestamp) = repeat {
+                        let new_timestamp = timestamp + (skip * count);
                         set.execute(params![id, new_timestamp])?;
-                    } else {
+                    } else if miss != MissBehavior::None {
+                        // If there's no repeat information at all, this is a oneshot, so no need to re-save it.
+                        tokio::task::spawn_local(
+                            Self::run(db.clone(), action).or_else(Self::catch_error),
+                        );
                         remove.execute(params![id])?;
-                    }
+                    };
                 }
             }
 
+            // Now we start our infinite loop where we sleep until we have something to execute
             loop {
                 while let Ok(_) = recv.try_recv() {} // drain messages before doing the database query
                 let next: Option<i64> = get_time.query_row((), |row| row.get(0)).optional()?;
@@ -384,8 +433,6 @@ CREATE TABLE IF NOT EXISTS scheduler (
                     let tz_index: i64 = row.get(7)?;
                     let repeater: i64 = row.get(8)?;
 
-                    Self::run(&db2, action);
-
                     if every_months != 0
                         || every_days != 0
                         || repeater != 0
@@ -393,7 +440,7 @@ CREATE TABLE IF NOT EXISTS scheduler (
                         || every_millis != 0
                     {
                         let new_timestamp = Self::repeat(
-                            &db2,
+                            &db,
                             timestamp,
                             every_months as u32,
                             every_days as u32,
@@ -404,8 +451,18 @@ CREATE TABLE IF NOT EXISTS scheduler (
                         )
                         .await?;
 
+                        tokio::task::spawn_local(Self::catchup(
+                            db.clone(),
+                            MissBehavior::One,
+                            id,
+                            1,
+                            action,
+                        ));
                         set.execute(params![id, new_timestamp.timestamp_millis()])?;
                     } else {
+                        tokio::task::spawn_local(
+                            Self::run(db.clone(), action).or_else(Self::catch_error),
+                        );
                         remove.execute(params![id])?;
                     }
                 }
@@ -413,7 +470,7 @@ CREATE TABLE IF NOT EXISTS scheduler (
         });
 
         Ok(Self {
-            db: db.clone(),
+            db: db2,
             thread: handle,
             signal: send,
         })
@@ -435,20 +492,29 @@ impl registration::Server for Registration {
     }
 }
 
-#[capnproto_rpc(root)]
-impl root::Server for Scheduler {
-    async fn once_(&self, time: Reader, act: Reader, fire_if_missed: bool) {
-        let a: crate::scheduler_capnp::action::Client = act;
-        let saveable: crate::storage_capnp::saveable::Client<capnp::any_pointer::Owned> =
-            capnp::capability::FromClientHook::new(a.client.hook);
+async fn db_save_action(
+    db: Rc<ServerDispatch<SqliteDatabase>>,
+    hook: Box<dyn ClientHook>,
+) -> capnp::Result<i64> {
+    let saveable: crate::storage_capnp::saveable::Client<any_pointer> =
+        capnp::capability::FromClientHook::new(hook);
+    let response = saveable.save_request().send().promise.await?;
+    let sturdyref = capnp::capability::get_resolved_cap(response.get()?.get_ref()?).await;
+    db.get_sturdyref_id(sturdyref)
+}
 
-        let response = saveable.save_request().send().promise.await?;
-        let sturdyref = capnp::capability::get_resolved_cap(response.get()?.get_ref()?).await;
-        let action_id = self.db.get_sturdyref_id(sturdyref)?;
-        let miss = if fire_if_missed {
-            crate::scheduler_capnp::MissBehavior::One
+impl root::Server for Scheduler {
+    async fn once_(
+        &self,
+        params: root::OnceParams,
+        mut results: root::OnceResults,
+    ) -> Result<(), ::capnp::Error> {
+        let params = params.get()?;
+        let action_id = db_save_action(self.db.clone(), params.get_act()?.client.hook).await?;
+        let miss = if params.get_fire_if_missed() {
+            MissBehavior::One
         } else {
-            crate::scheduler_capnp::MissBehavior::None
+            MissBehavior::None
         };
 
         let mut add_once = self.db.connection.prepare_cached(
@@ -456,7 +522,11 @@ impl root::Server for Scheduler {
         ).to_capnp()?;
 
         add_once
-            .execute(params![get_timestamp(time)?, action_id, miss as i32])
+            .execute(params![
+                get_timestamp(params.get_time()?)?,
+                action_id,
+                miss as i32
+            ])
             .to_capnp()?;
 
         self.signal.send(Queue::Add).await.to_capnp()?;
@@ -470,44 +540,141 @@ impl root::Server for Scheduler {
         Ok(())
     }
 
-    /*async fn every(&self, time: Reader, repeat: Reader, act: Reader) {
-        Result::<(), capnp::Error>::Err(::capnp::Error::unimplemented(
-            "method root::Server::every not implemented".to_string(),
-        ))
+    async fn every(
+        &self,
+        params: root::EveryParams,
+        mut results: root::EveryResults,
+    ) -> Result<(), ::capnp::Error> {
+        let params = params.get()?;
 
-        let add_every = db.connection.prepare_cached(
+        let action_id = db_save_action(self.db.clone(), params.get_act()?.client.hook).await?;
+        let miss = params.get_missed()?;
+        let repeat = params.get_repeat()?;
+
+        let mut add_every = self.db.connection.prepare_cached(
             "INSERT INTO scheduler (timestamp, action, every_months, every_days, every_hours, every_millis, tz, repeat, miss) VALUES(?1, ?2, ?4, ?5, ?6, ?7, ?8, 0, ?3)",
-        )?;
-    }*/
+        ).to_capnp()?;
+
+        add_every
+            .execute(params![
+                get_timestamp(params.get_time()?)?,
+                action_id,
+                miss as i32,
+                repeat.get_months(),
+                repeat.get_days(),
+                repeat.get_hours(),
+                repeat.get_millis(),
+                params.get_time()?.get_tz()? as i64,
+            ])
+            .to_capnp()?;
+
+        self.signal.send(Queue::Add).await.to_capnp()?;
+
+        let reg = Registration {
+            id: action_id,
+            signal: self.signal.clone(),
+        };
+        results.get().set_res(capnp_rpc::new_client(reg));
+
+        Ok(())
+    }
+
+    async fn complex(
+        &self,
+        params: root::ComplexParams,
+        mut results: root::ComplexResults,
+    ) -> Result<(), ::capnp::Error> {
+        let params = params.get()?;
+
+        let action_id = db_save_action(self.db.clone(), params.get_act()?.client.hook).await?;
+        let miss = params.get_missed()?;
+
+        let repeat_id = db_save_action(self.db.clone(), params.get_repeat()?.client.hook).await?;
+
+        let mut add_complex = self.db.connection.prepare_cached(
+            "INSERT INTO scheduler (timestamp, action, every_months, every_days, every_hours, every_millis, tz, repeat, miss) VALUES(?1, ?2, 0, 0, 0, 0, 0, ?4, ?3)",
+        ).to_capnp()?;
+
+        add_complex
+            .execute(params![
+                get_timestamp(params.get_time()?)?,
+                action_id,
+                miss as i32,
+                repeat_id,
+            ])
+            .to_capnp()?;
+
+        self.signal.send(Queue::Add).await.to_capnp()?;
+
+        let reg = Registration {
+            id: action_id,
+            signal: self.signal.clone(),
+        };
+        results.get().set_res(capnp_rpc::new_client(reg));
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::keystone::CapnpResult;
     use crate::scheduler_capnp::action;
+    use crate::scheduler_capnp::repeat_callback;
+    use crate::scheduler_capnp::MissBehavior;
+    use crate::sqlite::SqliteDatabase;
+    use crate::sqlite_capnp::root::ServerDispatch;
+    use crate::storage_capnp::restore;
     use crate::storage_capnp::saveable;
     use atomic_take::AtomicTake;
+    use capnp::any_pointer::Owned as any_pointer;
     use capnp::capability::FromClientHook;
     use capnp::capability::FromServer;
     use capnp::private::capability::ClientHook;
     use capnp_macros::capnproto_rpc;
     use chrono::Datelike;
     use chrono::Timelike;
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+    use std::rc::Rc;
+    use std::sync::atomic::AtomicI32;
     use tokio::sync::mpsc;
     use tokio::sync::oneshot;
     use tokio::time::Instant;
 
     struct TestActionImpl {
         send: AtomicTake<oneshot::Sender<()>>,
+        count: AtomicI32,
+        key: String,
+        parent: Rc<restore::ServerDispatch<TestModule, any_pointer>>,
     }
 
     #[capnproto_rpc(action)]
     impl action::Server for TestActionImpl {
         async fn run(&self) -> capnp::Result<()> {
-            self.send
-                .take()
-                .expect("Tried to run action twice!")
-                .send(())
-                .unwrap();
+            let prev = self
+                .count
+                .fetch_sub(1, std::sync::atomic::Ordering::Release);
+            tracing::info!("{}::run({})", self.key, prev);
+
+            if prev == 1 {
+                let test = self
+                    .send
+                    .take()
+                    .ok_or(capnp::Error::failed("Race condition with sender?".into()))?;
+                test.send(())
+                    .map_err(|_| capnp::Error::failed("Failed to send signal".into()))?;
+            } else if prev < 1 {
+                tracing::error!("ERROR!!!");
+                self.send.take().ok_or(capnp::Error::failed(
+                    "Action called more than expected!".into(),
+                ))?;
+                tracing::error!("MORE ERROR!!!");
+                return Err(capnp::Error::failed(
+                    "Count was below 0, but we never called the action???".into(),
+                ));
+            }
+
             Ok(())
         }
     }
@@ -515,7 +682,30 @@ mod tests {
     #[capnproto_rpc(saveable)]
     impl saveable::Server<action::Owned> for TestActionImpl {
         async fn save(&self) -> capnp::Result<()> {
-            panic!("aw fuck");
+            tracing::info!("{}::save() {:?}", self.key, &self.send);
+            let sturdyref =
+                crate::sturdyref::SturdyRefImpl::init(1, self.key.as_str(), self.parent.db.clone())
+                    .await
+                    .to_capnp()?;
+
+            let cap: crate::storage_capnp::sturdy_ref::Client<any_pointer> = self
+                .parent
+                .db
+                .sturdyref_set
+                .borrow_mut()
+                .new_client(sturdyref);
+
+            let cap: crate::storage_capnp::sturdy_ref::Client<action::Owned> = cap.client.cast_to();
+            results.get().set_ref(cap);
+
+            // After our final expected call of run(), send will be empty, and us calling save() on it is not a bug, so we can't detect it here.
+            if let Some(send) = self.send.take() {
+                self.parent.server.actions.borrow_mut().insert(
+                    self.key.clone(),
+                    (self.count.load(std::sync::atomic::Ordering::Relaxed), send),
+                );
+            }
+            Ok(())
         }
     }
 
@@ -526,14 +716,114 @@ mod tests {
 
     impl super::TimeSource for TestTimeSource {
         async fn now(&mut self) -> i64 {
+            tracing::info!(concat!("NOW: ", file!(), ":", line!()));
             self.now
                 .recv()
                 .await
                 .expect("Time channel closed unexpectedly")
         }
 
-        async fn sleep(&mut self, deadline: Instant) {
+        async fn sleep(&mut self, _: Instant) {
+            tracing::info!(concat!("SLEEP: ", file!(), ":", line!()));
             self.waker.recv().await.expect("waker closed unexpectedly!");
+        }
+    }
+
+    struct TestModule {
+        db: Rc<ServerDispatch<SqliteDatabase>>,
+        actions: RefCell<HashMap<String, (i32, oneshot::Sender<()>)>>,
+        this: std::rc::Weak<restore::ServerDispatch<TestModule, any_pointer>>, // TODO: Remove once we have access to Rc<Self>
+    }
+
+    struct TestRepeatCallback {
+        db: Rc<ServerDispatch<SqliteDatabase>>,
+    }
+
+    #[capnproto_rpc(repeat_callback)]
+    impl repeat_callback::Server for TestRepeatCallback {
+        async fn repeat(&self, time: Reader) -> capnp::Result<()> {
+            let tz_index = time.get_tz()?;
+            let datetime = super::from_ymd_hms_ms(time, tz_index, 0)?
+                .earliest()
+                .unwrap();
+            let t = datetime.checked_add_months(chrono::Months::new(1)).unwrap();
+
+            let mut time = results.get().init_next();
+            time.set_year(t.year() as i64);
+            time.set_month(t.month() as u8);
+            time.set_day(t.day() as u16);
+            time.set_hour(t.hour() as u16);
+            time.set_min(t.minute() as u16);
+            time.set_sec(t.second() as i64);
+            time.set_milli(t.timestamp_subsec_millis() as i64);
+            time.set_tz(tz_index.try_into().unwrap());
+
+            Ok(())
+        }
+    }
+
+    #[capnproto_rpc(saveable)]
+    impl saveable::Server<repeat_callback::Owned> for TestRepeatCallback {
+        async fn save(&self) -> capnp::Result<()> {
+            let sturdyref = crate::sturdyref::SturdyRefImpl::init(1, "__callback", self.db.clone())
+                .await
+                .to_capnp()?;
+
+            let cap: crate::storage_capnp::sturdy_ref::Client<any_pointer> =
+                self.db.sturdyref_set.borrow_mut().new_client(sturdyref);
+
+            let cap: crate::storage_capnp::sturdy_ref::Client<repeat_callback::Owned> =
+                cap.client.cast_to();
+            results.get().set_ref(cap);
+            Ok(())
+        }
+    }
+
+    impl restore::Server<any_pointer> for TestModule {
+        async fn restore(
+            &self,
+            params: restore::RestoreParams<any_pointer>,
+            mut results: restore::RestoreResults<any_pointer>,
+        ) -> Result<(), ::capnp::Error> {
+            let key: capnp::text::Reader = params.get()?.get_data()?.get_as()?;
+            let key = key.to_string()?;
+
+            if key == "__callback" {
+                let client: repeat_callback::Client = capnp_rpc::new_client(TestRepeatCallback {
+                    db: self.db.clone(),
+                });
+
+                results
+                    .get()
+                    .init_cap()
+                    .set_as_capability(client.client.hook);
+            } else {
+                let (count, send) = self
+                    .actions
+                    .borrow_mut()
+                    .remove(&key)
+                    .ok_or(capnp::Error::failed(
+                        "Tried to restore nonexistent oneshot sender!".into(),
+                    ))?
+                    .into();
+
+                let client: action::Client = capnp_rpc::new_client(TestActionImpl {
+                    send: send.into(),
+                    key,
+                    count: count.into(),
+                    parent: self
+                        .this
+                        .upgrade()
+                        .ok_or(capnp::Error::failed("Failed to upgrade self ref".into()))?,
+                });
+
+                results
+                    .get()
+                    .init_cap()
+                    .set_as_capability(client.client.hook);
+            }
+
+            Ok(())
         }
     }
 
@@ -543,16 +833,35 @@ mod tests {
         crate::scheduler_capnp::root::Client,
         mpsc::Sender<()>,
         mpsc::Sender<i64>,
+        Rc<restore::ServerDispatch<TestModule, any_pointer>>,
     )> {
-        let db = crate::sqlite::SqliteDatabase::new(
+        tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::DEBUG)
+            .with_writer(std::io::stderr)
+            .with_ansi(true)
+            .init();
+
+        let db = crate::database::open_database(
             db_path.to_path_buf(),
-            rusqlite::OpenFlags::default(),
-            Default::default(),
-            Default::default(),
+            SqliteDatabase::new_connection,
+            crate::database::OpenOptions::Create,
         )?;
 
+        let module: Rc<restore::ServerDispatch<TestModule, any_pointer>> = Rc::new_cyclic(|w| {
+            restore::Client::from_server(TestModule {
+                db: db.clone(),
+                actions: RefCell::new(HashMap::new()),
+                this: w.clone(),
+            })
+        });
+
+        db.clients.borrow_mut().insert(
+            1,
+            capnp_rpc::local::Client::from_rc(module.clone()).add_ref(),
+        );
         let (sleep, waker) = mpsc::channel(1);
         let (time, now) = mpsc::channel(1);
+
         let scheduler =
             capnp_rpc::local::Client::new(crate::scheduler_capnp::root::Client::from_server(
                 super::Scheduler::new(db, TestTimeSource { now, waker })?,
@@ -560,24 +869,29 @@ mod tests {
 
         let hook = scheduler.add_ref();
 
-        Ok((FromClientHook::new(hook), sleep, time))
+        Ok((FromClientHook::new(hook), sleep, time, module))
     }
 
-    #[tokio::test]
-    async fn test_basic_scheduler() -> eyre::Result<()> {
-        let pool = tokio::task::LocalSet::new();
-        pool.run_until(async move {
-            let db_path = tempfile::NamedTempFile::new().unwrap().into_temp_path();
-            let (scheduler, wake, time) = build_test_scheduler(&db_path)?;
+    async fn build_test_action(
+        name: impl AsRef<str>,
+        datetime: chrono::DateTime<chrono::Utc>,
+        delay: i64,
+        scheduler: &crate::scheduler_capnp::root::Client,
+        module: Rc<restore::ServerDispatch<TestModule, any_pointer>>,
+    ) -> capnp::Result<(
+        oneshot::Receiver<()>,
+        crate::scheduler_capnp::registration::Client,
+    )> {
+        let (sender, finished) = oneshot::channel();
+        let action = TestActionImpl {
+            send: sender.into(),
+            key: name.as_ref().into(),
+            count: 1.into(),
+            parent: module,
+        };
 
-            let (sender, mut finished) = oneshot::channel();
-            let datetime = chrono::offset::Utc::now();
-            let timestamp = datetime.timestamp_millis();
-            let action = TestActionImpl {
-                send: sender.into(),
-            };
-
-            scheduler.build_once_request(
+        let cancel = scheduler
+            .build_once_request(
                 Some(crate::scheduler_capnp::calendar_time::CalendarTime {
                     _year: datetime.year() as i64,
                     _month: datetime.month() as u8,
@@ -585,12 +899,125 @@ mod tests {
                     _hour: datetime.hour() as u16,
                     _min: datetime.minute() as u16,
                     _sec: datetime.second() as i64,
-                    _milli: datetime.timestamp_subsec_millis() as i64 + 1,
+                    _milli: datetime.timestamp_subsec_millis() as i64 + delay,
                     _tz: crate::tz_capnp::Tz::Utc,
                 }),
                 capnp_rpc::new_client(action),
                 true,
-            );
+            )
+            .send()
+            .promise
+            .await?;
+
+        Ok((finished, cancel.get()?.get_res()?))
+    }
+
+    async fn build_test_repeat(
+        name: impl AsRef<str>,
+        datetime: chrono::DateTime<chrono::Utc>,
+        repeat: i32,
+        delay: i64,
+        months: i64,
+        days: i64,
+        millis: i64,
+        miss: MissBehavior,
+        scheduler: &crate::scheduler_capnp::root::Client,
+        module: Rc<restore::ServerDispatch<TestModule, any_pointer>>,
+    ) -> capnp::Result<(
+        oneshot::Receiver<()>,
+        crate::scheduler_capnp::registration::Client,
+    )> {
+        let (sender, finished) = oneshot::channel();
+        let action = TestActionImpl {
+            send: sender.into(),
+            key: name.as_ref().into(),
+            count: repeat.into(),
+            parent: module,
+        };
+
+        let cancel = scheduler
+            .build_every_request(
+                Some(crate::scheduler_capnp::calendar_time::CalendarTime {
+                    _year: datetime.year() as i64,
+                    _month: datetime.month() as u8,
+                    _day: datetime.day() as u16,
+                    _hour: datetime.hour() as u16,
+                    _min: datetime.minute() as u16,
+                    _sec: datetime.second() as i64,
+                    _milli: datetime.timestamp_subsec_millis() as i64 + delay,
+                    _tz: crate::tz_capnp::Tz::Utc,
+                }),
+                Some(crate::scheduler_capnp::every::Every {
+                    _months: months as u32,
+                    _days: days as u64,
+                    _hours: 0,
+                    _millis: millis,
+                }),
+                capnp_rpc::new_client(action),
+                miss,
+            )
+            .send()
+            .promise
+            .await?;
+
+        Ok((finished, cancel.get()?.get_res()?))
+    }
+
+    async fn build_test_callback(
+        name: impl AsRef<str>,
+        datetime: chrono::DateTime<chrono::Utc>,
+        repeat: i32,
+        delay: i64,
+        callback: repeat_callback::Client,
+        miss: MissBehavior,
+        scheduler: &crate::scheduler_capnp::root::Client,
+        module: Rc<restore::ServerDispatch<TestModule, any_pointer>>,
+    ) -> capnp::Result<(
+        oneshot::Receiver<()>,
+        crate::scheduler_capnp::registration::Client,
+    )> {
+        let (sender, finished) = oneshot::channel();
+        let action = TestActionImpl {
+            send: sender.into(),
+            key: name.as_ref().into(),
+            count: repeat.into(),
+            parent: module,
+        };
+
+        let cancel = scheduler
+            .build_complex_request(
+                Some(crate::scheduler_capnp::calendar_time::CalendarTime {
+                    _year: datetime.year() as i64,
+                    _month: datetime.month() as u8,
+                    _day: datetime.day() as u16,
+                    _hour: datetime.hour() as u16,
+                    _min: datetime.minute() as u16,
+                    _sec: datetime.second() as i64,
+                    _milli: datetime.timestamp_subsec_millis() as i64 + delay,
+                    _tz: crate::tz_capnp::Tz::Utc,
+                }),
+                callback,
+                capnp_rpc::new_client(action),
+                miss,
+            )
+            .send()
+            .promise
+            .await?;
+
+        Ok((finished, cancel.get()?.get_res()?))
+    }
+
+    #[tokio::test]
+    async fn test_basic_scheduler() -> eyre::Result<()> {
+        let pool = tokio::task::LocalSet::new();
+        pool.run_until(async move {
+            let db_path = tempfile::NamedTempFile::new().unwrap().into_temp_path();
+            let (scheduler, wake, time, module) = build_test_scheduler(&db_path)?;
+
+            let datetime = chrono::offset::Utc::now();
+            let timestamp = datetime.timestamp_millis();
+            let (mut finished, _) =
+                build_test_action("basic", datetime, 1, &scheduler, module.clone()).await?;
 
             time.send(timestamp - 100).await?;
             time.send(timestamp - 100).await?;
@@ -602,10 +1029,273 @@ mod tests {
                 Err(oneshot::error::TryRecvError::Empty)
             );
             time.send(timestamp).await?;
-            assert_eq!(finished.blocking_recv(), Ok(()));
+            time.send(timestamp).await?;
+            assert_eq!(finished.await, Ok(()));
+
             Ok::<(), eyre::Report>(())
         })
         .await?;
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_schedule_cancel() -> eyre::Result<()> {
+        let pool = tokio::task::LocalSet::new();
+        pool.run_until(async move {
+            let db_path = tempfile::NamedTempFile::new().unwrap().into_temp_path();
+            let (scheduler, wake, time, module) = build_test_scheduler(&db_path)?;
+
+            let datetime = chrono::offset::Utc::now();
+            let timestamp = datetime.timestamp_millis();
+            let (mut finished, cancel) =
+                build_test_action("cancel", datetime, 100, &scheduler, module.clone()).await?;
+
+            time.send(timestamp).await?;
+            time.send(timestamp).await?;
+            wake.send(()).await?;
+            cancel.cancel_request().send().promise.await?;
+            time.send(timestamp).await?;
+            time.send(timestamp).await?;
+            wake.send(()).await?;
+            assert_eq!(
+                finished.try_recv(),
+                Err(oneshot::error::TryRecvError::Empty)
+            );
+
+            Ok::<(), eyre::Report>(())
+        })
+        .await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_scheduler_repeat() -> eyre::Result<()> {
+        let pool = tokio::task::LocalSet::new();
+        pool.run_until(async move {
+            let db_path = tempfile::NamedTempFile::new().unwrap().into_temp_path();
+            let (scheduler, wake, time, module) = build_test_scheduler(&db_path)?;
+
+            let datetime = chrono::offset::Utc::now();
+            let timestamp = datetime.timestamp_millis();
+            let (mut finished, _) = build_test_repeat(
+                "basic",
+                datetime,
+                3,
+                1,
+                0,
+                0,
+                1000,
+                MissBehavior::None,
+                &scheduler,
+                module.clone(),
+            )
+            .await?;
+
+            time.send(timestamp).await?;
+            wake.send(()).await?;
+            assert_eq!(
+                finished.try_recv(),
+                Err(oneshot::error::TryRecvError::Empty)
+            );
+            time.send(timestamp).await?;
+            time.send(timestamp).await?;
+            time.send(timestamp).await?;
+            wake.send(()).await?;
+            time.send(timestamp + 1000).await?;
+            time.send(timestamp + 1000).await?;
+            wake.send(()).await?;
+            time.send(timestamp + 2000).await?;
+            time.send(timestamp + 2000).await?;
+            assert_eq!(finished.await, Ok(()));
+
+            Ok::<(), eyre::Report>(())
+        })
+        .await?;
+
+        if let Some(e) = super::LAST_ERROR.take(std::sync::atomic::Ordering::AcqRel) {
+            Err(*e)
+        } else {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn test_scheduler_repeat_months() -> eyre::Result<()> {
+        let pool = tokio::task::LocalSet::new();
+        pool.run_until(async move {
+            let db_path = tempfile::NamedTempFile::new().unwrap().into_temp_path();
+            let (scheduler, wake, time, module) = build_test_scheduler(&db_path)?;
+
+            let datetime = chrono::offset::Utc::now();
+            let timestamp = datetime.timestamp_millis();
+            let (mut finished, _) = build_test_repeat(
+                "basic",
+                datetime,
+                3,
+                1,
+                1,
+                0,
+                0,
+                MissBehavior::None,
+                &scheduler,
+                module.clone(),
+            )
+            .await?;
+
+            time.send(timestamp).await?;
+            wake.send(()).await?;
+            assert_eq!(
+                finished.try_recv(),
+                Err(oneshot::error::TryRecvError::Empty)
+            );
+            time.send(timestamp).await?;
+            time.send(timestamp).await?;
+            time.send(timestamp).await?;
+            wake.send(()).await?;
+            let timestamp = datetime
+                .checked_add_months(chrono::Months::new(1))
+                .unwrap()
+                .timestamp_millis();
+            time.send(timestamp).await?;
+            time.send(timestamp).await?;
+            wake.send(()).await?;
+            let timestamp = datetime
+                .checked_add_months(chrono::Months::new(2))
+                .unwrap()
+                .timestamp_millis();
+            time.send(timestamp).await?;
+            time.send(timestamp).await?;
+            assert_eq!(finished.await, Ok(()));
+
+            Ok::<(), eyre::Report>(())
+        })
+        .await?;
+
+        if let Some(e) = super::LAST_ERROR.take(std::sync::atomic::Ordering::AcqRel) {
+            Err(*e)
+        } else {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn test_scheduler_repeat_cancel() -> eyre::Result<()> {
+        let pool = tokio::task::LocalSet::new();
+        pool.run_until(async move {
+            let db_path = tempfile::NamedTempFile::new().unwrap().into_temp_path();
+            let (scheduler, wake, time, module) = build_test_scheduler(&db_path)?;
+
+            let datetime = chrono::offset::Utc::now();
+            let timestamp = datetime.timestamp_millis();
+            let (mut finished, cancel) = build_test_repeat(
+                "basic",
+                datetime,
+                2,
+                1,
+                1,
+                0,
+                0,
+                MissBehavior::None,
+                &scheduler,
+                module.clone(),
+            )
+            .await?;
+
+            time.send(timestamp).await?;
+            wake.send(()).await?;
+            assert_eq!(
+                finished.try_recv(),
+                Err(oneshot::error::TryRecvError::Empty)
+            );
+            time.send(timestamp).await?;
+            time.send(timestamp).await?;
+            time.send(timestamp).await?;
+            wake.send(()).await?;
+            let timestamp = datetime
+                .checked_add_months(chrono::Months::new(1))
+                .unwrap()
+                .timestamp_millis();
+            time.send(timestamp).await?;
+            time.send(timestamp).await?;
+
+            cancel.cancel_request().send().promise.await?;
+            let timestamp = datetime
+                .checked_add_months(chrono::Months::new(2))
+                .unwrap()
+                .timestamp_millis();
+            time.send(timestamp).await?;
+            time.send(timestamp).await?;
+            assert_eq!(finished.await, Ok(()));
+
+            Ok::<(), eyre::Report>(())
+        })
+        .await?;
+
+        if let Some(e) = super::LAST_ERROR.take(std::sync::atomic::Ordering::AcqRel) {
+            Err(*e)
+        } else {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn test_scheduler_repeat_callback() -> eyre::Result<()> {
+        let pool = tokio::task::LocalSet::new();
+        pool.run_until(async move {
+            let db_path = tempfile::NamedTempFile::new().unwrap().into_temp_path();
+            let (scheduler, wake, time, module) = build_test_scheduler(&db_path)?;
+
+            let datetime = chrono::offset::Utc::now();
+            let timestamp = datetime.timestamp_millis();
+
+            let callback: repeat_callback::Client = capnp_rpc::new_client(TestRepeatCallback {
+                db: module.db.clone(),
+            });
+            let (mut finished, _) = build_test_callback(
+                "basic",
+                datetime,
+                3,
+                1,
+                callback,
+                MissBehavior::None,
+                &scheduler,
+                module.clone(),
+            )
+            .await?;
+
+            time.send(timestamp).await?;
+            wake.send(()).await?;
+            assert_eq!(
+                finished.try_recv(),
+                Err(oneshot::error::TryRecvError::Empty)
+            );
+            time.send(timestamp).await?;
+            time.send(timestamp).await?;
+            time.send(timestamp).await?;
+            wake.send(()).await?;
+            let timestamp = datetime
+                .checked_add_months(chrono::Months::new(1))
+                .unwrap()
+                .timestamp_millis();
+            time.send(timestamp).await?;
+            time.send(timestamp).await?;
+            wake.send(()).await?;
+            let timestamp = datetime
+                .checked_add_months(chrono::Months::new(2))
+                .unwrap()
+                .timestamp_millis();
+            time.send(timestamp).await?;
+            time.send(timestamp).await?;
+            assert_eq!(finished.await, Ok(()));
+
+            Ok::<(), eyre::Report>(())
+        })
+        .await?;
+
+        if let Some(e) = super::LAST_ERROR.take(std::sync::atomic::Ordering::AcqRel) {
+            Err(*e)
+        } else {
+            Ok(())
+        }
     }
 }

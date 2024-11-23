@@ -30,7 +30,7 @@ interface Registration {
     cancel @0 () -> (none :Void); # cancels the registration
 }
 
-interface RepeatCallback {
+interface RepeatCallback extends(ST.Saveable(RepeatCallback)) {
     repeat @0 (time :CalendarTime) -> (next :CalendarTime);
 }
 

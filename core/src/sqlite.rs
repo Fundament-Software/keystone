@@ -3090,7 +3090,7 @@ mod tests {
             .set_text("meow".into());
         run_request.send().promise.await?;
 
-        let checking = client //TODO this is doing nothing currently just checking if intersect implodes
+        let _ = client //TODO this is doing nothing currently just checking if intersect implodes
             .send_request_from_sql(
                 "SELECT name FROM ?0 INTERSECT SELECT name FROM ?0",
                 vec![Bindings::ROTableref(ro_tableref_cap.clone())],

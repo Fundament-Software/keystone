@@ -262,15 +262,6 @@ impl PosixProcessImpl {
     }
 }
 
-type GetApiParams = process::GetApiParams<ByteStream, PosixError>;
-type GetApiResults = process::GetApiResults<ByteStream, PosixError>;
-type GetErrorParams = process::GetErrorParams<ByteStream, PosixError>;
-type GetErrorResults = process::GetErrorResults<ByteStream, PosixError>;
-type KillParams = process::KillParams<ByteStream, PosixError>;
-type KillResults = process::KillResults<ByteStream, PosixError>;
-type JoinParams = process::JoinParams<ByteStream, PosixError>;
-type JoinResults = process::JoinResults<ByteStream, PosixError>;
-
 impl PosixProcessImpl {
     async fn finish(&self) -> capnp::Result<i32> {
         let mut exitcode = self.exitcode.clone();

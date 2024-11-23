@@ -9,8 +9,6 @@ use crate::posix_spawn_capnp::posix_args::Owned as PosixArgs;
 use crate::posix_spawn_capnp::posix_error::Owned as PosixError;
 use crate::spawn_capnp::process;
 use crate::spawn_capnp::program;
-use crate::spawn_capnp::program::SpawnParams;
-use crate::spawn_capnp::program::SpawnResults;
 use capnp::any_pointer::Owned as any_pointer;
 use capnp::any_pointer::Owned as cap_pointer;
 use capnp::capability::FromServer;

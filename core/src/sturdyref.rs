@@ -13,10 +13,6 @@ pub struct SturdyRefImpl {
 }
 
 impl SturdyRefImpl {
-    pub fn new(id: i64, db: Rc<ServerDispatch<SqliteDatabase>>) -> Self {
-        Self { id, db }
-    }
-
     pub async fn init<'a, R: SetPointerBuilder + Clone>(
         module_id: u64,
         data: R,

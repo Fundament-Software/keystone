@@ -633,6 +633,7 @@ mod tests {
     use capnp::private::capability::ClientHook;
     use capnp_macros::capnproto_rpc;
     use chrono::Datelike;
+    use chrono::TimeZone;
     use chrono::Timelike;
     use std::cell::RefCell;
     use std::collections::HashMap;
@@ -1014,7 +1015,7 @@ mod tests {
             let db_path = tempfile::NamedTempFile::new().unwrap().into_temp_path();
             let (scheduler, wake, time, module) = build_test_scheduler(&db_path)?;
 
-            let datetime = chrono::offset::Utc::now();
+            let datetime = chrono::Utc.with_ymd_and_hms(2023, 12, 31, 1, 2, 3).unwrap();
             let timestamp = datetime.timestamp_millis();
             let (mut finished, _) =
                 build_test_action("basic", datetime, 1, &scheduler, module.clone()).await?;
@@ -1045,7 +1046,7 @@ mod tests {
             let db_path = tempfile::NamedTempFile::new().unwrap().into_temp_path();
             let (scheduler, wake, time, module) = build_test_scheduler(&db_path)?;
 
-            let datetime = chrono::offset::Utc::now();
+            let datetime = chrono::Utc.with_ymd_and_hms(2023, 12, 31, 1, 2, 3).unwrap();
             let timestamp = datetime.timestamp_millis();
             let (mut finished, cancel) =
                 build_test_action("cancel", datetime, 100, &scheduler, module.clone()).await?;
@@ -1075,7 +1076,7 @@ mod tests {
             let db_path = tempfile::NamedTempFile::new().unwrap().into_temp_path();
             let (scheduler, wake, time, module) = build_test_scheduler(&db_path)?;
 
-            let datetime = chrono::offset::Utc::now();
+            let datetime = chrono::Utc.with_ymd_and_hms(2023, 12, 31, 1, 2, 3).unwrap();
             let timestamp = datetime.timestamp_millis();
             let (mut finished, _) = build_test_repeat(
                 "basic",
@@ -1126,7 +1127,7 @@ mod tests {
             let db_path = tempfile::NamedTempFile::new().unwrap().into_temp_path();
             let (scheduler, wake, time, module) = build_test_scheduler(&db_path)?;
 
-            let datetime = chrono::offset::Utc::now();
+            let datetime = chrono::Utc.with_ymd_and_hms(2023, 12, 31, 1, 2, 3).unwrap();
             let timestamp = datetime.timestamp_millis();
             let (mut finished, _) = build_test_repeat(
                 "basic",
@@ -1185,7 +1186,7 @@ mod tests {
             let db_path = tempfile::NamedTempFile::new().unwrap().into_temp_path();
             let (scheduler, wake, time, module) = build_test_scheduler(&db_path)?;
 
-            let datetime = chrono::offset::Utc::now();
+            let datetime = chrono::Utc.with_ymd_and_hms(2023, 12, 31, 1, 2, 3).unwrap();
             let timestamp = datetime.timestamp_millis();
             let (mut finished, cancel) = build_test_repeat(
                 "basic",
@@ -1245,7 +1246,7 @@ mod tests {
             let db_path = tempfile::NamedTempFile::new().unwrap().into_temp_path();
             let (scheduler, wake, time, module) = build_test_scheduler(&db_path)?;
 
-            let datetime = chrono::offset::Utc::now();
+            let datetime = chrono::Utc.with_ymd_and_hms(2023, 12, 31, 1, 2, 3).unwrap();
             let timestamp = datetime.timestamp_millis();
 
             let callback: repeat_callback::Client = capnp_rpc::new_client(TestRepeatCallback {

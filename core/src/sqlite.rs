@@ -2057,7 +2057,7 @@ fn parse_insert_statement(
     token = iter.next().ok_or(ParseError::IncompleteStatement)?;
 
     if token == "(" {
-        while let Some(next) = iter.next() {
+        for next in iter.by_ref() {
             if next == ")" {
                 break;
             } else if next != "," {
@@ -2496,7 +2496,7 @@ fn parse_select_statement(
             _tableorsubquery: Some(table_or_subquery::TableOrSubquery::_Tableref(ro)),
             _joinoperations: Vec::new(),
         });
-        while let Some(next) = iter.next() {
+        for next in iter.by_ref() {
             if next == "," {
                 todo!(); //Maybe change the schema to make it make sense
             } else {
@@ -3033,7 +3033,7 @@ mod tests {
             .get()?
             .get_res()?;
 
-        let res = client
+        let _ = client
             .send_request_from_sql(
                 "INSERT OR ABORT INTO ?0 (name, data) VALUES (Steven, NULL)",
                 vec![Bindings::RATableref(ra_table_ref_cap.clone())],
@@ -3090,7 +3090,7 @@ mod tests {
             .set_text("meow".into());
         run_request.send().promise.await?;
 
-        let checking = client //TODO this is doing nothing currently just checking if intersect implodes
+        let _ = client //TODO this is doing nothing currently just checking if intersect implodes
             .send_request_from_sql(
                 "SELECT name FROM ?0 INTERSECT SELECT name FROM ?0",
                 vec![Bindings::ROTableref(ro_tableref_cap.clone())],
@@ -3099,7 +3099,7 @@ mod tests {
             .await?
             .get()?
             .get_res()?;
-        let checking2 = client //TODO this is doing nothing currently just checking if BETWEEN implodes
+        let _ = client //TODO this is doing nothing currently just checking if BETWEEN implodes
             .send_request_from_sql(
                 "SELECT * FROM ?0 WHERE ?1 BETWEEN ?2 AND ?3",
                 vec![
@@ -3151,7 +3151,7 @@ mod tests {
             .await?
             .get()?
             .get_res()?;
-        let mut res = client
+        let _ = client
             .send_request_from_sql("DELETE FROM ?0", vec![Bindings::Tableref(table_ref)])?
             .promise
             .await?;

@@ -262,15 +262,6 @@ impl PosixProcessImpl {
     }
 }
 
-type GetApiParams = process::GetApiParams<ByteStream, PosixError>;
-type GetApiResults = process::GetApiResults<ByteStream, PosixError>;
-type GetErrorParams = process::GetErrorParams<ByteStream, PosixError>;
-type GetErrorResults = process::GetErrorResults<ByteStream, PosixError>;
-type KillParams = process::KillParams<ByteStream, PosixError>;
-type KillResults = process::KillResults<ByteStream, PosixError>;
-type JoinParams = process::JoinParams<ByteStream, PosixError>;
-type JoinResults = process::JoinResults<ByteStream, PosixError>;
-
 impl PosixProcessImpl {
     async fn finish(&self) -> capnp::Result<i32> {
         let mut exitcode = self.exitcode.clone();
@@ -284,14 +275,11 @@ impl PosixProcessImpl {
         }
     }
 }
+
+#[capnproto_rpc(process)]
 impl process::Server<ByteStream, PosixError> for PosixProcessImpl {
-    /// In this implementation of `spawn`, the functions returns the exit code of the child
-    /// process.
-    async fn get_error(
-        &self,
-        _: GetErrorParams,
-        mut results: GetErrorResults,
-    ) -> capnp::Result<()> {
+    /// In this implementation of `spawn`, the functions returns the exit code of the child process
+    async fn get_error(&self) -> capnp::Result<()> {
         let results_builder = results.get();
         let mut process_error_builder = results_builder.init_result();
 
@@ -306,7 +294,7 @@ impl process::Server<ByteStream, PosixError> for PosixProcessImpl {
         Ok(())
     }
 
-    async fn kill(&self, _: KillParams, _: KillResults) -> capnp::Result<()> {
+    async fn kill(&self) -> capnp::Result<()> {
         if let Some(sender) = self.killsender.take() {
             let _ = sender.send(());
             self.cancellation_token.cancel();
@@ -316,17 +304,13 @@ impl process::Server<ByteStream, PosixError> for PosixProcessImpl {
         }
     }
 
-    async fn get_api(
-        &self,
-        _params: GetApiParams,
-        mut results: GetApiResults,
-    ) -> capnp::Result<()> {
+    async fn get_api(&self) -> capnp::Result<()> {
         results
             .get()
             .set_api(capnp_rpc::new_client(self.stdin.clone()))
     }
 
-    async fn join(&self, _: JoinParams, mut results: JoinResults) -> capnp::Result<()> {
+    async fn join(&self) -> capnp::Result<()> {
         let results_builder = results.get();
         let mut process_error_builder = results_builder.init_result();
         process_error_builder.set_error_code(self.finish().await?.into());

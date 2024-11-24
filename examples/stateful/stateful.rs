@@ -1,5 +1,6 @@
 use crate::stateful_capnp::my_state;
 use crate::stateful_capnp::root;
+use capnp_macros::capnproto_rpc;
 use keystone::storage_capnp::cell;
 
 pub struct StatefulImpl {
@@ -7,14 +8,10 @@ pub struct StatefulImpl {
     pub echo_last: cell::Client<my_state::Owned>,
 }
 
+#[capnproto_rpc(root)]
 impl root::Server for StatefulImpl {
-    async fn echo_last(
-        &self,
-        params: root::EchoLastParams,
-        mut results: root::EchoLastResults,
-    ) -> Result<(), ::capnp::Error> {
+    async fn echo_last(&self, request: Reader) -> Result<(), ::capnp::Error> {
         tracing::debug!("echo_last was called!");
-        let request = params.get()?.get_request()?;
         let name = request.get_name()?.to_str()?;
         let prev_request = self.echo_last.get_request().send();
         let prev_response = prev_request.promise.await?;

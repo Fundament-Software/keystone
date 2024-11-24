@@ -4,6 +4,7 @@ use crate::database::DatabaseExt;
 pub use crate::proxy::ProxyServer;
 use caplog::{CapLog, MAX_BUFFER_SIZE};
 use capnp::any_pointer::Owned as any_pointer;
+use capnp::capability::FromServer;
 use capnp::capability::{FromClientHook, RemotePromise};
 use capnp::private::capability::ClientHook;
 use capnp::traits::SetPointerBuilder;
@@ -43,7 +44,7 @@ use super::{
 
 use crate::{
     cap_std_capnproto::AmbientAuthorityImpl, host::HostImpl, posix_module::PosixModuleImpl,
-    posix_process::PosixProgramImpl, sqlite::SqliteDatabase,
+    posix_process::PosixProgramImpl, scheduler::Scheduler, sqlite::SqliteDatabase,
 };
 type SpawnProgram = crate::spawn_capnp::program::Client<
     posix_module_args::Owned<any_pointer>,
@@ -140,9 +141,10 @@ pub struct ModuleInstance {
 }
 
 pub type ModuleJoinSet = Rc<RefCell<tokio::task::JoinSet<Result<()>>>>;
-
+pub type RpcSystemSet = FuturesUnordered<Pin<Box<dyn Future<Output = Result<()>>>>>;
 pub struct Keystone {
     db: Rc<crate::sqlite_capnp::root::ServerDispatch<SqliteDatabase>>,
+    scheduler: Rc<crate::scheduler_capnp::root::ServerDispatch<Scheduler>>,
     log: CapLog<MAX_BUFFER_SIZE>,
     file_server: Rc<RefCell<AmbientAuthorityImpl>>,
     pub modules: HashMap<u64, ModuleInstance>,
@@ -152,12 +154,13 @@ pub struct Keystone {
     pub proxy_set: Rc<RefCell<crate::proxy::CapSet>>, // Set of all untyped proxies
     module_process_set: Rc<RefCell<crate::posix_module::ModuleProcessCapSet>>,
     process_set: Rc<RefCell<crate::posix_process::ProcessCapSet>>,
-    rpc_systems: FuturesUnordered<Pin<Box<dyn Future<Output = Result<()>>>>>,
+    rpc_systems: RpcSystemSet,
 }
 
 pub const BUILTIN_KEYSTONE: &str = "keystone";
 pub const BUILTIN_SQLITE: &str = "sqlite";
-const BUILTIN_MODULES: [&str; 2] = [BUILTIN_KEYSTONE, BUILTIN_SQLITE];
+pub const BUILTIN_SCHEDULER: &str = "scheduler";
+const BUILTIN_MODULES: [&str; 3] = [BUILTIN_KEYSTONE, BUILTIN_SQLITE, BUILTIN_SCHEDULER];
 
 impl Keystone {
     pub async fn init_single_module<
@@ -258,6 +261,9 @@ impl Keystone {
             SqliteDatabase::new_connection,
             crate::database::OpenOptions::Create,
         )?;
+        let scheduler = Rc::new(crate::scheduler_capnp::root::Client::from_server(
+            Scheduler::new(db.clone(), ())?,
+        ));
 
         let builtin =
             BUILTIN_MODULES.map(|s| (s.to_string(), db.get_string_index(s).unwrap() as u64));
@@ -305,6 +311,11 @@ impl Keystone {
                 namemap[BUILTIN_SQLITE],
                 capnp_rpc::local::Client::from_rc(db.clone()).add_ref(),
             );
+
+            clients.insert(
+                namemap[BUILTIN_SCHEDULER],
+                capnp_rpc::local::Client::from_rc(scheduler.clone()).add_ref(),
+            );
         }
 
         #[cfg(miri)]
@@ -327,6 +338,7 @@ impl Keystone {
 
         Ok(Self {
             db,
+            scheduler,
             log: caplog,
             file_server: Default::default(),
             modules,
@@ -408,6 +420,9 @@ impl Keystone {
                 .hook,
             ),
             BUILTIN_SQLITE => Some(capnp_rpc::local::Client::from_rc(self.db.clone()).add_ref()),
+            BUILTIN_SCHEDULER => {
+                Some(capnp_rpc::local::Client::from_rc(self.scheduler.clone()).add_ref())
+            }
             _ => None,
         }
     }
@@ -680,10 +695,8 @@ impl Keystone {
         Ok(())
     }
 
-    pub fn next<'a>(
-        &'a mut self,
-    ) -> futures_util::stream::Next<'a, FuturesUnordered<Pin<Box<dyn Future<Output = Result<()>>>>>>
-    {
+    #[allow(clippy::should_implement_trait)]
+    pub fn next(&mut self) -> futures_util::stream::Next<'_, RpcSystemSet> {
         self.rpc_systems.next()
     }
 
@@ -751,11 +764,9 @@ impl Keystone {
         if Self::halted(&module.state) {
             return Ok(());
         }
-        // TODO: If a race condition here is possible, this must be made atomic and checked to see if it was already set to closing by another thread.
         module.state = ModuleState::Closing;
 
         // Send the stop request to the bootstrap interface
-
         let Some(bootstrap) = module.bootstrap.as_ref() else {
             return Err(Error::MissingBootstrap(module.name.clone()).into());
         };
@@ -791,12 +802,15 @@ impl Keystone {
         }
     }
 
-    pub fn shutdown<'a>(
-        &'a mut self,
+    pub fn shutdown(
+        &mut self,
     ) -> (
-        FuturesUnordered<impl Future<Output = Result<()>> + use<'a>>,
-        &'a mut FuturesUnordered<Pin<Box<dyn Future<Output = Result<()>>>>>,
+        FuturesUnordered<impl Future<Output = Result<()>> + use<'_>>,
+        &mut RpcSystemSet,
     ) {
+        // The scheduler thread is always running in an endless loop, so we abort it here.
+        self.scheduler.server.thread.abort();
+
         let set: FuturesUnordered<_> = self
             .modules
             .values_mut()
@@ -830,13 +844,11 @@ impl Keystone {
     }
 }
 
-/*impl Drop for Keystone {
+/* sadly we can't actually do this, because if an error happens the rpc_system won't be drained.
+impl Drop for Keystone {
     fn drop(&mut self) {
-        for (_, m) in self.modules.iter() {
-            if !Self::halted(&m.state) {
-                // There's a module that wasn't properly halted, but we can't start an additional runtime to handle it, so we panic
-                panic!("Keystone instance dropped while {} was not halted!", m.name);
-            }
+        if !self.rpc_systems.is_empty() {
+            panic!("Keystone instance dropped without waiting for proper shutdown!", m.name);
         }
     }
 }*/

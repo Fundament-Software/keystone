@@ -2,6 +2,7 @@ include!(concat!(env!("OUT_DIR"), "/capnproto.rs"));
 
 use capnp::any_pointer::Owned as any_pointer;
 use capnp::capability::FromClientHook;
+use capnp_macros::capnproto_rpc;
 use keystone::sqlite_capnp::add_d_b;
 use keystone::sqlite_capnp::d_b_any;
 use keystone::sqlite_capnp::database;
@@ -27,12 +28,9 @@ pub struct SqliteUsageImpl {
     pub sqlite: keystone::sqlite_capnp::root::Client,
 }
 
+#[capnproto_rpc(root)]
 impl root::Server for SqliteUsageImpl {
-    async fn echo_alphabetical(
-        &self,
-        params: root::EchoAlphabeticalParams,
-        mut results: root::EchoAlphabeticalResults,
-    ) -> Result<(), ::capnp::Error> {
+    async fn echo_alphabetical(&self, request: Reader) -> Result<(), ::capnp::Error> {
         tracing::debug!("echo_alphabetical was called!");
 
         let res = self
@@ -87,7 +85,6 @@ impl root::Server for SqliteUsageImpl {
         let message = format!("usage {last}");
         results.get().init_reply().set_message(message[..].into());
 
-        let request = params.get()?.get_request()?;
         let current = request.get_name()?.to_str()?;
 
         let ins = self
@@ -175,9 +172,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .await
 }
-
-#[cfg(test)]
-use tempfile::NamedTempFile;
 
 #[test]
 fn test_sqlite_usage() -> eyre::Result<()> {

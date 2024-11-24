@@ -7,6 +7,7 @@ members = [
   "examples/stateful",
   "examples/complex-config",
   "examples/sqlite-usage",
+  "examples/scheduler-usage",
 ]
 resolver = "2"
 default-members = ["core"]
@@ -14,7 +15,7 @@ default-members = ["core"]
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.77.0"
+rust-version = "1.80.0"
 license = "Apache-2.0"
 homepage = "https://github.com/Fundament-Software/keystone"
 repository = "https://github.com/Fundament-Software/keystone/"
@@ -62,3 +63,9 @@ stateful = { path = "examples/stateful" }
 complex-config = { path = "examples/complex-config" }
 tempfile = "3"
 test-binary = "3.0"
+chrono = { version = "0.4", default-features = false, features = [
+  "std",
+  "alloc",
+  "clock",
+] }
+atomic-take = "1.1.0"

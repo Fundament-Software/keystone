@@ -9,8 +9,6 @@ use crate::posix_spawn_capnp::posix_args::Owned as PosixArgs;
 use crate::posix_spawn_capnp::posix_error::Owned as PosixError;
 use crate::spawn_capnp::process;
 use crate::spawn_capnp::program;
-use crate::spawn_capnp::program::SpawnParams;
-use crate::spawn_capnp::program::SpawnResults;
 use capnp::any_pointer::Owned as any_pointer;
 use capnp::any_pointer::Owned as cap_pointer;
 use capnp::capability::FromServer;
@@ -118,6 +116,7 @@ fn flatten_to_capnp<T, E: ToString, E2: ToString>(
     }
 }
 
+#[capnproto_rpc(program)]
 impl
     program::Server<
         posix_module_args::Owned<any_pointer>,
@@ -125,32 +124,20 @@ impl
         module_error::Owned<any_pointer>,
     > for PosixModuleProgramImpl
 {
-    async fn spawn(
-        &self,
-        params: SpawnParams<
-            posix_module_args::Owned<any_pointer>,
-            cap_pointer,
-            module_error::Owned<any_pointer>,
-        >,
-        mut results: SpawnResults<
-            posix_module_args::Owned<any_pointer>,
-            cap_pointer,
-            module_error::Owned<any_pointer>,
-        >,
-    ) -> Result<(), ::capnp::Error> {
+    async fn spawn(&self, args: Reader) -> Result<(), ::capnp::Error> {
         let span = tracing::span!(tracing::Level::DEBUG, "posix_program::spawn");
         let _enter = span.enter();
         let mut request = self.posix_program.spawn_request();
-        let mut args = request.get().init_args();
-        args.reborrow().init_args(0);
+        let mut prog_args = request.get().init_args();
+        prog_args.reborrow().init_args(0);
 
         // Here we create a bytestream implementation backed by a circular buffer. This is passed
         // into the new process so it can write to it, and then our RPC system reads from it.
         let stdout = ByteStreamBufferImpl::new();
         let stderr = ByteStreamBufferImpl::new();
 
-        args.set_stdout(capnp_rpc::new_client(stdout.clone()));
-        args.set_stderr(capnp_rpc::new_client(stderr.clone()));
+        prog_args.set_stdout(capnp_rpc::new_client(stdout.clone()));
+        prog_args.set_stderr(capnp_rpc::new_client(stderr.clone()));
         match request.send().promise.await {
             Ok(h) => {
                 let process = h.get()?.get_result()?;
@@ -159,7 +146,7 @@ impl
                     Ok(s) => {
                         let stdin = crate::byte_stream::ClientWriter::new(s.get()?.get_api()?);
 
-                        let pair = params.get()?.get_args()?;
+                        let pair = args;
 
                         // read from the output stream of the process
                         // write into the input stream of the process

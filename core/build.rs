@@ -1,43 +1,6 @@
-use std::io::Write;
 use std::path::PathBuf;
 
 fn main() {
-    // This code was used to generate the timezones, but because any new timezones must be added
-    // without changing the ordinal of any existing enumerants, regenerating the timezones file is
-    // a protocol-breaking change. DO NOT UNCOMMENT unless you intend to make a breaking change.
-    /*{
-        use convert_case::Casing;
-
-        let mut f = std::fs::File::create("schema/tz.capnp").unwrap();
-        writeln!(&mut f, "@0x{:x};", capnpc::generate_random_id()).unwrap();
-        writeln!(&mut f, "# DO NOT RE-ORDER INDICES").unwrap();
-        writeln!(&mut f, "annotation tzname(enumerant) :Text;").unwrap();
-        writeln!(&mut f).unwrap();
-        writeln!(&mut f, "enum Tz {{").unwrap();
-
-        let mut ordinal = 0;
-        for tz in chrono_tz::TZ_VARIANTS {
-            writeln!(
-                &mut f,
-                "  {} @{} $tzname(\"{}\");",
-                tz.name()
-                    .replace("/", " ")
-                    .replace("_", " ")
-                    .replace("+", "plus")
-                    .replace("-", "minus")
-                    .to_case(convert_case::Case::Camel),
-                ordinal,
-                tz.name()
-            )
-            .unwrap();
-            ordinal += 1;
-        }
-
-        writeln!(&mut f, "}}").unwrap();
-        writeln!(&mut f, "").unwrap();
-    }*/
-
-    // If so, attempt to regenerate it. If this fails (because we're in a read-only context), that's fine
     // Export schema path
     let manifest: std::path::PathBuf = std::env::var_os("CARGO_MANIFEST_DIR").unwrap().into();
     println!(

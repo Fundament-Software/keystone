@@ -173,9 +173,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .await
 }
 
-#[cfg(test)]
-use tempfile::NamedTempFile;
-
 #[test]
 fn test_sqlite_usage() -> eyre::Result<()> {
     //console_subscriber::init();

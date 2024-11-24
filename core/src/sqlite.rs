@@ -2057,7 +2057,7 @@ fn parse_insert_statement(
     token = iter.next().ok_or(ParseError::IncompleteStatement)?;
 
     if token == "(" {
-        while let Some(next) = iter.next() {
+        for next in iter.by_ref() {
             if next == ")" {
                 break;
             } else if next != "," {
@@ -2496,7 +2496,7 @@ fn parse_select_statement(
             _tableorsubquery: Some(table_or_subquery::TableOrSubquery::_Tableref(ro)),
             _joinoperations: Vec::new(),
         });
-        while let Some(next) = iter.next() {
+        for next in iter.by_ref() {
             if next == "," {
                 todo!(); //Maybe change the schema to make it make sense
             } else {

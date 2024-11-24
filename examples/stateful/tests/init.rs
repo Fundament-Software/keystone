@@ -13,7 +13,7 @@ fn test_stateful() -> Result<()> {
 
                 let fut = async move {
                     {
-                        let mut echo_response = stateful_client
+                        let echo_response = stateful_client
                             .build_echo_last_request(Some(EchoRequest {
                                 _name: "Keystone".into(),
                             }))
@@ -27,7 +27,7 @@ fn test_stateful() -> Result<()> {
                     }
 
                     {
-                        let mut echo_response = stateful_client
+                        let echo_response = stateful_client
                             .build_echo_last_request(Some(EchoRequest {
                                 _name: "Replace".into(),
                             }))
@@ -41,7 +41,7 @@ fn test_stateful() -> Result<()> {
                     }
 
                     {
-                        let mut echo_response = stateful_client
+                        let echo_response = stateful_client
                             .build_echo_last_request(Some(EchoRequest {
                                 _name: "Reload".into(),
                             }))

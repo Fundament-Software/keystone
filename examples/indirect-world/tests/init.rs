@@ -1,7 +1,4 @@
-use eyre::Context;
-use futures_util::StreamExt;
 use indirect_world::indirect_world_capnp::root;
-use tempfile::NamedTempFile;
 
 #[test]
 fn test_indirect_init() -> eyre::Result<()> {

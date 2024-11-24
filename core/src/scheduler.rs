@@ -64,7 +64,7 @@ pub fn gen_tz_map<const SIZE: usize>() -> [Tz; SIZE] {
 }
 
 use std::sync::LazyLock;
-const TZ_MAP: LazyLock<[Tz; 596]> = LazyLock::new(|| gen_tz_map());
+static TZ_MAP: LazyLock<[Tz; 596]> = LazyLock::new(gen_tz_map);
 static LAST_ERROR: AtomicOptionBox<eyre::ErrReport> = AtomicOptionBox::none();
 
 enum Queue {
@@ -148,6 +148,7 @@ fn to_datetime(tz: &Tz, timestamp: i64) -> Result<DateTime<Tz>> {
 }
 
 impl Scheduler {
+    #[allow(clippy::too_many_arguments)]
     pub async fn repeat(
         db: &Rc<ServerDispatch<SqliteDatabase>>,
         timestamp: i64,
@@ -220,7 +221,7 @@ impl Scheduler {
     }
 
     async fn catch_error<T>(e: eyre::ErrReport) -> capnp::Result<T> {
-        eprintln!("Error when executing action: {}", e.to_string());
+        eprintln!("Error when executing action: {}", e);
         let r = capnp::Error::failed(e.to_string());
         LAST_ERROR.store(Some(Box::new(e)), std::sync::atomic::Ordering::AcqRel);
         Err(r)
@@ -241,7 +242,7 @@ impl Scheduler {
             {
                 Ok(a) => a,
                 Err(e) => {
-                    let _ = Self::catch_error::<()>(e.into());
+                    let _ = Self::catch_error::<()>(e.into()).await;
                     return;
                 }
             };
@@ -263,6 +264,12 @@ impl Scheduler {
             }
         }
     }
+
+    fn overflow_error(id: i64, remove: &mut CachedStatement<'_>) -> rusqlite::Result<usize> {
+        eprintln!("Overflow error while processing {}, canceling task", id);
+        remove.execute(params![id])
+    }
+
     #[allow(private_bounds)]
     pub fn new<TS: TimeSource + 'static>(
         db: Rc<ServerDispatch<SqliteDatabase>>,
@@ -358,8 +365,18 @@ CREATE TABLE IF NOT EXISTS scheduler (
                         set.execute(params![id, next])?;
                     } else if every_hours != 0 || every_millis != 0 {
                         // Otherwise, this interval isn't affected by DST and we can calculate it directly
-                        let skip = (every_hours * 3600000) + every_millis;
-                        let diff = now - timestamp;
+                        let Some(millis) = every_hours.checked_mul(3600000) else {
+                            Self::overflow_error(id, &mut remove)?;
+                            continue;
+                        };
+                        let Some(skip) = millis.checked_add(every_millis) else {
+                            Self::overflow_error(id, &mut remove)?;
+                            continue;
+                        };
+                        let Some(diff) = now.checked_sub(timestamp) else {
+                            Self::overflow_error(id, &mut remove)?;
+                            continue;
+                        };
                         let count = (skip / diff) + 1;
 
                         tokio::task::spawn_local(Self::catchup(
@@ -370,7 +387,11 @@ CREATE TABLE IF NOT EXISTS scheduler (
                             action,
                         ));
 
-                        let new_timestamp = timestamp + (skip * count);
+                        let Some(new_timestamp) = timestamp.checked_add(skip * count) else {
+                            Self::overflow_error(id, &mut remove)?;
+                            continue;
+                        };
+
                         set.execute(params![id, new_timestamp])?;
                     } else if miss != MissBehavior::None {
                         // If there's no repeat information at all, this is a oneshot, so no need to re-save it.
@@ -384,12 +405,13 @@ CREATE TABLE IF NOT EXISTS scheduler (
 
             // Now we start our infinite loop where we sleep until we have something to execute
             loop {
-                while let Ok(_) = recv.try_recv() {} // drain messages before doing the database query
+                while recv.try_recv().is_ok() {} // drain messages before doing the database query
                 let next: Option<i64> = get_time.query_row((), |row| row.get(0)).optional()?;
                 // If there is no next event, we go to sleep forever, only awakening if we receive a database change signal.
                 let now = ts.now().await;
                 let diff = if let Some(ms) = next {
-                    ms - now
+                    ms.checked_sub(now)
+                        .expect("Overflow subtracting ms from now! Aborting!")
                 } else {
                     86400 * 365 * 30 * 1000
                 };
@@ -405,14 +427,19 @@ CREATE TABLE IF NOT EXISTS scheduler (
                             }
                             // Check to see if we got woken up close enough to our target time (if it exists) to just treat this as a timer wakeup
                             if let Some(ms) = next {
-                                if !((ms - ts.now().await) < TIMER_EPSILON) {
-                                    // If we weren't close enough, restart the loop to requery the database
+                                let rediff = ms.checked_sub(ts.now().await);
+                                if let Some(n) = rediff {
+                                    if n >= TIMER_EPSILON {
+                                        // If we weren't close enough, restart the loop to requery the database
+                                        continue;
+                                    }
+                                } else {
+                                    // If there's an overflow, definitely requery the database
                                     continue;
                                 }
                             } else {
                                 continue;
                             }
-                            ()
                         }
                         _ = ts.sleep(Instant::now() + Duration::from_millis(diff as u64)) => ()
                     };

@@ -141,7 +141,7 @@ pub struct ModuleInstance {
 }
 
 pub type ModuleJoinSet = Rc<RefCell<tokio::task::JoinSet<Result<()>>>>;
-
+pub type RpcSystemSet = FuturesUnordered<Pin<Box<dyn Future<Output = Result<()>>>>>;
 pub struct Keystone {
     db: Rc<crate::sqlite_capnp::root::ServerDispatch<SqliteDatabase>>,
     scheduler: Rc<crate::scheduler_capnp::root::ServerDispatch<Scheduler>>,
@@ -154,7 +154,7 @@ pub struct Keystone {
     pub proxy_set: Rc<RefCell<crate::proxy::CapSet>>, // Set of all untyped proxies
     module_process_set: Rc<RefCell<crate::posix_module::ModuleProcessCapSet>>,
     process_set: Rc<RefCell<crate::posix_process::ProcessCapSet>>,
-    rpc_systems: FuturesUnordered<Pin<Box<dyn Future<Output = Result<()>>>>>,
+    rpc_systems: RpcSystemSet,
 }
 
 pub const BUILTIN_KEYSTONE: &str = "keystone";
@@ -695,10 +695,8 @@ impl Keystone {
         Ok(())
     }
 
-    pub fn next<'a>(
-        &'a mut self,
-    ) -> futures_util::stream::Next<'a, FuturesUnordered<Pin<Box<dyn Future<Output = Result<()>>>>>>
-    {
+    #[allow(clippy::should_implement_trait)]
+    pub fn next(&mut self) -> futures_util::stream::Next<'_, RpcSystemSet> {
         self.rpc_systems.next()
     }
 
@@ -804,11 +802,11 @@ impl Keystone {
         }
     }
 
-    pub fn shutdown<'a>(
-        &'a mut self,
+    pub fn shutdown(
+        &mut self,
     ) -> (
-        FuturesUnordered<impl Future<Output = Result<()>> + use<'a>>,
-        &'a mut FuturesUnordered<Pin<Box<dyn Future<Output = Result<()>>>>>,
+        FuturesUnordered<impl Future<Output = Result<()>> + use<'_>>,
+        &mut RpcSystemSet,
     ) {
         // The scheduler thread is always running in an endless loop, so we abort it here.
         self.scheduler.server.thread.abort();

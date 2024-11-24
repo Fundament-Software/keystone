@@ -9,7 +9,7 @@ license.workspace = true
 links = "scheduler_usage"
 
 [features]
-default = ["tracing"]
+default = []
 tracing = []
 
 [lib]

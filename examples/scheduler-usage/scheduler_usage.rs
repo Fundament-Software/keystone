@@ -142,6 +142,8 @@ impl restore::Server<storage::Owned> for SchedulerUsageImpl {
 }
 
 use std::sync::LazyLock;
+
+#[allow(clippy::type_complexity)]
 pub static MASTER_SYNC: LazyLock<(
     AtomicTake<oneshot::Sender<String>>,
     AtomicTake<oneshot::Receiver<String>>,

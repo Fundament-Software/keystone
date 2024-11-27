@@ -18,6 +18,7 @@ mod proxy;
 pub mod scheduler;
 pub mod sqlite;
 mod sturdyref;
+mod util;
 
 use atomic_take::AtomicTake;
 use capnp::any_pointer::Owned as any_pointer;
@@ -249,7 +250,10 @@ pub async fn test_create_keystone(
     )?;
 
     instance
-        .init(message.get_root_as_reader::<keystone_config::Reader>()?)
+        .init(
+            &std::env::current_dir()?,
+            message.get_root_as_reader::<keystone_config::Reader>()?,
+        )
         .await?;
 
     Ok(instance)
@@ -268,7 +272,11 @@ pub fn test_harness<F: Future<Output = eyre::Result<()>> + 'static>(
     let mut source = build_temp_config(&temp_db, &temp_log, &temp_prefix);
 
     source.push_str(config);
-    config::to_capnp(&source.parse::<toml::Table>()?, msg.reborrow())?;
+    config::to_capnp(
+        &source.parse::<toml::Table>()?,
+        msg.reborrow(),
+        &std::env::current_dir()?,
+    )?;
 
     // TODO: might be able to replace the runtime catch below with .unhandled_panic(UnhandledPanic::ShutdownRuntime) if gets stabilized
     let pool = tokio::task::LocalSet::new();
@@ -287,14 +295,6 @@ pub fn test_harness<F: Future<Output = eyre::Result<()>> + 'static>(
         panic!("Test took too long!");
     }
 
-    Ok(())
-}
-
-#[inline]
-pub async fn test_runner(instance: &mut Keystone) -> eyre::Result<()> {
-    while let Some(r) = instance.next().await {
-        r?;
-    }
     Ok(())
 }
 
@@ -354,7 +354,7 @@ pub fn test_module_harness<
                 .unwrap();
 
         tokio::select! {
-            r = test_runner(&mut instance) => r,
+            r = drive_stream(&mut instance.rpc_systems) => r,
             r = f(api) => r.wrap_err(module),
         }?;
         test_shutdown(&mut instance).await

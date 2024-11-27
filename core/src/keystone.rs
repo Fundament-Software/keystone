@@ -2,6 +2,7 @@ use crate::cap_replacement::CapReplacement;
 use crate::cell::SimpleCellImpl;
 use crate::database::DatabaseExt;
 pub use crate::proxy::ProxyServer;
+use crate::util::SnowflakeSource;
 use caplog::{CapLog, MAX_BUFFER_SIZE};
 use capnp::any_pointer::Owned as any_pointer;
 use capnp::capability::FromServer;
@@ -14,7 +15,6 @@ use eyre::Result;
 use eyre::WrapErr;
 use futures_util::stream::FuturesUnordered;
 use futures_util::FutureExt;
-use futures_util::StreamExt;
 use std::future::Future;
 use std::pin::Pin;
 use std::time::Duration;
@@ -145,7 +145,7 @@ pub type RpcSystemSet = FuturesUnordered<Pin<Box<dyn Future<Output = Result<()>>
 pub struct Keystone {
     db: Rc<crate::sqlite_capnp::root::ServerDispatch<SqliteDatabase>>,
     scheduler: Rc<crate::scheduler_capnp::root::ServerDispatch<Scheduler>>,
-    log: CapLog<MAX_BUFFER_SIZE>,
+    log: Rc<RefCell<CapLog<MAX_BUFFER_SIZE>>>, // TODO: Remove RefCell once CapLog is made thread-safe.
     file_server: Rc<RefCell<AmbientAuthorityImpl>>,
     pub modules: HashMap<u64, ModuleInstance>,
     pub namemap: HashMap<String, u64>,
@@ -154,7 +154,8 @@ pub struct Keystone {
     pub proxy_set: Rc<RefCell<crate::proxy::CapSet>>, // Set of all untyped proxies
     module_process_set: Rc<RefCell<crate::posix_module::ModuleProcessCapSet>>,
     process_set: Rc<RefCell<crate::posix_process::ProcessCapSet>>,
-    rpc_systems: RpcSystemSet,
+    pub rpc_systems: RpcSystemSet,
+    snowflake: Rc<SnowflakeSource>,
 }
 
 pub const BUILTIN_KEYSTONE: &str = "keystone";
@@ -175,7 +176,11 @@ impl Keystone {
     ) -> Result<(Self, API)> {
         let mut message = ::capnp::message::Builder::new_default();
         let mut msg = message.init_root::<keystone_config::Builder>();
-        crate::config::to_capnp(&config.as_ref().parse::<toml::Table>()?, msg.reborrow())?;
+        crate::config::to_capnp(
+            &config.as_ref().parse::<toml::Table>()?,
+            msg.reborrow(),
+            &std::env::current_dir()?,
+        )?;
 
         let mut instance = Keystone::new(
             message.get_root_as_reader::<keystone_config::Reader>()?,
@@ -190,7 +195,9 @@ impl Keystone {
             if s.get_name()?.to_str()? == module.as_ref() {
                 target = Some(s);
             } else {
-                instance.init_module(id, s, config.get_cap_table()?).await?;
+                instance
+                    .init_module(id, s, &std::env::current_dir()?, config.get_cap_table()?)
+                    .await?;
             }
         }
 
@@ -339,7 +346,7 @@ impl Keystone {
         Ok(Self {
             db,
             scheduler,
-            log: caplog,
+            log: Rc::new(RefCell::new(caplog)),
             file_server: Default::default(),
             modules,
             timeout: Duration::from_millis(config.get_ms_timeout()),
@@ -351,6 +358,7 @@ impl Keystone {
             process_set: Rc::new(RefCell::new(crate::posix_process::ProcessCapSet::new())),
             namemap,
             rpc_systems: Default::default(),
+            snowflake: Rc::new(SnowflakeSource::new()),
         })
     }
 
@@ -382,11 +390,11 @@ impl Keystone {
         &self,
         host: crate::keystone_capnp::host::Client<any_pointer>,
         config: keystone_config::module_config::Reader<'_, any_pointer>,
+        dir: &Path,
     ) -> Result<SpawnProgram> {
-        let spawn_process_server = PosixProgramImpl::new_std(
-            std::fs::File::open(config.get_path()?.to_str()?).unwrap(),
-            self.process_set.clone(),
-        );
+        let path = dir.join(Path::new(config.get_path()?.to_str()?));
+        let spawn_process_server =
+            PosixProgramImpl::new_std(std::fs::File::open(&path)?, self.process_set.clone());
 
         let spawn_process_client: crate::posix_process::PosixProgramClient =
             capnp_rpc::new_client(spawn_process_server);
@@ -448,6 +456,8 @@ impl Keystone {
                             .new_client(ProxyServer::new(
                                 self.modules[id].queue.add_ref(),
                                 self.proxy_set.clone(),
+                                self.log.clone(),
+                                self.snowflake.clone(),
                             ))
                             .hook
                     },
@@ -531,6 +541,7 @@ impl Keystone {
         &mut self,
         id: u64,
         config: keystone_config::module_config::Reader<'_, any_pointer>,
+        config_dir: &Path,
         cap_table: capnp::struct_list::Reader<'_, cap_expr::Owned>,
     ) -> Result<()> {
         self.modules
@@ -544,7 +555,10 @@ impl Keystone {
 
         let keystone_host: crate::keystone_capnp::host::Client<any_pointer> =
             capnp_rpc::new_client(HostImpl::new(id, self.db.clone()));
-        let Ok(program) = self.posix_spawn(keystone_host.clone(), config).await else {
+        let Ok(program) = self
+            .posix_spawn(keystone_host.clone(), config, config_dir)
+            .await
+        else {
             return Self::failed_start(
                 &mut self.modules,
                 id,
@@ -560,9 +574,9 @@ impl Keystone {
         };
 
         // Then we get a path to our current app dir
-        let workpath = workpath.parent().unwrap_or(workpath);
+        let workpath = config_dir.join(workpath.parent().unwrap_or(workpath));
         let dir = match cap_std::fs::Dir::open_ambient_dir(
-            workpath,
+            &workpath,
             self.file_server.as_ref().borrow().authority,
         ) {
             Ok(x) => x,
@@ -683,21 +697,16 @@ impl Keystone {
         })
     }
 
-    pub async fn init(&mut self, config: keystone_config::Reader<'_>) -> Result<()> {
+    pub async fn init(&mut self, dir: &Path, config: keystone_config::Reader<'_>) -> Result<()> {
         let modules = config.get_modules()?;
         for s in modules.iter() {
             let id = self.get_id(s)?;
-            if let Err(e) = self.init_module(id, s, config.get_cap_table()?).await {
+            if let Err(e) = self.init_module(id, s, dir, config.get_cap_table()?).await {
                 tracing::error!("Module Start Failure: {}", e);
             }
         }
 
         Ok(())
-    }
-
-    #[allow(clippy::should_implement_trait)]
-    pub fn next(&mut self) -> futures_util::stream::Next<'_, RpcSystemSet> {
-        self.rpc_systems.next()
     }
 
     /*pub fn run<'a>(

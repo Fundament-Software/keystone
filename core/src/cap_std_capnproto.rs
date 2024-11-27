@@ -1050,14 +1050,12 @@ pub struct SystemTimeImpl {
 #[capnproto_rpc(system_time)]
 impl system_time::Server for SystemTimeImpl {
     async fn duration_since(&self, earlier: Capability) {
-        let Ok(earlier_duration_since_unix_epoch) = tokio::task::block_in_place(move || {
-            tokio::runtime::Handle::current().block_on(
-                earlier
-                    .get_duration_since_unix_epoch_request()
-                    .send()
-                    .promise,
-            )
-        }) else {
+        let Ok(earlier_duration_since_unix_epoch) = earlier
+            .get_duration_since_unix_epoch_request()
+            .send()
+            .promise
+            .await
+        else {
             return Err(Error::failed("Failed to convert to unix time".into()));
         };
         let reader = earlier_duration_since_unix_epoch.get()?;

@@ -17,14 +17,20 @@ mod proxy;
 pub mod scheduler;
 pub mod sqlite;
 mod sturdyref;
-
-include!(concat!(env!("OUT_DIR"), "/capnproto.rs"));
+mod util;
 
 use crate::keystone_capnp::keystone_config;
 use clap::{Parser, Subcommand, ValueEnum};
 use eyre::Result;
+use futures_util::StreamExt;
 pub use keystone::*;
+use std::future::Future;
+use std::io::Write;
+use std::path::Path;
 use std::{convert::Into, fs, io::Read, str::FromStr};
+use windows_sys::Win32::Foundation::ERROR_PRINTER_DRIVER_DOWNLOAD_NEEDED;
+
+include!(concat!(env!("OUT_DIR"), "/capnproto.rs"));
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -90,12 +96,17 @@ enum Commands {
         //nickel: Option<String>,
         #[arg(short = 'c')]
         config: Option<String>,
+        #[arg(short = 'i')]
+        interactive: bool,
     },
     /// Installs a new keystone daemon using the given compiled config.
     Install {
         /// If not specified, assumes the config lives in "./keystone.config"
         #[arg(short = 'c')]
         config: Option<String>,
+        /// If specified, copies the entire directory next to the keystone executable. Will eventually be replaced with a proper content store.
+        #[arg(short = 't')]
+        store: Option<String>,
         /// If any modules are specified in both the old and new configs, preserve their state and internal configuration.
         #[arg(short = 'u')]
         update: bool,
@@ -136,13 +147,6 @@ enum Commands {
     },
 }
 
-async fn shutdown_signal() {
-    // Wait for the CTRL+C signal
-    tokio::signal::ctrl_c()
-        .await
-        .expect("failed to listen to shutdown signal");
-}
-
 fn inspect<R: Read>(
     reader: R,
 ) -> capnp::Result<capnp::message::Reader<capnp::serialize::OwnedSegments>> {
@@ -157,11 +161,51 @@ fn inspect<R: Read>(
     )
 }
 
-use std::io::Write;
+#[inline]
+pub async fn drive_stream_with_error(
+    msg: &str,
+    stream: &mut futures_util::stream::FuturesUnordered<impl Future<Output = eyre::Result<()>>>,
+) {
+    while let Some(r) = stream.next().await {
+        if let Err(e) = r {
+            eprintln!("{}: {}", msg, e);
+        }
+    }
+}
+
+fn keystone_startup(dir: &Path, message: keystone_config::Reader<'_>) -> Result<()> {
+    let pool = tokio::task::LocalSet::new();
+
+    let fut = pool.run_until(async move {
+        let mut instance = Keystone::new(message, false)?;
+        instance.init(dir, message).await?;
+
+        eprintln!("finished init");
+        tokio::select! {
+            //r = drive_stream_with_error("Module crashed!", &mut instance.rpc_systems) => (),
+            r = tokio::signal::ctrl_c() => r.expect("failed to listen to shutdown signal"),
+        };
+
+        let (mut shutdown, runner) = instance.shutdown();
+
+        tokio::join!(
+            drive_stream_with_error("Error during shutdown!", &mut shutdown),
+            drive_stream_with_error("Error during shutdown!", runner)
+        );
+
+        Ok::<(), eyre::Report>(())
+    });
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    let result = runtime.block_on(fut);
+    println!("Performing graceful shutdown...");
+    runtime.shutdown_timeout(std::time::Duration::from_millis(1000));
+    result?;
+    Ok(())
+}
 
 #[allow(unused)]
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     // Setup eyre
     color_eyre::install()?;
 
@@ -169,6 +213,7 @@ async fn main() -> Result<()> {
 
     tracing_subscriber::fmt()
         .with_max_level(cli.log.unwrap_or(LogLevel::Warn))
+        //.with_max_level(cli.log.unwrap_or(LogLevel::Trace))
         .with_target(true)
         .with_timer(tracing_subscriber::fmt::time::OffsetTime::new(
             time::UtcOffset::UTC,
@@ -180,15 +225,22 @@ async fn main() -> Result<()> {
         Commands::Build { toml, output } => {
             let mut message = ::capnp::message::Builder::new_default();
             let mut msg = message.init_root::<keystone_config::Builder>();
-            let source = if let Some(t) = toml {
-                fs::read_to_string(std::path::PathBuf::from_str(t.as_str())?)?
+            let mut parent = None;
+            let source = if let Some(t) = toml.as_ref() {
+                let path = std::path::Path::new(t.as_str());
+                parent = path.parent();
+                fs::read_to_string(path)?
             } else {
                 let mut source = Default::default();
                 std::io::stdin().read_to_string(&mut source);
                 source
             };
 
-            config::to_capnp(&source.parse::<toml::Table>()?, msg.reborrow())?;
+            config::to_capnp(
+                &source.parse::<toml::Table>()?,
+                msg.reborrow(),
+                parent.unwrap_or(Path::new("")),
+            )?;
 
             if let Some(out) = output {
                 let mut f = fs::File::create(out)?;
@@ -221,9 +273,39 @@ async fn main() -> Result<()> {
                 print!("{:#?}", value);
             }
         }
-        Commands::Session { toml, config } => {
-            shutdown_signal().await;
-            println!("Performing graceful shutdown...");
+        Commands::Session {
+            toml,
+            config,
+            interactive,
+        } => {
+            if let Some(p) = toml {
+                let path = Path::new(&p);
+                let mut f = std::fs::File::open(path)?;
+                let mut buf = String::new();
+                f.read_to_string(&mut buf)?;
+
+                let mut message = ::capnp::message::Builder::new_default();
+                let mut msg = message.init_root::<keystone_config::Builder>();
+                let dir = path.parent().unwrap_or(Path::new(""));
+                config::to_capnp(&buf.parse::<toml::Table>()?, msg.reborrow(), dir)?;
+                keystone_startup(
+                    dir,
+                    message.get_root_as_reader::<keystone_config::Reader>()?,
+                )
+            } else if let Some(p) = config {
+                let path = Path::new(&p);
+                keystone_startup(
+                    path.parent().unwrap_or(Path::new("")),
+                    crate::config::message_from_file(path)?
+                        .get_root::<keystone_config::Reader>()?,
+                )
+            } else {
+                keystone_startup(
+                    &std::env::current_dir()?,
+                    crate::config::message_from_file(Path::new("./keystone.config"))?
+                        .get_root::<keystone_config::Reader>()?,
+                )
+            }?;
         }
         Commands::Id {} => {
             println!("0x{:x}", capnpc::generate_random_id());

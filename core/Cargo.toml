@@ -76,13 +76,15 @@ chrono.workspace = true
 chrono-tz = "0.10"
 atomicbox = "0.4"
 convert_case = { version = "0.6", optional = true }
+safemem = "0.3"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2"
+sshkeys = "0.3"
 
 [target.'cfg(target_os = "windows")'.dependencies.windows-sys]
 version = "0.59"
-features = ["Win32_Foundation"]
+features = ["Win32_Foundation", "Win32_NetworkManagement_IpHelper"]
 
 [dev-dependencies]
 predicates = "3.1"

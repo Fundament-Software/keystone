@@ -1,7 +1,6 @@
-use std::mem::MaybeUninit;
-
 #[cfg(target_os = "windows")]
 unsafe fn get_mac() -> Option<u64> {
+    use std::mem::MaybeUninit;
     use windows_sys::Win32::{Foundation::ERROR_SUCCESS, NetworkManagement::IpHelper};
 
     let mut info: [MaybeUninit<IpHelper::IP_ADAPTER_INFO>; 32] =
@@ -81,13 +80,13 @@ impl SnowflakeSource {
     #[cfg(target_os = "linux")]
     pub fn gen_machine_id() -> u64 {
         if let Ok(key) = sshkeys::PublicKey::from_path("/etc/ssh/ssh_host_ed25519_key.pub") {
-            if let PublicKeyKind::Ed25519(kind) = key.kind {
-                kind.g
+            if let sshkeys::PublicKeyKind::Ed25519(kind) = key.kind {
+                return u64::from_le_bytes(kind.key[0..8].try_into().unwrap());
             }
         }
         if let Ok(key) = sshkeys::PublicKey::from_path("/etc/ssh/ssh_host_rsa_key.pub") {
-            if let PublicKeyKind::Rsa(kind) = key.kind {
-                kind.e
+            if let sshkeys::PublicKeyKind::Rsa(kind) = key.kind {
+                return u64::from_le_bytes(kind.e[0..8].try_into().unwrap());
             }
         }
 

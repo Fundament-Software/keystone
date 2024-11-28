@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 mod binary_embed;
 mod buffer_allocator;
 mod byte_stream;
@@ -28,7 +27,6 @@ use std::future::Future;
 use std::io::Write;
 use std::path::Path;
 use std::{convert::Into, fs, io::Read, str::FromStr};
-use windows_sys::Win32::Foundation::ERROR_PRINTER_DRIVER_DOWNLOAD_NEEDED;
 
 include!(concat!(env!("OUT_DIR"), "/capnproto.rs"));
 
@@ -175,22 +173,22 @@ pub async fn drive_stream_with_error(
 
 fn keystone_startup(dir: &Path, message: keystone_config::Reader<'_>) -> Result<()> {
     let pool = tokio::task::LocalSet::new();
+    let mut instance = Keystone::new(message, false)?;
 
     let fut = pool.run_until(async move {
-        let mut instance = Keystone::new(message, false)?;
         instance.init(dir, message).await?;
 
-        eprintln!("finished init");
         tokio::select! {
-            //r = drive_stream_with_error("Module crashed!", &mut instance.rpc_systems) => (),
+            r = drive_stream_with_error("Module crashed!", &mut instance.rpc_systems) => (),
             r = tokio::signal::ctrl_c() => r.expect("failed to listen to shutdown signal"),
         };
 
-        let (mut shutdown, runner) = instance.shutdown();
+        eprintln!("Attempting graceful shutdown...");
+        let (mut shutdown, rpc_systems) = instance.shutdown();
 
         tokio::join!(
             drive_stream_with_error("Error during shutdown!", &mut shutdown),
-            drive_stream_with_error("Error during shutdown!", runner)
+            drive_stream_with_error("Error during shutdown!", rpc_systems)
         );
 
         Ok::<(), eyre::Report>(())
@@ -198,7 +196,6 @@ fn keystone_startup(dir: &Path, message: keystone_config::Reader<'_>) -> Result<
 
     let runtime = tokio::runtime::Runtime::new()?;
     let result = runtime.block_on(fut);
-    println!("Performing graceful shutdown...");
     runtime.shutdown_timeout(std::time::Duration::from_millis(1000));
     result?;
     Ok(())

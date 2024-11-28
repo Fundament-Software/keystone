@@ -19,6 +19,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::time::Duration;
 use std::{cell::RefCell, collections::HashMap, path::Path, rc::Rc};
+use tokio::task::JoinHandle;
 
 pub trait CapnpResult<T> {
     fn to_capnp(self) -> capnp::Result<T>;
@@ -140,12 +141,19 @@ pub struct ModuleInstance {
     pub queue: capnp_rpc::queued::Client,
 }
 
+enum FutureStaging {
+    None,
+    Staged(Pin<Box<dyn Future<Output = Result<()>>>>),
+    Running(JoinHandle<Result<()>>),
+}
+
 pub type ModuleJoinSet = Rc<RefCell<tokio::task::JoinSet<Result<()>>>>;
 pub type RpcSystemSet = FuturesUnordered<Pin<Box<dyn Future<Output = Result<()>>>>>;
 pub struct Keystone {
     db: Rc<crate::sqlite_capnp::root::ServerDispatch<SqliteDatabase>>,
     scheduler: Rc<crate::scheduler_capnp::root::ServerDispatch<Scheduler>>,
-    log: Rc<RefCell<CapLog<MAX_BUFFER_SIZE>>>, // TODO: Remove RefCell once CapLog is made thread-safe.
+    scheduler_thread: FutureStaging,
+    pub log: Rc<RefCell<CapLog<MAX_BUFFER_SIZE>>>, // TODO: Remove RefCell once CapLog is made thread-safe.
     file_server: Rc<RefCell<AmbientAuthorityImpl>>,
     pub modules: HashMap<u64, ModuleInstance>,
     pub namemap: HashMap<String, u64>,
@@ -155,7 +163,7 @@ pub struct Keystone {
     module_process_set: Rc<RefCell<crate::posix_module::ModuleProcessCapSet>>,
     process_set: Rc<RefCell<crate::posix_process::ProcessCapSet>>,
     pub rpc_systems: RpcSystemSet,
-    snowflake: Rc<SnowflakeSource>,
+    pub snowflake: Rc<SnowflakeSource>,
 }
 
 pub const BUILTIN_KEYSTONE: &str = "keystone";
@@ -268,9 +276,9 @@ impl Keystone {
             SqliteDatabase::new_connection,
             crate::database::OpenOptions::Create,
         )?;
-        let scheduler = Rc::new(crate::scheduler_capnp::root::Client::from_server(
-            Scheduler::new(db.clone(), ())?,
-        ));
+
+        let (s, fut) = Scheduler::new(db.clone(), ())?;
+        let scheduler = Rc::new(crate::scheduler_capnp::root::Client::from_server(s));
 
         let builtin =
             BUILTIN_MODULES.map(|s| (s.to_string(), db.get_string_index(s).unwrap() as u64));
@@ -346,6 +354,7 @@ impl Keystone {
         Ok(Self {
             db,
             scheduler,
+            scheduler_thread: FutureStaging::Staged(fut.boxed_local()),
             log: Rc::new(RefCell::new(caplog)),
             file_server: Default::default(),
             modules,
@@ -706,49 +715,15 @@ impl Keystone {
             }
         }
 
-        Ok(())
-    }
-
-    /*pub fn run<'a>(
-        &'a mut self,
-    ) -> (
-        impl std::future::Future<Output = Result<(), Vec<eyre::ErrReport>>> + 'a,
-        CancellationToken,
-    ) {
-        let cancel = CancellationToken::new();
-        let cloned = cancel.clone();
-
-        let fut = async move {
-            let mut output: Vec<eyre::ErrReport> = Vec::new();
-            tracing::info!("Keystone running");
-            while !self.rpc_systems.is_empty() {
-                let res = tokio::select! {
-                    r = self.rpc_systems.next() => r,
-                    _ = cloned.cancelled() => break,
-                };
-                match res {
-                    Some(Ok(())) => (),
-                    Some(Err((e, name))) => {
-                        tracing::error!(
-                            "{} RPC error: {}",
-                            name.unwrap_or("[Unknown Module]".to_string()),
-                            e
-                        );
-                        output.push(e.into());
-                    }
-                    None => (),
-                };
-            }
-
-            if output.is_empty() {
-                Ok(())
-            } else {
-                Err(output)
-            }
+        let stage = match std::mem::replace(&mut self.scheduler_thread, FutureStaging::None) {
+            FutureStaging::None => FutureStaging::None,
+            FutureStaging::Staged(pin) => FutureStaging::Running(tokio::task::spawn_local(pin)),
+            FutureStaging::Running(join_handle) => FutureStaging::Running(join_handle),
         };
 
-        (fut, cancel)
-    }*/
+        self.scheduler_thread = stage;
+        Ok(())
+    }
 
     async fn kill_module(module: &mut ModuleInstance) {
         if let Some(p) = module.process.as_ref() {
@@ -775,21 +750,26 @@ impl Keystone {
         }
         module.state = ModuleState::Closing;
 
+        eprintln!("assemble Close request");
         // Send the stop request to the bootstrap interface
         let Some(bootstrap) = module.bootstrap.as_ref() else {
             return Err(Error::MissingBootstrap(module.name.clone()).into());
         };
 
+        eprintln!("send Close request with {:?}", timeout);
         let stop_request = bootstrap.stop_request().send();
 
         // Call the stop method with some timeout
         if (tokio::time::timeout(timeout, stop_request.promise).await).is_err() {
             // Force kill the module.
+            eprintln!("force killing");
             Self::kill_module(module).await;
             Ok(())
         } else {
+            eprintln!("got Close request");
             if let Some(p) = module.process.as_ref() {
                 // Now join the process with the same timeout
+                eprintln!("join Close request");
                 match tokio::time::timeout(timeout, p.join_request().send().promise).await {
                     Ok(result) => {
                         module.state = match Self::check_error(&module.name, result) {
@@ -818,7 +798,11 @@ impl Keystone {
         &mut RpcSystemSet,
     ) {
         // The scheduler thread is always running in an endless loop, so we abort it here.
-        self.scheduler.server.thread.abort();
+        if let FutureStaging::Running(t) =
+            std::mem::replace(&mut self.scheduler_thread, FutureStaging::None)
+        {
+            t.abort();
+        }
 
         let set: FuturesUnordered<_> = self
             .modules

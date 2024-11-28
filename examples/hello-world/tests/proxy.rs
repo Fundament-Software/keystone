@@ -18,6 +18,8 @@ fn test_hello_world_proxy() -> eyre::Result<()> {
                 .new_client(ProxyServer::new(
                     module.queue.add_ref(),
                     instance.proxy_set.clone(),
+                    instance.log.clone(),
+                    instance.snowflake.clone(),
                 ))
                 .hook;
 
@@ -36,7 +38,7 @@ fn test_hello_world_proxy() -> eyre::Result<()> {
             };
 
             tokio::select! {
-                r = keystone::test_runner(&mut instance) => Ok(r?),
+                r = keystone::drive_stream(&mut instance.rpc_systems) => Ok(r?),
                 r = fut => r,
             }?;
             keystone::test_shutdown(&mut instance).await

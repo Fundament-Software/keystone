@@ -890,14 +890,14 @@ mod tests {
         );
         let (sleep, waker) = mpsc::channel(1);
         let (time, now) = mpsc::channel(1);
+        let (s, fut) = super::Scheduler::new(db, TestTimeSource { now, waker })?;
 
         let scheduler =
-            capnp_rpc::local::Client::new(crate::scheduler_capnp::root::Client::from_server(
-                super::Scheduler::new(db, TestTimeSource { now, waker })?,
-            ));
+            capnp_rpc::local::Client::new(crate::scheduler_capnp::root::Client::from_server(s));
 
         let hook = scheduler.add_ref();
 
+        tokio::task::spawn_local(fut);
         Ok((FromClientHook::new(hook), sleep, time, module))
     }
 

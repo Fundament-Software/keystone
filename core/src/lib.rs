@@ -131,9 +131,9 @@ impl<
 }
 
 pub async fn start<
-    Config: 'static + capnp::traits::Owned,
+    Config: 'static + capnp::traits::Owned + Unpin,
     Impl: 'static + Module<Config>,
-    API: 'static + for<'c> capnp::traits::Owned<Reader<'c>: capnp::capability::FromServer<Impl>>,
+    API: 'static + for<'c> capnp::traits::Owned<Reader<'c>: capnp::capability::FromServer<Impl>> + Unpin,
     T: tokio::io::AsyncRead + 'static + Unpin,
     U: tokio::io::AsyncWrite + 'static + Unpin,
 >(
@@ -178,7 +178,18 @@ pub async fn start<
         }
     });
     tracing::debug!("Spawning RPC system");
-    let err = rpc_system.await;
+
+    // We install a ctrl-C handler here so we can shutdown properly when the parent process gets a ctrl-C signal
+    let err = tokio::select! {
+        r = &mut rpc_system => r,
+        r = tokio::signal::ctrl_c() => {
+            r.expect("failed to capture ctrl-c");
+            let call = module_client.stop_request().send();
+            tokio::try_join!(call.promise, rpc_system).map(|_| ())
+        },
+    };
+
+    //let err = rpc_system.await;
 
     if let Err(e) = err {
         // Don't report disconnects as an error.
@@ -194,9 +205,9 @@ pub async fn start<
 
 #[inline(always)]
 pub async fn main<
-    Config: 'static + capnp::traits::Owned,
+    Config: 'static + capnp::traits::Owned + Unpin,
     Impl: 'static + Module<Config>,
-    API: 'static + for<'c> capnp::traits::Owned<Reader<'c>: capnp::capability::FromServer<Impl>>,
+    API: 'static + for<'c> capnp::traits::Owned<Reader<'c>: capnp::capability::FromServer<Impl>> + Unpin,
 >(
     future: impl Future,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -318,9 +329,9 @@ pub async fn test_shutdown(instance: &mut Keystone) -> eyre::Result<()> {
 
 #[allow(clippy::unit_arg)]
 pub fn test_module_harness<
-    Config: 'static + capnp::traits::Owned,
+    Config: 'static + capnp::traits::Owned + Unpin,
     Impl: 'static + Module<Config>,
-    API: 'static + for<'c> capnp::traits::Owned<Reader<'c>: capnp::capability::FromServer<Impl>>,
+    API: 'static + for<'c> capnp::traits::Owned<Reader<'c>: capnp::capability::FromServer<Impl>> + Unpin,
     F: Future<Output = eyre::Result<()>> + 'static,
 >(
     config: &str,

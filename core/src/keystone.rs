@@ -209,6 +209,14 @@ impl Keystone {
             }
         }
 
+        let stage = match std::mem::replace(&mut instance.scheduler_thread, FutureStaging::None) {
+            FutureStaging::None => FutureStaging::None,
+            FutureStaging::Staged(pin) => FutureStaging::Running(tokio::task::spawn_local(pin)),
+            FutureStaging::Running(join_handle) => FutureStaging::Running(join_handle),
+        };
+
+        instance.scheduler_thread = stage;
+
         let span = tracing::debug_span!("Module", module = module.as_ref());
         let _enter = span.enter();
 
@@ -348,6 +356,7 @@ impl Keystone {
             Path::new(caplog_config.get_trie_file()?.to_str()?),
             Path::new(caplog_config.get_data_prefix()?.to_str()?),
             caplog_config.get_max_open_files() as usize,
+            true,
             check_consistency,
         )?;
 
@@ -750,26 +759,21 @@ impl Keystone {
         }
         module.state = ModuleState::Closing;
 
-        eprintln!("assemble Close request");
         // Send the stop request to the bootstrap interface
         let Some(bootstrap) = module.bootstrap.as_ref() else {
             return Err(Error::MissingBootstrap(module.name.clone()).into());
         };
 
-        eprintln!("send Close request with {:?}", timeout);
         let stop_request = bootstrap.stop_request().send();
 
         // Call the stop method with some timeout
         if (tokio::time::timeout(timeout, stop_request.promise).await).is_err() {
             // Force kill the module.
-            eprintln!("force killing");
             Self::kill_module(module).await;
             Ok(())
         } else {
-            eprintln!("got Close request");
             if let Some(p) = module.process.as_ref() {
                 // Now join the process with the same timeout
-                eprintln!("join Close request");
                 match tokio::time::timeout(timeout, p.join_request().send().promise).await {
                     Ok(result) => {
                         module.state = match Self::check_error(&module.name, result) {

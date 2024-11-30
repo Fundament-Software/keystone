@@ -67,13 +67,27 @@ fn test_hello_world_empty() -> eyre::Result<()> {
             r#"{  greeting = "Bonjour" }"#,
         ),
         |message| async move {
-            let mut instance = keystone::test_create_keystone(&message).await.unwrap();
+            let mut instance = keystone::Keystone::new(
+                message
+                    .get_root_as_reader::<keystone::keystone_capnp::keystone_config::Reader>()?,
+                false,
+            )?;
 
-            let (mut shutdown, runner) = instance.shutdown();
+            instance
+                .init(
+                    &std::env::current_dir()?,
+                    message
+                        .get_root_as_reader::<keystone::keystone_capnp::keystone_config::Reader>(
+                        )?,
+                )
+                .await?;
+
+            eprintln!("Attempting graceful shutdown...");
+            let (mut shutdown, rpc_systems) = instance.shutdown();
 
             tokio::join!(
                 drive_stream_with_error("Error during shutdown!", &mut shutdown),
-                drive_stream_with_error("Error during shutdown!", runner)
+                drive_stream_with_error("Error during shutdown!", rpc_systems)
             );
             Ok::<(), eyre::Report>(())
         },

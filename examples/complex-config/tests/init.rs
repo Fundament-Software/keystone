@@ -26,7 +26,7 @@ fn test_complex_config_init() -> Result<()> {
             };
 
             tokio::select! {
-                r = keystone::test_runner(&mut instance) => Ok(r?),
+                r = keystone::drive_stream(&mut instance.rpc_systems) => Ok(r?),
                 r = fut => r,
             }?;
             keystone::test_shutdown(&mut instance).await

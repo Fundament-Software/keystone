@@ -18,6 +18,7 @@ use capnp_rpc::CapabilityServerSet;
 use eyre::Context;
 use futures_util::future::LocalBoxFuture;
 use futures_util::FutureExt;
+use std::process::ExitStatus;
 use std::{cell::RefCell, rc::Rc};
 
 pub struct PosixModuleProcessImpl {
@@ -209,20 +210,33 @@ impl
                                             if let Err(e) = flatten_to_capnp(r) {
                                                 let _ = kill.send(()); Err(e)
                                             } else {
-                                                process_handle.await.to_capnp()
+                                                flatten_to_capnp(process_handle.await)
                                             }
                                         },
                                         r = &mut process_handle => {
-                                            if let Err(e) = r {
-                                                let _ = disconnect.await;
-                                                Err(e).to_capnp()
-                                            } else {
-                                                flatten_to_capnp(rpc_handle.await)
-                                            }
+                                            let blah: capnp::Result<ExitStatus> = match r {
+                                                Ok(Ok(e)) => {
+                                                    if e.success() {
+                                                        flatten_to_capnp(rpc_handle.await).map(move |_| e)
+                                                    } else {
+                                                        let _ = disconnect.await;
+                                                        Err(e).to_capnp()
+                                                    }
+                                                }
+                                                Ok(Err(e)) => {
+                                                    let _ = disconnect.await;
+                                                    Err(e).to_capnp()
+                                                }
+                                                Err(e) => {
+                                                    let _ = disconnect.await;
+                                                    Err(e).to_capnp()
+                                                }
+                                            };
+                                            blah
                                          },
                                     };
 
-                                    result.wrap_err_with(move || {
+                                    result.map(|_| ()).wrap_err_with(move || {
                                         let name = handle.borrow().debug_name.clone();
                                         if let Some(n) = name {
                                             format!("Error from {}", n)

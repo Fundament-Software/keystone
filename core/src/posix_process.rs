@@ -135,7 +135,7 @@ pub type ProcessCapSet = CapabilityServerSet<PosixProcessImpl, PosixProcessClien
 pub struct PosixProcessImpl {
     pub cancellation_token: CancellationToken,
     pub stdin: Rc<Mutex<Option<ChildStdin>>>,
-    pub(crate) future: AtomicTake<BoxFuture<'static, ()>>,
+    pub(crate) future: AtomicTake<BoxFuture<'static, Result<ExitStatus>>>,
     pub(crate) exitcode: watch::Receiver<Option<Result<ExitStatus>>>,
     pub(crate) killsender: AtomicTake<tokio::sync::oneshot::Sender<()>>,
 }
@@ -145,7 +145,7 @@ impl PosixProcessImpl {
     fn new(
         cancellation_token: CancellationToken,
         stdin: Option<ChildStdin>,
-        future: BoxFuture<'static, ()>,
+        future: BoxFuture<'static, Result<ExitStatus>>,
         killsender: tokio::sync::oneshot::Sender<()>,
         exitcode: watch::Receiver<Option<Result<ExitStatus>>>,
     ) -> Self {
@@ -235,21 +235,26 @@ impl PosixProcessImpl {
 
         let (tx, rx) = watch::channel(None);
         let future = async move {
+            let mut r = Err(eyre::eyre!("No tasks spawned"));
             while let Some(result) = tasks.join_next().await {
                 match result {
                     Ok(Ok(Some(e))) => {
                         tx.send_replace(Some(Ok(e)));
+                        r = Ok(e);
                     }
                     Ok(Ok(None)) => (),
                     Ok(Err(e)) => {
+                        r = Err(eyre::eyre!(e.to_string())); // We call to_string here because we have to copy the error
                         tx.send_replace(Some(Err(e)));
                     }
                     Err(e) => {
-                        tx.send_replace(Some(Err(eyre::eyre!(e.to_string()))));
+                        r = Err(eyre::eyre!(e.to_string()));
+                        tx.send_replace(Some(Err(e.into())));
                     }
                 }
             }
             tasks.shutdown().await;
+            r
         };
 
         Result::Ok(Self::new(
@@ -264,14 +269,23 @@ impl PosixProcessImpl {
 
 impl PosixProcessImpl {
     async fn finish(&self) -> capnp::Result<i32> {
+        #[cfg(not(windows))]
+        use std::os::unix::process::ExitStatusExt;
+
         let mut exitcode = self.exitcode.clone();
         let status = exitcode.wait_for(|x| x.is_some()).await.to_capnp()?;
 
         if let Some(v) = status.as_ref() {
-            // TODO: use std::os::unix::process::ExitStatusExt on unix to handle None
-            Ok(v.as_ref().to_capnp()?.code().unwrap_or(i32::MIN))
+            let status = v.as_ref().to_capnp()?;
+            #[cfg(not(windows))]
+            return Ok(status
+                .code()
+                .unwrap_or_else(|| status.signal().unwrap_or(i32::MIN)));
+
+            #[cfg(windows)]
+            return Ok(status.code().unwrap_or(i32::MIN));
         } else {
-            Ok(i32::MIN)
+            return Ok(i32::MIN);
         }
     }
 }

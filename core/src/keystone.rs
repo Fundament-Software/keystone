@@ -122,10 +122,27 @@ pub enum ModuleState {
     CloseFailure,
 }
 
+impl std::string::ToString for ModuleState {
+    fn to_string(&self) -> String {
+        match self {
+            ModuleState::NotStarted => "Not Started",
+            ModuleState::Initialized => "Initialized",
+            ModuleState::Ready => "Ready",
+            ModuleState::Paused => "Paused",
+            ModuleState::Closing => "Closing",
+            ModuleState::Closed => "Closed",
+            ModuleState::Aborted => "Aborted",
+            ModuleState::StartFailure => "Start Failure",
+            ModuleState::CloseFailure => "Close Failure",
+        }
+        .to_string()
+    }
+}
+
 // This can't be a rust generic because we do not know the type parameters at compile time.
 pub struct ModuleInstance {
-    module_id: u64,
-    name: String,
+    pub module_id: u64,
+    pub name: String,
     program: Option<SpawnProgram>,
     process: Option<SpawnProcess>,
     bootstrap: Option<module_start::Client<any_pointer, any_pointer>>,
@@ -137,7 +154,7 @@ pub struct ModuleInstance {
             >,
         >,
     >,
-    state: ModuleState,
+    pub state: ModuleState,
     pub queue: capnp_rpc::queued::Client,
 }
 

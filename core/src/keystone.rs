@@ -1,6 +1,7 @@
 use crate::cap_replacement::CapReplacement;
 use crate::cell::SimpleCellImpl;
 use crate::database::DatabaseExt;
+use crate::posix_module::ModuleProcessCapSet;
 pub use crate::proxy::ProxyServer;
 use crate::util::SnowflakeSource;
 use caplog::{CapLog, MAX_BUFFER_SIZE};
@@ -146,6 +147,7 @@ pub struct ModuleInstance {
     program: Option<SpawnProgram>,
     process: Option<SpawnProcess>,
     bootstrap: Option<module_start::Client<any_pointer, any_pointer>>,
+    pub pause: tokio::sync::mpsc::Sender<bool>,
     pub api: Option<
         RemotePromise<
             crate::spawn_capnp::process::get_api_results::Owned<
@@ -156,6 +158,131 @@ pub struct ModuleInstance {
     >,
     pub state: ModuleState,
     pub queue: capnp_rpc::queued::Client,
+}
+
+impl ModuleInstance {
+    fn failed_start(&mut self, e: capnp::Error) -> Result<()> {
+        self.state = ModuleState::StartFailure;
+        capnp_rpc::queued::ClientInner::resolve(&self.queue.inner, Err(e.clone()));
+        tracing::error!(
+            "Module {} failed to start with error {}",
+            self.name,
+            e.to_string()
+        );
+        Err(e.into())
+    }
+
+    fn check_error(
+        name: &str,
+        result: Result<
+            capnp::capability::Response<
+                crate::spawn_capnp::process::join_results::Owned<
+                    any_pointer,
+                    module_error::Owned<any_pointer>,
+                >,
+            >,
+            capnp::Error,
+        >,
+    ) -> Result<ModuleState> {
+        let r = match result {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::error!("{} process returned error: {}", name, e.to_string());
+                return Err(e.into());
+            }
+        };
+
+        let moderr: module_error::Reader<any_pointer> = r.get()?.get_result()?;
+        Ok(match moderr.which()? {
+            module_error::Which::Backing(e) => {
+                let e: crate::posix_spawn_capnp::posix_error::Reader = e?.get_as()?;
+                if e.get_error_code() != 0 {
+                    tracing::error!(
+                        "{} process returned error code: {}",
+                        name,
+                        e.get_error_code()
+                    );
+                    ModuleState::CloseFailure
+                } else {
+                    ModuleState::Closed
+                }
+            }
+            _ => ModuleState::CloseFailure,
+        })
+    }
+
+    pub async fn stop(&mut self, timeout: Duration) -> Result<()> {
+        if self.halted() {
+            return Ok(());
+        }
+        self.pause.send(false).await?;
+        self.state = ModuleState::Closing;
+
+        // Send the stop request to the bootstrap interface
+        let Some(bootstrap) = self.bootstrap.as_ref() else {
+            return Err(Error::MissingBootstrap(self.name.clone()).into());
+        };
+
+        let stop_request = bootstrap.stop_request().send();
+
+        // Call the stop method with some timeout
+        if (tokio::time::timeout(timeout, stop_request.promise).await).is_err() {
+            // Force kill the module.
+            self.kill().await;
+            Ok(())
+        } else {
+            if let Some(p) = self.process.as_ref() {
+                // Now join the process with the same timeout
+                match tokio::time::timeout(timeout, p.join_request().send().promise).await {
+                    Ok(result) => {
+                        self.state = match Self::check_error(&self.name, result) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                tracing::error!(
+                                    "Failure during {} error lookup: {}",
+                                    &self.name,
+                                    e.to_string()
+                                );
+                                ModuleState::CloseFailure
+                            }
+                        };
+                    }
+                    Err(_) => self.kill().await,
+                }
+            }
+            Ok(())
+        }
+    }
+
+    pub async fn kill(&mut self) {
+        if let Some(p) = self.process.as_ref() {
+            let _ = p.kill_request().send().promise.await;
+        }
+
+        self.state = ModuleState::Aborted;
+    }
+
+    pub async fn pause(&mut self, pause: bool) -> Result<()> {
+        self.pause.send(pause).await?;
+
+        if pause {
+            self.state = ModuleState::Paused;
+        } else {
+            self.state = ModuleState::Ready;
+        }
+        Ok(())
+    }
+
+    fn halted(&self) -> bool {
+        matches!(
+            self.state,
+            ModuleState::NotStarted
+                | ModuleState::Closed
+                | ModuleState::Aborted
+                | ModuleState::StartFailure
+                | ModuleState::CloseFailure
+        )
+    }
 }
 
 enum FutureStaging {
@@ -177,7 +304,7 @@ pub struct Keystone {
     pub cells: Rc<RefCell<CellCapSet>>,
     timeout: Duration,
     pub proxy_set: Rc<RefCell<crate::proxy::CapSet>>, // Set of all untyped proxies
-    module_process_set: Rc<RefCell<crate::posix_module::ModuleProcessCapSet>>,
+    module_process_set: Rc<RefCell<ModuleProcessCapSet>>,
     process_set: Rc<RefCell<crate::posix_process::ProcessCapSet>>,
     pub rpc_systems: RpcSystemSet,
     pub snowflake: Rc<SnowflakeSource>,
@@ -220,9 +347,26 @@ impl Keystone {
             if s.get_name()?.to_str()? == module.as_ref() {
                 target = Some(s);
             } else {
-                instance
-                    .init_module(id, s, &std::env::current_dir()?, config.get_cap_table()?)
-                    .await?;
+                instance.rpc_systems.push(
+                    Self::init_module(
+                        &mut instance.modules,
+                        id,
+                        s,
+                        &std::env::current_dir()?,
+                        config.get_cap_table()?,
+                        instance.db.clone(),
+                        instance.module_process_set.clone(),
+                        instance.process_set.clone(),
+                        instance.file_server.clone(),
+                        instance.cells.clone(),
+                        &instance.namemap,
+                        instance.proxy_set.clone(),
+                        instance.snowflake.clone(),
+                        instance.log.clone(),
+                        instance.scheduler.clone(),
+                    )
+                    .await?,
+                );
             }
         }
 
@@ -244,10 +388,29 @@ impl Keystone {
 
             let (conf, _) = Self::extract_config_pair(s)?;
             let replacement = CapReplacement::new(conf, |index, mut builder| {
-                if instance.autoinit_check(cap_table, builder.reborrow(), index as u32, id)? {
+                if Keystone::autoinit_check(
+                    cap_table,
+                    builder.reborrow(),
+                    index as u32,
+                    id,
+                    instance.db.clone(),
+                    instance.cells.clone(),
+                )? {
                     Ok(())
                 } else {
-                    instance.resolve_cap_expr(cap_table.get(index as u32), cap_table, builder)
+                    Self::resolve_cap_expr(
+                        cap_table.get(index as u32),
+                        cap_table,
+                        builder,
+                        &instance.namemap,
+                        instance.proxy_set.clone(),
+                        instance.snowflake.clone(),
+                        instance.log.clone(),
+                        &instance.modules,
+                        instance.db.clone(),
+                        instance.cells.clone(),
+                        instance.scheduler.clone(),
+                    )
                 }
             });
 
@@ -308,6 +471,7 @@ impl Keystone {
         let builtin =
             BUILTIN_MODULES.map(|s| (s.to_string(), db.get_string_index(s).unwrap() as u64));
 
+        let (empty_send, _) = tokio::sync::mpsc::channel(1);
         tracing::debug!("Iterating through {} modules", config.get_modules()?.len());
         let modules = config.get_modules().map_or(HashMap::new(), |modules| {
             modules
@@ -327,6 +491,7 @@ impl Keystone {
                             api: None,
                             state: ModuleState::NotStarted,
                             queue: capnp_rpc::queued::Client::new(None),
+                            pause: empty_send.clone(),
                         },
                     )
                 })
@@ -387,9 +552,7 @@ impl Keystone {
             timeout: Duration::from_millis(config.get_ms_timeout()),
             cells: Rc::new(RefCell::new(CapabilityServerSet::new())),
             proxy_set: Rc::new(RefCell::new(crate::proxy::CapSet::new())),
-            module_process_set: Rc::new(RefCell::new(
-                crate::posix_module::ModuleProcessCapSet::new(),
-            )),
+            module_process_set: Rc::new(RefCell::new(ModuleProcessCapSet::new())),
             process_set: Rc::new(RefCell::new(crate::posix_process::ProcessCapSet::new())),
             namemap,
             rpc_systems: Default::default(),
@@ -403,15 +566,16 @@ impl Keystone {
     pub fn log_capnp_params(params: &capnp::dynamic_value::Reader<'_>) {
         tracing::event!(tracing::Level::TRACE, parameters = format!("{:?}", params));
     }
-    async fn wrap_posix(
-        &self,
+    pub async fn wrap_posix(
         host: crate::keystone_capnp::host::Client<any_pointer>,
         client: crate::posix_process::PosixProgramClient,
+        module_process_set: Rc<RefCell<ModuleProcessCapSet>>,
+        process_set: Rc<RefCell<crate::posix_process::ProcessCapSet>>,
     ) -> Result<SpawnProgram> {
         let wrapper_server = PosixModuleImpl {
             host,
-            module_process_set: self.module_process_set.clone(),
-            process_set: self.process_set.clone(),
+            module_process_set: module_process_set,
+            process_set: process_set,
         };
         let wrapper_client: posix_module::Client = capnp_rpc::new_client(wrapper_server);
 
@@ -421,24 +585,25 @@ impl Keystone {
         Ok(wrap_response.get()?.get_result()?)
     }
 
-    async fn posix_spawn(
-        &self,
+    pub async fn posix_spawn(
         host: crate::keystone_capnp::host::Client<any_pointer>,
         config: keystone_config::module_config::Reader<'_, any_pointer>,
         dir: &Path,
+        module_process_set: Rc<RefCell<ModuleProcessCapSet>>,
+        process_set: Rc<RefCell<crate::posix_process::ProcessCapSet>>,
     ) -> Result<SpawnProgram> {
         let path = dir.join(Path::new(config.get_path()?.to_str()?));
         let spawn_process_server =
-            PosixProgramImpl::new_std(std::fs::File::open(&path)?, self.process_set.clone());
+            PosixProgramImpl::new_std(std::fs::File::open(&path)?, process_set.clone());
 
         let spawn_process_client: crate::posix_process::PosixProgramClient =
             capnp_rpc::new_client(spawn_process_server);
 
-        self.wrap_posix(host, spawn_process_client).await
+        Self::wrap_posix(host, spawn_process_client, module_process_set, process_set).await
     }
 
     #[inline]
-    fn extract_config_pair(
+    pub fn extract_config_pair(
         config: keystone_config::module_config::Reader<'_, any_pointer>,
     ) -> Result<(capnp::any_pointer::Reader, &Path), capnp::Error> {
         Ok((
@@ -453,57 +618,93 @@ impl Keystone {
         x?.get()?.get_result()
     }
 
-    fn internal_cap(&self, id: &str) -> Option<Box<dyn ClientHook>> {
+    fn internal_cap(
+        id: &str,
+        db: Rc<crate::sqlite_capnp::root::ServerDispatch<SqliteDatabase>>,
+        cells: Rc<RefCell<CellCapSet>>,
+        scheduler: Rc<crate::scheduler_capnp::root::ServerDispatch<Scheduler>>,
+    ) -> Option<Box<dyn ClientHook>> {
         match id {
             BUILTIN_KEYSTONE => Some(
                 capnp_rpc::new_client::<crate::keystone_capnp::root::Client, KeystoneRoot>(
-                    KeystoneRoot::new(self),
+                    KeystoneRoot {
+                        db: db.clone(),
+                        cells: cells.clone(),
+                    },
                 )
                 .client
                 .hook,
             ),
-            BUILTIN_SQLITE => Some(capnp_rpc::local::Client::from_rc(self.db.clone()).add_ref()),
+            BUILTIN_SQLITE => Some(capnp_rpc::local::Client::from_rc(db.clone()).add_ref()),
             BUILTIN_SCHEDULER => {
-                Some(capnp_rpc::local::Client::from_rc(self.scheduler.clone()).add_ref())
+                Some(capnp_rpc::local::Client::from_rc(scheduler.clone()).add_ref())
             }
             _ => None,
         }
     }
 
     fn recurse_cap_expr(
-        &self,
         reader: cap_expr::Reader<'_>,
         cap_table: capnp::struct_list::Reader<'_, cap_expr::Owned>,
+        namemap: &HashMap<String, u64>,
+        proxy_set: Rc<RefCell<crate::proxy::CapSet>>,
+        snowflake: Rc<SnowflakeSource>,
+        log: Rc<RefCell<CapLog<MAX_BUFFER_SIZE>>>,
+        modules: &HashMap<u64, ModuleInstance>,
+        db: Rc<crate::sqlite_capnp::root::ServerDispatch<SqliteDatabase>>,
+        cells: Rc<RefCell<CellCapSet>>,
+        scheduler: Rc<crate::scheduler_capnp::root::ServerDispatch<Scheduler>>,
     ) -> capnp::Result<capnp::any_pointer::Pipeline> {
         Ok(match reader.which()? {
             cap_expr::Which::ModuleRef(r) => {
                 let k = r?.to_string()?;
                 capnp::any_pointer::Pipeline::new(Box::new(capnp_rpc::rpc::SingleCapPipeline::new(
-                    if let Some(hook) = self.internal_cap(&k) {
+                    if let Some(hook) = Self::internal_cap(&k, db, cells, scheduler) {
                         hook
                     } else {
-                        let id = self
-                            .namemap
+                        let id = namemap
                             .get(&k)
                             .ok_or(capnp::Error::failed("couldn't find module!".into()))?;
-                        self.proxy_set
+                        proxy_set
                             .borrow_mut()
                             .new_client(ProxyServer::new(
-                                self.modules[id].queue.add_ref(),
-                                self.proxy_set.clone(),
-                                self.log.clone(),
-                                self.snowflake.clone(),
+                                modules[id].queue.add_ref(),
+                                proxy_set.clone(),
+                                log.clone(),
+                                snowflake.clone(),
                             ))
                             .hook
                     },
                 )))
             }
             cap_expr::Which::Field(r) => {
-                let base = self.recurse_cap_expr(r.get_base()?, cap_table)?;
+                let base = Self::recurse_cap_expr(
+                    r.get_base()?,
+                    cap_table,
+                    namemap,
+                    proxy_set,
+                    snowflake,
+                    log,
+                    modules,
+                    db,
+                    cells,
+                    scheduler,
+                )?;
                 base.get_pointer_field(r.get_index())
             }
             cap_expr::Which::Method(r) => {
-                let base = self.recurse_cap_expr(r.get_subject()?, cap_table)?;
+                let base = Self::recurse_cap_expr(
+                    r.get_subject()?,
+                    cap_table,
+                    namemap,
+                    proxy_set.clone(),
+                    snowflake.clone(),
+                    log.clone(),
+                    modules,
+                    db.clone(),
+                    cells.clone(),
+                    scheduler.clone(),
+                )?;
                 let args = r.get_args();
                 let mut call = base.as_cap().new_call(
                     r.get_interface_id(),
@@ -511,7 +712,19 @@ impl Keystone {
                     Some(args.target_size()?),
                 );
                 let replacement = CapReplacement::new(args, |index, builder| {
-                    self.resolve_cap_expr(cap_table.get(index as u32), cap_table, builder)
+                    Self::resolve_cap_expr(
+                        cap_table.get(index as u32),
+                        cap_table,
+                        builder,
+                        namemap,
+                        proxy_set.clone(),
+                        snowflake.clone(),
+                        log.clone(),
+                        modules,
+                        db.clone(),
+                        cells.clone(),
+                        scheduler.clone(),
+                    )
                 });
                 call.get().set_as(replacement)?;
                 call.send().pipeline
@@ -524,20 +737,56 @@ impl Keystone {
     }
 
     fn resolve_cap_expr(
-        &self,
         reader: cap_expr::Reader<'_>,
         cap_table: capnp::struct_list::Reader<'_, cap_expr::Owned>,
         mut builder: capnp::any_pointer::Builder<'_>,
+        namemap: &HashMap<String, u64>,
+        proxy_set: Rc<RefCell<crate::proxy::CapSet>>,
+        snowflake: Rc<SnowflakeSource>,
+        log: Rc<RefCell<CapLog<MAX_BUFFER_SIZE>>>,
+        modules: &HashMap<u64, ModuleInstance>,
+        db: Rc<crate::sqlite_capnp::root::ServerDispatch<SqliteDatabase>>,
+        cells: Rc<RefCell<CellCapSet>>,
+        scheduler: Rc<crate::scheduler_capnp::root::ServerDispatch<Scheduler>>,
     ) -> capnp::Result<()> {
-        builder.set_as_capability(self.recurse_cap_expr(reader, cap_table)?.as_cap());
+        builder.set_as_capability(
+            Self::recurse_cap_expr(
+                reader, cap_table, namemap, proxy_set, snowflake, log, modules, db, cells,
+                scheduler,
+            )?
+            .as_cap(),
+        );
         Ok(())
+    }
+
+    pub fn autoinit_check(
+        cap_table: capnp::struct_list::Reader<'_, cap_expr::Owned>,
+        mut builder: capnp::any_pointer::Builder<'_>,
+        index: u32,
+        id: u64,
+        db: Rc<crate::sqlite_capnp::root::ServerDispatch<SqliteDatabase>>,
+        cells: Rc<RefCell<CellCapSet>>,
+    ) -> capnp::Result<bool> {
+        if let crate::keystone_capnp::cap_expr::Which::ModuleRef(_) =
+            cap_table.get(index).which()?
+        {
+            if !cap_table.get(index).has_module_ref() {
+                let client = cells
+                    .borrow_mut()
+                    // Very important to use ::init() here so it gets initialized to a default value
+                    .new_client(SimpleCellImpl::init(id as i64, db).to_capnp()?);
+                builder.set_as_capability(client.into_client_hook());
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     fn failed_start(
         modules: &mut HashMap<u64, ModuleInstance>,
         id: u64,
         e: capnp::Error,
-    ) -> Result<()> {
+    ) -> Result<Pin<Box<dyn Future<Output = Result<()>>>>> {
         let module = modules.get_mut(&id).ok_or(Error::ModuleNotFound(id))?;
         module.state = ModuleState::StartFailure;
         capnp_rpc::queued::ClientInner::resolve(&module.queue.inner, Err(e.clone()));
@@ -549,62 +798,51 @@ impl Keystone {
         Err(e.into())
     }
 
-    fn autoinit_check(
-        &self,
-        cap_table: capnp::struct_list::Reader<'_, cap_expr::Owned>,
-        mut builder: capnp::any_pointer::Builder<'_>,
-        index: u32,
-        id: u64,
-    ) -> capnp::Result<bool> {
-        if let crate::keystone_capnp::cap_expr::Which::ModuleRef(_) =
-            cap_table.get(index).which()?
-        {
-            if !cap_table.get(index).has_module_ref() {
-                let client = self
-                    .cells
-                    .borrow_mut()
-                    // Very important to use ::init() here so it gets initialized to a default value
-                    .new_client(SimpleCellImpl::init(id as i64, self.db.clone()).to_capnp()?);
-                builder.set_as_capability(client.into_client_hook());
-                return Ok(true);
-            }
-        }
-        Ok(false)
-    }
-
     async fn init_module(
-        &mut self,
+        modules: &mut HashMap<u64, ModuleInstance>,
         id: u64,
         config: keystone_config::module_config::Reader<'_, any_pointer>,
         config_dir: &Path,
         cap_table: capnp::struct_list::Reader<'_, cap_expr::Owned>,
-    ) -> Result<()> {
-        self.modules
-            .get_mut(&id)
-            .ok_or(Error::ModuleNotFound(id))?
-            .state = ModuleState::Initialized;
+        db: Rc<crate::sqlite_capnp::root::ServerDispatch<SqliteDatabase>>,
+        module_process_set: Rc<RefCell<ModuleProcessCapSet>>,
+        process_set: Rc<RefCell<crate::posix_process::ProcessCapSet>>,
+        file_server: Rc<RefCell<AmbientAuthorityImpl>>,
+        cells: Rc<RefCell<CellCapSet>>,
+        namemap: &HashMap<String, u64>,
+        proxy_set: Rc<RefCell<crate::proxy::CapSet>>,
+        snowflake: Rc<SnowflakeSource>,
+        log: Rc<RefCell<CapLog<MAX_BUFFER_SIZE>>>,
+        scheduler: Rc<crate::scheduler_capnp::root::ServerDispatch<Scheduler>>,
+    ) -> Result<Pin<Box<dyn Future<Output = Result<()>>>>> {
+        modules.get_mut(&id).ok_or(Error::ModuleNotFound(id))?.state = ModuleState::Initialized;
 
-        let span = tracing::debug_span!("Initializing", name = self.modules.get(&id).unwrap().name);
+        let span = tracing::debug_span!("Initializing", name = modules.get(&id).unwrap().name);
         let _enter = span.enter();
         tracing::debug!("Set Initialized flag");
 
         let keystone_host: crate::keystone_capnp::host::Client<any_pointer> =
-            capnp_rpc::new_client(HostImpl::new(id, self.db.clone()));
-        let Ok(program) = self
-            .posix_spawn(keystone_host.clone(), config, config_dir)
-            .await
+            capnp_rpc::new_client(HostImpl::new(id, db.clone()));
+        let Ok(program) = Keystone::posix_spawn(
+            keystone_host.clone(),
+            config,
+            config_dir,
+            module_process_set.clone(),
+            process_set.clone(),
+        )
+        .await
         else {
             return Self::failed_start(
-                &mut self.modules,
+                modules,
                 id,
                 capnp::Error::failed("Failed to spawn program!".to_string()),
             );
         };
 
-        let (conf, workpath) = match Self::extract_config_pair(config) {
+        let (conf, workpath) = match Keystone::extract_config_pair(config) {
             Ok((c, d)) => (c, d),
             Err(e) => {
-                return Self::failed_start(&mut self.modules, id, e);
+                return Self::failed_start(modules, id, e);
             }
         };
 
@@ -612,60 +850,69 @@ impl Keystone {
         let workpath = config_dir.join(workpath.parent().unwrap_or(workpath));
         let dir = match cap_std::fs::Dir::open_ambient_dir(
             &workpath,
-            self.file_server.as_ref().borrow().authority,
+            file_server.as_ref().borrow().authority,
         ) {
             Ok(x) => x,
             Err(e) => {
-                return Self::failed_start(&mut self.modules, id, e.into());
+                return Self::failed_start(modules, id, e.into());
             }
         };
 
-        let dirclient = AmbientAuthorityImpl::new_dir(&self.file_server, dir);
+        let dirclient = AmbientAuthorityImpl::new_dir(&file_server, dir);
 
         // Pass our pair of arguments to the spawn request
         let mut spawn_request = program.spawn_request();
         let builder = spawn_request.get();
         let replacement = CapReplacement::new(conf, |index, mut builder| {
-            if self.autoinit_check(cap_table, builder.reborrow(), index as u32, id)? {
+            if Keystone::autoinit_check(
+                cap_table,
+                builder.reborrow(),
+                index as u32,
+                id,
+                db.clone(),
+                cells.clone(),
+            )? {
                 Ok(())
             } else {
-                self.resolve_cap_expr(cap_table.get(index as u32), cap_table, builder)
+                Self::resolve_cap_expr(
+                    cap_table.get(index as u32),
+                    cap_table,
+                    builder,
+                    namemap,
+                    proxy_set.clone(),
+                    snowflake.clone(),
+                    log.clone(),
+                    modules,
+                    db.clone(),
+                    cells.clone(),
+                    scheduler.clone(),
+                )
             }
         });
 
         let mut pair = builder.init_args();
         let mut anybuild: capnp::any_pointer::Builder = pair.reborrow().init_config();
         if let Err(e) = anybuild.set_as(replacement) {
-            return Self::failed_start(&mut self.modules, id, e);
+            return Self::failed_start(modules, id, e);
         }
         pair.set_workdir(dirclient);
 
         tracing::debug!("Sending spawn request inside {}", workpath.display());
         let response = spawn_request.send().promise.await;
-        let process = match Self::process_spawn_request(response) {
+        let process = match Keystone::process_spawn_request(response) {
             Ok(x) => x,
             Err(e) => {
-                return Self::failed_start(&mut self.modules, id, e);
+                return Self::failed_start(modules, id, e);
             }
         };
 
-        let inner = self
-            .module_process_set
+        let inner = module_process_set
             .borrow()
             .get_local_server_of_resolved(&process)
             .expect("Could not get inner process dispatch?");
 
-        self.rpc_systems.push(
-            inner
-                .server
-                .borrow_mut()
-                .rpc_future
-                .take()
-                .expect("Lost rpc_future???"),
-        );
-
         tracing::debug!("Sending API request");
-        let module = self.modules.get_mut(&id).ok_or(Error::ModuleNotFound(id))?;
+        let module = modules.get_mut(&id).ok_or(Error::ModuleNotFound(id))?;
         let p = process.get_api_request().send();
         capnp_rpc::queued::ClientInner::resolve(
             &module.queue.inner,
@@ -677,10 +924,17 @@ impl Keystone {
         module.process = Some(process);
         module.program = Some(program);
         module.bootstrap = inner.server.borrow_mut().bootstrap.take();
+        module.pause = inner.server.borrow_mut().pause.clone();
         module.api = Some(p);
         module.state = ModuleState::Ready;
 
-        Ok(())
+        let x = inner
+            .server
+            .borrow_mut()
+            .rpc_future
+            .take()
+            .expect("Lost rpc_future???");
+        Ok(x)
     }
 
     fn get_id(
@@ -693,51 +947,32 @@ impl Keystone {
             .get_string_index(config.get_name()?.to_str()?)? as u64)
     }
 
-    fn check_error(
-        name: &str,
-        result: Result<
-            capnp::capability::Response<
-                crate::spawn_capnp::process::join_results::Owned<
-                    any_pointer,
-                    module_error::Owned<any_pointer>,
-                >,
-            >,
-            capnp::Error,
-        >,
-    ) -> Result<ModuleState> {
-        let r = match result {
-            Ok(v) => v,
-            Err(e) => {
-                tracing::error!("{} process returned error: {}", name, e.to_string());
-                return Err(e.into());
-            }
-        };
-
-        let moderr: module_error::Reader<any_pointer> = r.get()?.get_result()?;
-        Ok(match moderr.which()? {
-            module_error::Which::Backing(e) => {
-                let e: crate::posix_spawn_capnp::posix_error::Reader = e?.get_as()?;
-                if e.get_error_code() != 0 {
-                    tracing::error!(
-                        "{} process returned error code: {}",
-                        name,
-                        e.get_error_code()
-                    );
-                    ModuleState::CloseFailure
-                } else {
-                    ModuleState::Closed
-                }
-            }
-            _ => ModuleState::CloseFailure,
-        })
-    }
-
     pub async fn init(&mut self, dir: &Path, config: keystone_config::Reader<'_>) -> Result<()> {
         let modules = config.get_modules()?;
         for s in modules.iter() {
             let id = self.get_id(s)?;
-            if let Err(e) = self.init_module(id, s, dir, config.get_cap_table()?).await {
-                tracing::error!("Module Start Failure: {}", e);
+
+            match Self::init_module(
+                &mut self.modules,
+                id,
+                s,
+                dir,
+                config.get_cap_table()?,
+                self.db.clone(),
+                self.module_process_set.clone(),
+                self.process_set.clone(),
+                self.file_server.clone(),
+                self.cells.clone(),
+                &self.namemap,
+                self.proxy_set.clone(),
+                self.snowflake.clone(),
+                self.log.clone(),
+                self.scheduler.clone(),
+            )
+            .await
+            {
+                Ok(f) => self.rpc_systems.push(f),
+                Err(e) => tracing::error!("Module Start Failure: {}", e),
             }
         }
 
@@ -749,67 +984,6 @@ impl Keystone {
 
         self.scheduler_thread = stage;
         Ok(())
-    }
-
-    async fn kill_module(module: &mut ModuleInstance) {
-        if let Some(p) = module.process.as_ref() {
-            let _ = p.kill_request().send().promise.await;
-        }
-
-        module.state = ModuleState::Aborted;
-    }
-
-    fn halted(state: &ModuleState) -> bool {
-        matches!(
-            state,
-            ModuleState::NotStarted
-                | ModuleState::Closed
-                | ModuleState::Aborted
-                | ModuleState::StartFailure
-                | ModuleState::CloseFailure
-        )
-    }
-
-    pub async fn stop_module(module: &mut ModuleInstance, timeout: Duration) -> Result<()> {
-        if Self::halted(&module.state) {
-            return Ok(());
-        }
-        module.state = ModuleState::Closing;
-
-        // Send the stop request to the bootstrap interface
-        let Some(bootstrap) = module.bootstrap.as_ref() else {
-            return Err(Error::MissingBootstrap(module.name.clone()).into());
-        };
-
-        let stop_request = bootstrap.stop_request().send();
-
-        // Call the stop method with some timeout
-        if (tokio::time::timeout(timeout, stop_request.promise).await).is_err() {
-            // Force kill the module.
-            Self::kill_module(module).await;
-            Ok(())
-        } else {
-            if let Some(p) = module.process.as_ref() {
-                // Now join the process with the same timeout
-                match tokio::time::timeout(timeout, p.join_request().send().promise).await {
-                    Ok(result) => {
-                        module.state = match Self::check_error(&module.name, result) {
-                            Ok(v) => v,
-                            Err(e) => {
-                                tracing::error!(
-                                    "Failure during {} error lookup: {}",
-                                    &module.name,
-                                    e.to_string()
-                                );
-                                ModuleState::CloseFailure
-                            }
-                        };
-                    }
-                    Err(_) => Self::kill_module(module).await,
-                }
-            }
-            Ok(())
-        }
     }
 
     pub fn shutdown(
@@ -830,7 +1004,7 @@ impl Keystone {
             .values_mut()
             .filter_map(|v| {
                 if v.state != ModuleState::Closing {
-                    Some(Self::stop_module(v, self.timeout))
+                    Some(v.stop(self.timeout))
                 } else {
                     None
                 }

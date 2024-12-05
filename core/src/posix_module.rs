@@ -20,6 +20,7 @@ use futures_util::future::LocalBoxFuture;
 use futures_util::FutureExt;
 use std::process::ExitStatus;
 use std::{cell::RefCell, rc::Rc};
+use tokio::sync::mpsc;
 
 pub struct PosixModuleProcessImpl {
     posix_process: process::Client<ByteStream, PosixError>,
@@ -27,6 +28,7 @@ pub struct PosixModuleProcessImpl {
     pub(crate) bootstrap: Option<module_start::Client<any_pointer, cap_pointer>>,
     api: RemotePromise<module_start::start_results::Owned<any_pointer, cap_pointer>>,
     pub(crate) debug_name: Option<String>,
+    pub(crate) pause: mpsc::Sender<bool>,
 }
 
 type AnyPointerClient = process::Client<cap_pointer, module_error::Owned<any_pointer>>;
@@ -151,7 +153,7 @@ impl
 
                         // read from the output stream of the process
                         // write into the input stream of the process
-                        let (rpc_system, bootstrap, disconnector, api) =
+                        let (mut rpc_system, bootstrap, disconnector, api) =
                             crate::keystone::init_rpc_system(
                                 stdout.clone(),
                                 stdin,
@@ -183,6 +185,8 @@ impl
 
                         let mut process_handle = tokio::task::spawn_local(process_future);
 
+                        let (send, mut pause_recv) = mpsc::channel::<bool>(1);
+
                         let module_process = Rc::new_cyclic(|this| {
                             let this = this.clone();
                             let bootstrap_hook = bootstrap.client.hook.add_ref();
@@ -200,7 +204,14 @@ impl
                                         >,
                                     > = this.upgrade().unwrap();
 
-                                    let mut rpc_handle = tokio::task::spawn_local(rpc_system);
+                                    let mut rpc_handle = tokio::task::spawn_local(async move {
+                                        loop {
+                                            // If the RPC system, finishes, break out of the loop. If we recieve a "go ahead" signal, continue the loop. Otherwise, pause the RPC system
+                                            tokio::select! { r = &mut rpc_system => break r, q = pause_recv.recv() => if q.unwrap_or(false) { () } else { continue; }, }
+                                            // Wait until we recieve a false value from the signaler
+                                            while pause_recv.recv().await.unwrap_or(false) {}
+                                        }
+                                    });
 
                                     // Here, we await both joinhandles to see which returns first. If one returns an error, we kill the other one, otherwise
                                     // we await the other handle. This is done carefully so that we never await a handle twice
@@ -256,6 +267,7 @@ impl
                                 bootstrap: Some(bootstrap),
                                 api,
                                 debug_name: None,
+                                pause: send,
                             }))
                         });
 

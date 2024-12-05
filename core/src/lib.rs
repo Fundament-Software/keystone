@@ -189,8 +189,6 @@ pub async fn start<
         },
     };
 
-    //let err = rpc_system.await;
-
     if let Err(e) = err {
         // Don't report disconnects as an error.
         if e.kind != ::capnp::ErrorKind::Disconnected {

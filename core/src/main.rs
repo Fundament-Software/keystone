@@ -26,6 +26,8 @@ use crossterm::event::{Event, KeyEvent};
 use eyre::Result;
 use futures_util::{FutureExt, StreamExt};
 pub use keystone::*;
+use ratatui::widgets::{ListState, TableState};
+use std::collections::BTreeMap;
 use std::future::Future;
 use std::io::Write;
 use std::path::Path;
@@ -231,16 +233,22 @@ enum TabPage {
     Keystone = 0,
     Module = 1,
     Network = 2,
-    //Dependencies,
+    Interface = 3,
 }
 
-static TABPAGES: [TabPage; 3] = [TabPage::Keystone, TabPage::Module, TabPage::Network];
+static TABPAGES: [TabPage; 4] = [
+    TabPage::Keystone,
+    TabPage::Module,
+    TabPage::Network,
+    TabPage::Interface,
+];
 
 impl std::string::ToString for TabPage {
     fn to_string(&self) -> String {
         match self {
             TabPage::Keystone => "Keystone",
             TabPage::Module => "Module",
+            TabPage::Interface => "API Explorer",
             TabPage::Network => "Network",
         }
         .to_owned()
@@ -255,12 +263,16 @@ struct TuiKeystone {
     modules: u32,
     loaded: u32,
     state: ModuleState,
-    selected: i32,
+    table_state: TableState,
 }
 
 struct TuiModule {
+    id: u64,
+    cpu: CircularBuffer<32, u64>,
+    ram: CircularBuffer<32, u64>,
     name: String,
     state: ModuleState,
+    selected: Option<usize>,
 }
 
 struct TuiNetworkNode {
@@ -270,13 +282,15 @@ struct TuiNetworkNode {
 
 struct Tui<'a> {
     tab: TabPage,
-    keystone: TuiKeystone,
-    module: Option<TuiModule>,
+    keystone: TuiKeystone, // TODO: Replace this with a reference into the network when we have a way to identify keystone nodes
+    module: Option<u64>,
     network: Vec<TuiNetworkNode>,
-    modules: &'a mut std::collections::HashMap<u64, ModuleInstance>,
+    modules: BTreeMap<u64, TuiModule>,
+    modulemap: &'a mut std::collections::HashMap<u64, ModuleInstance>,
+    list_state: ListState,
 }
 
-impl ratatui::widgets::Widget for &Tui<'_> {
+impl ratatui::widgets::Widget for &mut Tui<'_> {
     fn render(self, area: ratatui::prelude::Rect, buf: &mut ratatui::prelude::Buffer) {
         use ratatui::prelude::*;
         use ratatui::symbols::border;
@@ -285,20 +299,19 @@ impl ratatui::widgets::Widget for &Tui<'_> {
         let style_green = Style::new().green();
         let style_yellow = Style::new().yellow();
         let style_red = Style::new().red();
+        let style_gray = Style::new().dark_gray();
 
-        let title = Line::from(" Keystone Status ".bold());
-        let instructions = Line::from(vec![
-            " Quit ".into(),
-            "<Q>".green().bold(),
-            " — Scroll ".into(),
-            "<⭡⭣>".green().bold(),
-            " — Select ".into(),
-            "<Enter>".green().bold(),
-            " — Back ".into(),
-            "<Esc>".green().bold(),
-            " — Next Page ".into(),
-            "<Tab> ".green().bold(),
-        ]);
+        let state_style = |state: ModuleState| match state {
+            ModuleState::NotStarted => style_gray,
+            ModuleState::Initialized => style_yellow,
+            ModuleState::Ready => style_green,
+            ModuleState::Paused => style_yellow,
+            ModuleState::Closing => style_yellow,
+            ModuleState::Closed => style_gray,
+            ModuleState::Aborted => style_red,
+            ModuleState::StartFailure => style_red,
+            ModuleState::CloseFailure => style_red,
+        };
 
         let cell = Block::bordered()
             .border_set(border::PLAIN)
@@ -321,7 +334,9 @@ impl ratatui::widgets::Widget for &Tui<'_> {
         for tab in TABPAGES.iter() {
             let style = if self.tab == *tab {
                 tab_select
-            } else if *tab == TabPage::Module && self.module.is_none() {
+            } else if (*tab == TabPage::Module || *tab == TabPage::Interface)
+                && self.module.is_none()
+            {
                 tab_disable
             } else {
                 tab_unselect
@@ -330,86 +345,286 @@ impl ratatui::widgets::Widget for &Tui<'_> {
             Paragraph::new(Span::styled(tab.to_string(), style)).render(tabs[*tab as usize], buf);
         }
 
-        let block = Block::bordered()
-            .title(title.centered())
-            .title_bottom(instructions.centered())
-            .border_set(border::THICK);
-        block.render(tabarea[1], buf);
+        match self.tab {
+            TabPage::Keystone => {
+                let title = Line::from(" Keystone Status ".bold());
+                let instructions = Line::from(vec![
+                    " Quit ".into(),
+                    "<Q>".green().bold(),
+                    " — Scroll ".into(),
+                    "<⭡⭣>".green().bold(),
+                    " — Select ".into(),
+                    "<Enter>".green().bold(),
+                    " — Next Page ".into(),
+                    "<Tab> ".green().bold(),
+                ]);
 
-        let main = Layout::default()
-            .direction(Direction::Vertical)
-            .margin(1)
-            .constraints([
-                Constraint::Length(1),
-                Constraint::Length(1),
-                Constraint::Min(1),
-            ])
-            .split(tabarea[1]);
+                let block = Block::bordered()
+                    .title(title.centered())
+                    .title_bottom(instructions.centered())
+                    .border_set(border::THICK);
+                block.render(tabarea[1], buf);
 
-        let block = Block::bordered()
-            .border_set(border::PLAIN)
-            .borders(Borders::BOTTOM);
-        block.render(main[1], buf);
+                let main = Layout::default()
+                    .direction(Direction::Vertical)
+                    .margin(1)
+                    .constraints([
+                        Constraint::Length(1),
+                        Constraint::Length(1),
+                        Constraint::Min(1),
+                    ])
+                    .split(tabarea[1]);
 
-        let header = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Min(6),
-                Constraint::Min(5),
-                Constraint::Min(5),
-                Constraint::Min(12),
-                Constraint::Min(8),
-            ])
-            .split(main[0]);
+                let block = Block::bordered()
+                    .border_set(border::PLAIN)
+                    .borders(Borders::BOTTOM);
+                block.render(main[1], buf);
 
-        Paragraph::new(format!("Name: {}", self.keystone.name))
-            .block(cell.clone())
-            .render(header[0], buf);
+                let header = Layout::default()
+                    .direction(Direction::Horizontal)
+                    .constraints([
+                        Constraint::Min(6),
+                        Constraint::Min(5),
+                        Constraint::Min(5),
+                        Constraint::Min(12),
+                        Constraint::Min(8),
+                    ])
+                    .split(main[0]);
 
-        let halves = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Length(5), Constraint::Min(1)])
-            .split(header[1]);
+                Paragraph::new(format!("Name: {}", self.keystone.name))
+                    .block(cell.clone())
+                    .render(header[0], buf);
 
-        Paragraph::new("CPU: ").render(halves[0], buf);
-        Sparkline::default()
-            .data(self.keystone.cpu.iter())
-            .render(halves[1], buf);
-        cell.clone().render(header[1], buf);
+                let halves = Layout::default()
+                    .direction(Direction::Horizontal)
+                    .constraints([Constraint::Length(5), Constraint::Min(1)])
+                    .split(header[1]);
 
-        let halves = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Length(5), Constraint::Min(1)])
-            .split(header[2]);
+                Paragraph::new("CPU: ").render(halves[0], buf);
+                Sparkline::default()
+                    .data(self.keystone.cpu.iter())
+                    .render(halves[1], buf);
+                cell.clone().render(header[1], buf);
 
-        Paragraph::new("RAM: ").render(halves[0], buf);
-        Sparkline::default()
-            .data(self.keystone.ram.iter())
-            .render(halves[1], buf);
-        cell.clone().render(header[2], buf);
+                let halves = Layout::default()
+                    .direction(Direction::Horizontal)
+                    .constraints([Constraint::Length(5), Constraint::Min(1)])
+                    .split(header[2]);
 
-        Paragraph::new(Line::from(vec![
-            Span::raw("Modules: "),
-            Span::styled("⬤", style_green),
-            Span::raw(format!(
-                " {}/{}",
-                self.keystone.loaded, self.keystone.modules
-            )),
-        ]))
-        .block(cell.clone())
-        .render(header[3], buf);
+                Paragraph::new("RAM: ").render(halves[0], buf);
+                Sparkline::default()
+                    .data(self.keystone.ram.iter())
+                    .render(halves[1], buf);
+                cell.clone().render(header[2], buf);
 
-        Paragraph::new(Line::from(vec![
-            Span::raw("State: "),
-            Span::styled("⬤", style_green),
-            Span::raw(format!(" {}", self.keystone.state.to_string())),
-        ]))
-        .render(header[4], buf);
+                Paragraph::new(Line::from(vec![
+                    Span::raw("Modules: "),
+                    Span::styled(
+                        "⬤",
+                        if self.keystone.loaded == 0 {
+                            style_red
+                        } else if self.keystone.loaded == self.keystone.modules {
+                            style_green
+                        } else {
+                            style_yellow
+                        },
+                    ),
+                    Span::raw(format!(
+                        " {}/{}",
+                        self.keystone.loaded, self.keystone.modules
+                    )),
+                ]))
+                .block(cell.clone())
+                .render(header[3], buf);
+
+                Paragraph::new(Line::from(vec![
+                    Span::raw("State: "),
+                    Span::styled("⬤", state_style(self.keystone.state)),
+                    Span::raw(format!(" {}", self.keystone.state.to_string())),
+                ]))
+                .render(header[4], buf);
+
+                const HEADER: [&str; 6] = ["ID", "Name", "State", "CPU", "RAM", "Last Log"];
+
+                let rows = self.modules.iter().map(|(id, m)| {
+                    Row::new([
+                        Cell::from(Text::from(id.to_string())),
+                        Cell::from(Text::from(m.name.as_str())),
+                        Cell::from(Line::from(vec![
+                            Span::styled("⬤ ", state_style(m.state)),
+                            Span::raw(m.state.to_string()),
+                        ])),
+                        Cell::from(Text::from("<TODO>")),
+                        Cell::from(Text::from("<TODO>")),
+                        Cell::from(Text::from("<TODO>")),
+                    ])
+                    .height(1)
+                });
+
+                let table = StatefulWidget::render(
+                    Table::new(rows, HEADER.map(|_| Constraint::Min(1)))
+                        .column_spacing(0)
+                        // It has an optional header, which is simply a Row always visible at the top.
+                        .header(Row::new(HEADER).style(Style::new().bold()))
+                        .row_highlight_style(Style::new().reversed()),
+                    main[2],
+                    buf,
+                    &mut self.keystone.table_state,
+                );
+            }
+            TabPage::Module if self.module.is_some() => {
+                let Some(id) = self.module.as_ref() else {
+                    unreachable!();
+                };
+                let Some(module) = self.modules.get(id) else {
+                    return;
+                };
+
+                let title = Line::from(" Module Status ".bold());
+                let instructions = Line::from(vec![
+                    " Quit ".into(),
+                    "<Q>".green().bold(),
+                    " — Pick ".into(),
+                    "<←→>".green().bold(),
+                    " — Select ".into(),
+                    "<Enter>".green().bold(),
+                    " — Back ".into(),
+                    "<Esc>".green().bold(),
+                    " — Next Page ".into(),
+                    "<Tab> ".green().bold(),
+                ]);
+
+                let block = Block::bordered()
+                    .title(title.centered())
+                    .title_bottom(instructions.centered())
+                    .border_set(border::THICK);
+                block.render(tabarea[1], buf);
+
+                let main = Layout::default()
+                    .direction(Direction::Vertical)
+                    .margin(1)
+                    .constraints([
+                        Constraint::Length(1),
+                        Constraint::Length(1),
+                        Constraint::Length(1),
+                        Constraint::Min(1),
+                    ])
+                    .split(tabarea[1]);
+
+                let header = Layout::default()
+                    .direction(Direction::Horizontal)
+                    .constraints([
+                        Constraint::Min(6),
+                        Constraint::Min(5),
+                        Constraint::Min(5),
+                        Constraint::Min(8),
+                    ])
+                    .split(main[0]);
+
+                Paragraph::new(format!("Name: {}", module.name))
+                    .block(cell.clone())
+                    .render(header[0], buf);
+
+                let halves = Layout::default()
+                    .direction(Direction::Horizontal)
+                    .constraints([Constraint::Length(5), Constraint::Min(1)])
+                    .split(header[1]);
+
+                Paragraph::new("CPU: ").render(halves[0], buf);
+                Sparkline::default()
+                    .data(self.keystone.cpu.iter())
+                    .render(halves[1], buf);
+                cell.clone().render(header[1], buf);
+
+                let halves = Layout::default()
+                    .direction(Direction::Horizontal)
+                    .constraints([Constraint::Length(5), Constraint::Min(1)])
+                    .split(header[2]);
+
+                Paragraph::new("RAM: ").render(halves[0], buf);
+                Sparkline::default()
+                    .data(self.keystone.ram.iter())
+                    .render(halves[1], buf);
+                cell.clone().render(header[2], buf);
+
+                Paragraph::new(Line::from(vec![
+                    Span::raw("State: "),
+                    Span::styled("⬤", state_style(module.state)),
+                    Span::raw(format!(" {}", module.state.to_string())),
+                ]))
+                .render(header[3], buf);
+
+                Tabs::new(match module.state {
+                    ModuleState::NotStarted
+                    | ModuleState::Closed
+                    | ModuleState::Aborted
+                    | ModuleState::StartFailure
+                    | ModuleState::CloseFailure => vec![Line::from(Span::styled(
+                        "Start ⏵",
+                        Style::new().green().bold(),
+                    ))],
+                    ModuleState::Initialized | ModuleState::Ready => vec![
+                        Line::from(Span::styled("Stop ▪", Style::new().red().bold())),
+                        Line::from(Span::styled("Pause ॥", Style::new().yellow().bold())),
+                        Line::from(Span::styled("Restart ↺", Style::new().blue().bold())),
+                    ],
+                    ModuleState::Paused => vec![
+                        Line::from(Span::styled("Stop ▪", Style::new().red().bold())),
+                        Line::from(Span::styled("Start ⏵", Style::new().green().bold())),
+                        Line::from(Span::styled("Restart ↺", Style::new().blue().bold())),
+                    ],
+                    ModuleState::Closing => vec![Line::from(Span::styled(
+                        "Kill 🕱",
+                        Style::new().red().bold(),
+                    ))],
+                })
+                .highlight_style(Style::new().black().on_white().bold())
+                .divider(symbols::DOT)
+                .select(module.selected)
+                .render(main[1], buf);
+            }
+            TabPage::Network => {
+                let title = Line::from(" Network Status ".bold());
+                let instructions = Line::from(vec![
+                    " Quit ".into(),
+                    "<Q>".green().bold(),
+                    " — Scroll ".into(),
+                    "<⭡⭣>".green().bold(),
+                    " — Select ".into(),
+                    "<Enter>".green().bold(),
+                    " — Back ".into(),
+                    "<Esc>".green().bold(),
+                    " — Next Page ".into(),
+                    "<Tab> ".green().bold(),
+                ]);
+
+                let block = Block::bordered()
+                    .title(title.centered())
+                    .title_bottom(instructions.centered())
+                    .border_set(border::THICK);
+                block.render(tabarea[1], buf);
+
+                let main = Layout::default()
+                    .direction(Direction::Vertical)
+                    .margin(1)
+                    .constraints([Constraint::Length(1), Constraint::Min(1)])
+                    .split(tabarea[1]);
+
+                let list = List::new(vec![Line::from(vec![
+                    Span::styled("☗ ", state_style(self.keystone.state)),
+                    Span::raw(self.keystone.name.as_str()),
+                ])])
+                .direction(ratatui::widgets::ListDirection::TopToBottom);
+
+                StatefulWidget::render(list, main[1], buf, &mut self.list_state);
+            }
+            _ => (),
+        }
     }
 }
 
 impl Tui<'_> {
-    fn key(&mut self, key: KeyEvent, cancellation_token: &CancellationToken) {
+    async fn key(&mut self, key: KeyEvent, cancellation_token: &CancellationToken) -> Result<()> {
         use crossterm::event::KeyCode;
         use crossterm::event::KeyEventKind;
 
@@ -419,34 +634,148 @@ impl Tui<'_> {
                     cancellation_token.cancel();
                 }
             }
-            KeyCode::Up if key.kind != KeyEventKind::Release => {
-                if self.modules.len() > 0 {
-                    self.keystone.selected =
-                        (self.keystone.selected + 1) % self.modules.len() as i32;
-                }
-            }
-            KeyCode::Down if key.kind != KeyEventKind::Release => {
-                if self.modules.len() > 0 {
-                    if self.keystone.selected < 0 {
-                        self.keystone.selected = 0;
+            KeyCode::Enter if key.kind != KeyEventKind::Release => match self.tab {
+                TabPage::Keystone => {
+                    if let Some(n) = self.keystone.table_state.selected() {
+                        // Rust's b-tree implementation doesn't have an efficient nth lookup: https://internals.rust-lang.org/t/suggestion-btreemap-btreeset-o-log-n-n-th-element-access/9515
+                        self.module = self.modules.iter().nth(n).map(|(id, _)| *id);
+                        if self.module.is_some() {
+                            self.tab = TabPage::Module;
+                        }
                     }
-                    self.keystone.selected =
-                        (self.keystone.selected - 1) % self.modules.len() as i32;
                 }
+                TabPage::Module if self.module.is_some() => {
+                    if let Some(m) = self.modules.get_mut(&self.module.unwrap()) {
+                        match m.state {
+                            ModuleState::NotStarted
+                            | ModuleState::Closed
+                            | ModuleState::Aborted
+                            | ModuleState::StartFailure
+                            | ModuleState::CloseFailure
+                                if m.selected.is_some() =>
+                            {
+                                if let Some(x) = self.modulemap.get(&m.id) {
+                                    todo!();
+                                }
+                            }
+                            ModuleState::Initialized | ModuleState::Ready
+                                if m.selected.is_some() =>
+                            {
+                                match m.selected.unwrap() {
+                                    0 => {
+                                        if let Some(x) = self.modulemap.get_mut(&m.id) {
+                                            x.stop(std::time::Duration::from_millis(10000)).await?;
+                                        }
+                                    }
+                                    1 => {
+                                        if let Some(x) = self.modulemap.get_mut(&m.id) {
+                                            x.pause(true).await?;
+                                        }
+                                    }
+                                    //2 => restart_module(), // TODO
+                                    _ => (),
+                                }
+                            }
+                            ModuleState::Paused if m.selected.is_some() => {
+                                match m.selected.unwrap() {
+                                    0 => {
+                                        if let Some(x) = self.modulemap.get_mut(&m.id) {
+                                            x.stop(std::time::Duration::from_millis(10000)).await?;
+                                        }
+                                    }
+                                    1 => {
+                                        if let Some(x) = self.modulemap.get_mut(&m.id) {
+                                            x.pause(false).await?;
+                                        }
+                                    }
+                                    //2 => restart_module(), // TODO
+                                    _ => (),
+                                }
+                            }
+                            ModuleState::Closing => {
+                                if let Some(x) = self.modulemap.get_mut(&m.id) {
+                                    x.kill().await;
+                                }
+                            }
+
+                            _ => (),
+                        }
+                    }
+                }
+                TabPage::Network => {
+                    if self.list_state.selected().is_some() {
+                        self.tab = TabPage::Keystone;
+                    }
+                }
+                _ => (),
+            },
+            KeyCode::Esc if key.kind != KeyEventKind::Release => {
+                self.tab = match self.tab {
+                    TabPage::Module => TabPage::Keystone,
+                    TabPage::Interface => TabPage::Module,
+                    TabPage::Network => TabPage::Keystone,
+                    _ => self.tab,
+                };
             }
+            KeyCode::Left if key.kind != KeyEventKind::Release => match self.tab {
+                TabPage::Module if self.module.is_some() => {
+                    if let Some(x) = self.module.as_ref() {
+                        if let Some(m) = self.modules.get_mut(x) {
+                            m.selected = m
+                                .selected
+                                .map(|x| x.checked_sub(1).unwrap_or(999))
+                                .or(Some(999));
+                        }
+                    }
+                }
+                _ => (),
+            },
+            KeyCode::Right if key.kind != KeyEventKind::Release => match self.tab {
+                TabPage::Module if self.module.is_some() => {
+                    if let Some(x) = self.module.as_ref() {
+                        if let Some(m) = self.modules.get_mut(x) {
+                            m.selected = m.selected.map(|x| x + 1).or(Some(0));
+                        }
+                    }
+                }
+                _ => (),
+            },
+            KeyCode::Up if key.kind != KeyEventKind::Release => match self.tab {
+                TabPage::Keystone => {
+                    self.keystone.table_state.select_next();
+                }
+                TabPage::Network => {
+                    self.list_state.select_previous();
+                }
+                _ => (),
+            },
+            KeyCode::Down if key.kind != KeyEventKind::Release => match self.tab {
+                TabPage::Keystone => {
+                    self.keystone.table_state.select_next();
+                }
+                TabPage::Network => {
+                    self.list_state.select_next();
+                }
+                _ => (),
+            },
             KeyCode::Tab if key.kind != KeyEventKind::Release => {
-                self.tab = TABPAGES[((self.tab as usize) + 1) % TABPAGES.len()];
+                let increment = |tab| TABPAGES[((tab as usize) + 1) % TABPAGES.len()];
+                self.tab = increment(self.tab);
                 if self.tab == TabPage::Module && self.module.is_none() {
-                    self.tab = TABPAGES[((self.tab as usize) + 1) % TABPAGES.len()];
+                    self.tab = increment(self.tab);
+                }
+                if self.tab == TabPage::Interface && self.module.is_none() {
+                    self.tab = increment(self.tab);
                 }
             }
             _ => (),
         }
+        Ok(())
     }
 }
 
 async fn event_loop<B: ratatui::prelude::Backend>(
-    modules: &mut std::collections::HashMap<u64, ModuleInstance>,
+    modulemap: &mut std::collections::HashMap<u64, ModuleInstance>,
     mut terminal: ratatui::Terminal<B>,
     mut event_rx: UnboundedReceiver<TerminalEvent>,
     cancellation_token: CancellationToken,
@@ -460,14 +789,16 @@ async fn event_loop<B: ratatui::prelude::Backend>(
             cpu: CircularBuffer::new(),
             ram: CircularBuffer::new(),
             links: 0,
-            modules: modules.len() as u32,
+            modules: modulemap.len() as u32,
             loaded: 0,
             state: ModuleState::NotStarted,
-            selected: -1,
+            table_state: TableState::default(),
         },
         module: None,
         network: Vec::new(),
-        modules,
+        modules: BTreeMap::new(),
+        modulemap,
+        list_state: ListState::default(),
     };
 
     let mut sys =
@@ -476,15 +807,15 @@ async fn event_loop<B: ratatui::prelude::Backend>(
     while let Some(evt) = event_rx.recv().await {
         match evt {
             TerminalEvent::Evt(e) => match e {
-                Event::Key(key) => app.key(key, &cancellation_token),
+                Event::Key(key) => app.key(key, &cancellation_token).await?,
                 Event::Mouse(mouse) => (),
                 Event::FocusGained => (),
                 Event::FocusLost => (),
                 Event::Paste(_) => (),
-                Event::Resize(x, y) => (),
+                Event::Resize(_, _) => (),
             },
             TerminalEvent::Render => terminal
-                .draw(|frame| frame.render_widget(&app, frame.area()))
+                .draw(|frame| frame.render_widget(&mut app, frame.area()))
                 .map(|_| ())?,
             TerminalEvent::Tick => {
                 sys.refresh_memory_specifics(MemoryRefreshKind::new().with_ram());
@@ -497,8 +828,23 @@ async fn event_loop<B: ratatui::prelude::Backend>(
                 app.keystone.ram.push_front(sys.used_memory());
                 app.keystone.loaded = 0;
                 app.keystone.state = ModuleState::NotStarted;
+                let remove = app
+                    .modules
+                    .iter()
+                    .filter_map(|(id, _)| {
+                        if app.modulemap.contains_key(id) {
+                            None
+                        } else {
+                            Some(*id)
+                        }
+                    })
+                    .collect::<Vec<_>>();
 
-                for (i, m) in &mut *app.modules {
+                for id in remove {
+                    app.modules.remove(&id);
+                }
+
+                for (id, m) in &mut *app.modulemap {
                     match m.state {
                         ModuleState::Ready | ModuleState::Paused => app.keystone.loaded += 1,
                         ModuleState::Initialized
@@ -507,6 +853,22 @@ async fn event_loop<B: ratatui::prelude::Backend>(
                             app.keystone.state = ModuleState::Initialized
                         }
                         _ => (),
+                    }
+                    if let Some(module) = app.modules.get_mut(id) {
+                        module.name = m.name.clone();
+                        module.state = m.state;
+                    } else {
+                        app.modules.insert(
+                            *id,
+                            TuiModule {
+                                id: *id,
+                                cpu: CircularBuffer::new(),
+                                ram: CircularBuffer::new(),
+                                name: m.name.clone(),
+                                state: m.state,
+                                selected: None,
+                            },
+                        );
                     }
                 }
 

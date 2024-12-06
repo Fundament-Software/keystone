@@ -10,7 +10,7 @@ fn test_hello_world_proxy() -> eyre::Result<()> {
             r#"{  greeting = "Bonjour" }"#,
         ),
         |message| async move {
-            let mut instance = keystone::test_create_keystone(&message).await.unwrap();
+            let (mut instance, mut rpc_systems) = keystone::test_create_keystone(&message).await.unwrap();
             let module = &instance.modules[&instance.namemap["Hello World"]];
             let pipe = instance
                 .proxy_set
@@ -38,10 +38,10 @@ fn test_hello_world_proxy() -> eyre::Result<()> {
             };
 
             tokio::select! {
-                r = keystone::drive_stream(&mut instance.rpc_systems) => Ok(r?),
+                r = keystone::drive_stream(&mut rpc_systems) => Ok(r?),
                 r = fut => r,
             }?;
-            keystone::test_shutdown(&mut instance).await
+            keystone::test_shutdown(&mut instance, &mut rpc_systems).await
         },
     )
 }

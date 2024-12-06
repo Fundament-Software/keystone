@@ -7,7 +7,8 @@ fn test_stateful() -> Result<()> {
         &keystone::build_module_config("Stateful", "stateful-module", r#"{ echoWord = "echo" }"#),
         |message| async move {
             {
-                let mut instance = keystone::test_create_keystone(&message).await.unwrap();
+                let (mut instance, mut rpc_systems) =
+                    keystone::test_create_keystone(&message).await.unwrap();
                 let stateful_client: stateful::stateful_capnp::root::Client =
                     instance.get_api_pipe("Stateful").unwrap();
 
@@ -57,13 +58,14 @@ fn test_stateful() -> Result<()> {
                 };
 
                 tokio::select! {
-                    r = keystone::drive_stream(&mut instance.rpc_systems) => Ok(r?),
+                    r = keystone::drive_stream(&mut rpc_systems) => Ok(r?),
                     r = fut => r,
                 }?;
-                keystone::test_shutdown(&mut instance).await?;
+                keystone::test_shutdown(&mut instance, &mut rpc_systems).await?;
             }
 
-            let mut instance = keystone::test_create_keystone(&message).await.unwrap();
+            let (mut instance, mut rpc_systems) =
+                keystone::test_create_keystone(&message).await.unwrap();
             let stateful_client: stateful::stateful_capnp::root::Client =
                 instance.get_api_pipe("Stateful").unwrap();
 
@@ -79,10 +81,10 @@ fn test_stateful() -> Result<()> {
             };
 
             tokio::select! {
-                r = keystone::drive_stream(&mut instance.rpc_systems) => Ok(r?),
+                r = keystone::drive_stream(&mut rpc_systems) => Ok(r?),
                 r = fut => r,
             }?;
-            keystone::test_shutdown(&mut instance).await?;
+            keystone::test_shutdown(&mut instance, &mut rpc_systems).await?;
             Ok::<(), eyre::Error>(())
         },
     )

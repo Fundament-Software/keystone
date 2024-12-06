@@ -9,6 +9,7 @@ mod database;
 pub mod host;
 pub mod http;
 mod keystone;
+mod module;
 mod posix_module;
 mod posix_process;
 mod posix_spawn;
@@ -19,6 +20,7 @@ mod sturdyref;
 mod util;
 
 use crate::keystone_capnp::keystone_config;
+use capnp::any_pointer::Owned as any_pointer;
 use circular_buffer::CircularBuffer;
 use clap::{Parser, Subcommand, ValueEnum};
 use crossterm::event::KeyCode::Char;
@@ -26,11 +28,13 @@ use crossterm::event::{Event, KeyEvent};
 use eyre::Result;
 use futures_util::{FutureExt, StreamExt};
 pub use keystone::*;
+pub use module::*;
 use ratatui::widgets::{ListState, TableState};
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::io::Write;
 use std::path::Path;
+use std::pin::Pin;
 use std::{convert::Into, fs, io::Read};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio_util::sync::CancellationToken;
@@ -187,29 +191,29 @@ fn keystone_startup(
     interactive: bool,
 ) -> Result<()> {
     let pool = tokio::task::LocalSet::new();
-    let mut instance = Keystone::new(message, false)?;
+    let (mut instance, mut rpc_systems) = Keystone::new(message, false)?;
 
     let fut = pool.run_until(async move {
-        instance.init(dir, message).await?;
+        instance.init(dir, message.reborrow(), &rpc_systems).await?;
 
         // TODO: Eventually the terminal interface should be factored out into a module using a monitoring capability.
         if interactive {
-            if let Err(e) = run_interface(&mut instance).await {
+            if let Err(e) = run_interface(&mut instance, &mut rpc_systems, dir, message).await {
                 eprintln!("{}", e.to_string());
             }
         } else {
             tokio::select! {
-                _ = drive_stream_with_error("Module crashed!", &mut instance.rpc_systems) => (),
+                _ = drive_stream_with_error("Module crashed!", &mut rpc_systems) => (),
                 r = tokio::signal::ctrl_c() => r.expect("failed to listen to shutdown signal"),
             };
         }
 
         eprintln!("Attempting graceful shutdown...");
-        let (mut shutdown, rpc_systems) = instance.shutdown();
+        let mut shutdown = instance.shutdown();
 
         tokio::join!(
             drive_stream_with_error("Error during shutdown!", &mut shutdown),
-            drive_stream_with_error("Error during shutdown!", rpc_systems)
+            drive_stream_with_error("Error during shutdown!", &mut rpc_systems)
         );
 
         Ok::<(), eyre::Report>(())
@@ -286,7 +290,9 @@ struct Tui<'a> {
     module: Option<u64>,
     network: Vec<TuiNetworkNode>,
     modules: BTreeMap<u64, TuiModule>,
-    modulemap: &'a mut std::collections::HashMap<u64, ModuleInstance>,
+    instance: &'a mut Keystone,
+    dir: &'a Path,
+    config: keystone_config::Reader<'a>,
     list_state: ListState,
 }
 
@@ -624,7 +630,27 @@ impl ratatui::widgets::Widget for &mut Tui<'_> {
 }
 
 impl Tui<'_> {
-    async fn key(&mut self, key: KeyEvent, cancellation_token: &CancellationToken) -> Result<()> {
+    fn find_module_config<'a>(
+        config: &'a keystone_config::Reader<'a>,
+        instance: &Keystone,
+        id: u64,
+    ) -> Result<keystone_config::module_config::Reader<'a, any_pointer>> {
+        let modules = config.get_modules()?;
+        for s in modules.iter() {
+            if instance.get_id(s)? == id {
+                return Ok(s);
+            }
+        }
+
+        Err(Error::ModuleNotFound(id).into())
+    }
+
+    async fn key(
+        &mut self,
+        key: KeyEvent,
+        rpc_tx: UnboundedSender<Pin<Box<dyn Future<Output = Result<()>>>>>,
+        cancellation_token: &CancellationToken,
+    ) -> Result<()> {
         use crossterm::event::KeyCode;
         use crossterm::event::KeyEventKind;
 
@@ -654,8 +680,27 @@ impl Tui<'_> {
                             | ModuleState::CloseFailure
                                 if m.selected.is_some() =>
                             {
-                                if let Some(x) = self.modulemap.get(&m.id) {
-                                    todo!();
+                                let s =
+                                    Self::find_module_config(&self.config, &self.instance, m.id)?;
+                                if let Err(t) = rpc_tx.send(
+                                    self.instance
+                                        .init_module(
+                                            m.id,
+                                            s,
+                                            self.dir,
+                                            self.config.get_cap_table()?,
+                                        )
+                                        .await?,
+                                ) {
+                                    tokio::try_join!(
+                                        self.instance
+                                            .modules
+                                            .get_mut(&m.id)
+                                            .unwrap()
+                                            .stop(self.instance.timeout),
+                                        t.0
+                                    )
+                                    .expect("Failed to recover from failed module start");
                                 }
                             }
                             ModuleState::Initialized | ModuleState::Ready
@@ -663,37 +708,97 @@ impl Tui<'_> {
                             {
                                 match m.selected.unwrap() {
                                     0 => {
-                                        if let Some(x) = self.modulemap.get_mut(&m.id) {
-                                            x.stop(std::time::Duration::from_millis(10000)).await?;
+                                        if let Some(x) = self.instance.modules.get_mut(&m.id) {
+                                            x.stop(self.instance.timeout).await?;
                                         }
                                     }
                                     1 => {
-                                        if let Some(x) = self.modulemap.get_mut(&m.id) {
+                                        if let Some(x) = self.instance.modules.get_mut(&m.id) {
                                             x.pause(true).await?;
                                         }
                                     }
-                                    //2 => restart_module(), // TODO
+                                    2 => {
+                                        let id = m.id;
+                                        if let Some(x) = self.instance.modules.get_mut(&id) {
+                                            x.stop(self.instance.timeout).await?;
+                                        }
+                                        let s = Self::find_module_config(
+                                            &self.config,
+                                            &self.instance,
+                                            id,
+                                        )?;
+                                        if let Err(t) = rpc_tx.send(
+                                            self.instance
+                                                .init_module(
+                                                    id,
+                                                    s,
+                                                    self.dir,
+                                                    self.config.get_cap_table()?,
+                                                )
+                                                .await?,
+                                        ) {
+                                            tokio::try_join!(
+                                                self.instance
+                                                    .modules
+                                                    .get_mut(&m.id)
+                                                    .unwrap()
+                                                    .stop(self.instance.timeout),
+                                                t.0
+                                            )
+                                            .expect("Failed to recover from failed module start");
+                                        }
+                                    }
                                     _ => (),
                                 }
                             }
                             ModuleState::Paused if m.selected.is_some() => {
                                 match m.selected.unwrap() {
                                     0 => {
-                                        if let Some(x) = self.modulemap.get_mut(&m.id) {
-                                            x.stop(std::time::Duration::from_millis(10000)).await?;
+                                        if let Some(x) = self.instance.modules.get_mut(&m.id) {
+                                            x.stop(self.instance.timeout).await?;
                                         }
                                     }
                                     1 => {
-                                        if let Some(x) = self.modulemap.get_mut(&m.id) {
+                                        if let Some(x) = self.instance.modules.get_mut(&m.id) {
                                             x.pause(false).await?;
                                         }
                                     }
-                                    //2 => restart_module(), // TODO
+                                    2 => {
+                                        let id = m.id;
+                                        if let Some(x) = self.instance.modules.get_mut(&id) {
+                                            x.stop(self.instance.timeout).await?;
+                                        }
+                                        let s = Self::find_module_config(
+                                            &self.config,
+                                            &self.instance,
+                                            id,
+                                        )?;
+                                        if let Err(t) = rpc_tx.send(
+                                            self.instance
+                                                .init_module(
+                                                    id,
+                                                    s,
+                                                    self.dir,
+                                                    self.config.get_cap_table()?,
+                                                )
+                                                .await?,
+                                        ) {
+                                            tokio::try_join!(
+                                                self.instance
+                                                    .modules
+                                                    .get_mut(&m.id)
+                                                    .unwrap()
+                                                    .stop(self.instance.timeout),
+                                                t.0
+                                            )
+                                            .expect("Failed to recover from failed module start");
+                                        }
+                                    }
                                     _ => (),
                                 }
                             }
                             ModuleState::Closing => {
-                                if let Some(x) = self.modulemap.get_mut(&m.id) {
+                                if let Some(x) = self.instance.modules.get_mut(&m.id) {
                                     x.kill().await;
                                 }
                             }
@@ -775,13 +880,17 @@ impl Tui<'_> {
 }
 
 async fn event_loop<B: ratatui::prelude::Backend>(
-    modulemap: &mut std::collections::HashMap<u64, ModuleInstance>,
+    instance: &mut Keystone,
     mut terminal: ratatui::Terminal<B>,
     mut event_rx: UnboundedReceiver<TerminalEvent>,
+    rpc_tx: UnboundedSender<Pin<Box<dyn Future<Output = Result<()>>>>>,
     cancellation_token: CancellationToken,
+    dir: &Path,
+    config: keystone_config::Reader<'_>,
 ) -> Result<()> {
     use sysinfo::{CpuRefreshKind, MemoryRefreshKind, RefreshKind, System};
 
+    let count = instance.modules.len() as u32;
     let mut app = Tui {
         tab: TabPage::Keystone,
         keystone: TuiKeystone {
@@ -789,7 +898,7 @@ async fn event_loop<B: ratatui::prelude::Backend>(
             cpu: CircularBuffer::new(),
             ram: CircularBuffer::new(),
             links: 0,
-            modules: modulemap.len() as u32,
+            modules: count,
             loaded: 0,
             state: ModuleState::NotStarted,
             table_state: TableState::default(),
@@ -797,7 +906,9 @@ async fn event_loop<B: ratatui::prelude::Backend>(
         module: None,
         network: Vec::new(),
         modules: BTreeMap::new(),
-        modulemap,
+        instance,
+        dir,
+        config,
         list_state: ListState::default(),
     };
 
@@ -807,7 +918,7 @@ async fn event_loop<B: ratatui::prelude::Backend>(
     while let Some(evt) = event_rx.recv().await {
         match evt {
             TerminalEvent::Evt(e) => match e {
-                Event::Key(key) => app.key(key, &cancellation_token).await?,
+                Event::Key(key) => app.key(key, rpc_tx.clone(), &cancellation_token).await?,
                 Event::Mouse(mouse) => (),
                 Event::FocusGained => (),
                 Event::FocusLost => (),
@@ -832,7 +943,7 @@ async fn event_loop<B: ratatui::prelude::Backend>(
                     .modules
                     .iter()
                     .filter_map(|(id, _)| {
-                        if app.modulemap.contains_key(id) {
+                        if app.instance.modules.contains_key(id) {
                             None
                         } else {
                             Some(*id)
@@ -844,7 +955,7 @@ async fn event_loop<B: ratatui::prelude::Backend>(
                     app.modules.remove(&id);
                 }
 
-                for (id, m) in &mut *app.modulemap {
+                for (id, m) in &mut app.instance.modules {
                     match m.state {
                         ModuleState::Ready | ModuleState::Paused => app.keystone.loaded += 1,
                         ModuleState::Initialized
@@ -883,8 +994,9 @@ async fn event_loop<B: ratatui::prelude::Backend>(
 }
 
 async fn event_stream(
-    stream: &mut futures_util::stream::FuturesUnordered<impl Future<Output = eyre::Result<()>>>,
+    rpc_systems: &mut RpcSystemSet,
     event_tx: UnboundedSender<TerminalEvent>,
+    mut rpc_rx: UnboundedReceiver<Pin<Box<dyn Future<Output = Result<()>>>>>,
     cancellation_token: CancellationToken,
 ) -> Result<()> {
     const TICK_RATE: f64 = 4.0;
@@ -909,10 +1021,11 @@ async fn event_stream(
             },
             _ = tick_delay => event_tx.send(TerminalEvent::Tick)?,
             _ = render_delay => event_tx.send(TerminalEvent::Render)?,
-            r = stream.next() => if let Some(Err(e)) = r {
+            Some(r) = rpc_systems.next() => if let Err(e) = r {
                 eprintln!("Module crashed! {}", e);
-            } else if r.is_none() {
-                cancellation_token.cancel();
+            },
+            r = rpc_rx.recv() => if let Some(v) = r {
+                rpc_systems.push(v);
             }
         }
     }
@@ -920,25 +1033,31 @@ async fn event_stream(
     Ok(())
 }
 
-async fn run_interface(instance: &mut Keystone) -> Result<()> {
+async fn run_interface(
+    instance: &mut Keystone,
+    rpc_systems: &mut keystone::RpcSystemSet,
+    dir: &Path,
+    config: keystone_config::Reader<'_>,
+) -> Result<()> {
     let mut terminal = ratatui::init();
     terminal.clear()?;
 
     let cancellation_token = CancellationToken::new();
     let (event_tx, event_rx) = mpsc::unbounded_channel::<TerminalEvent>();
 
+    let (rpc_tx, rpc_rx) = mpsc::unbounded_channel::<Pin<Box<dyn Future<Output = Result<()>>>>>();
+
     // Catch the error so we always restore the terminal state no matter what happens
     let e = tokio::try_join!(
-        event_stream(
-            &mut instance.rpc_systems,
-            event_tx,
-            cancellation_token.clone()
-        ),
+        event_stream(rpc_systems, event_tx, rpc_rx, cancellation_token.clone()),
         event_loop(
-            &mut instance.modules,
+            instance,
             terminal,
             event_rx,
-            cancellation_token.clone()
+            rpc_tx,
+            cancellation_token.clone(),
+            dir,
+            config
         ),
     );
     ratatui::restore();

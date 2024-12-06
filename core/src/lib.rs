@@ -11,6 +11,7 @@ mod database;
 pub mod host;
 pub mod http;
 mod keystone;
+mod module;
 mod posix_module;
 mod posix_process;
 mod posix_spawn;
@@ -30,6 +31,7 @@ use eyre::Context;
 use futures_util::StreamExt;
 pub use keystone::*;
 use keystone_capnp::keystone_config;
+pub use module::*;
 use module_capnp::module_start;
 use std::cell::RefCell;
 use std::future::Future;
@@ -252,8 +254,8 @@ pub fn build_temp_config(
 
 pub async fn test_create_keystone(
     message: &capnp::message::Builder<capnp::message::HeapAllocator>,
-) -> eyre::Result<Keystone> {
-    let mut instance = Keystone::new(
+) -> eyre::Result<(Keystone, RpcSystemSet)> {
+    let (mut instance, mut rpc_systems) = Keystone::new(
         message.get_root_as_reader::<keystone_config::Reader>()?,
         false,
     )?;
@@ -262,10 +264,11 @@ pub async fn test_create_keystone(
         .init(
             &std::env::current_dir()?,
             message.get_root_as_reader::<keystone_config::Reader>()?,
+            &mut rpc_systems,
         )
         .await?;
 
-    Ok(instance)
+    Ok((instance, rpc_systems))
 }
 
 pub fn test_harness<F: Future<Output = eyre::Result<()>> + 'static>(
@@ -318,8 +321,8 @@ pub async fn drive_stream(
 }
 
 #[inline]
-pub async fn test_shutdown(instance: &mut Keystone) -> eyre::Result<()> {
-    let (mut shutdown, runner) = instance.shutdown();
+pub async fn test_shutdown(instance: &mut Keystone, runner: &mut RpcSystemSet) -> eyre::Result<()> {
+    let mut shutdown = instance.shutdown();
 
     tokio::try_join!(drive_stream(&mut shutdown), drive_stream(runner))?;
     Ok::<(), eyre::Report>(())
@@ -357,16 +360,16 @@ pub fn test_module_harness<
 
     let module = module.to_string();
     let b = pool.run_until(pool.spawn_local(async move {
-        let (mut instance, api): (Keystone, API::Reader<'_>) =
+        let (mut instance, api, mut rpc_systems): (Keystone, API::Reader<'_>, RpcSystemSet) =
             Keystone::init_single_module(&source, &module, server_reader, server_writer)
                 .await
                 .unwrap();
 
         tokio::select! {
-            r = drive_stream(&mut instance.rpc_systems) => r,
+            r = drive_stream(&mut rpc_systems) => r,
             r = f(api) => r.wrap_err(module),
         }?;
-        test_shutdown(&mut instance).await
+        test_shutdown(&mut instance, &mut rpc_systems).await
     }));
 
     let runtime = tokio::runtime::Builder::new_current_thread()

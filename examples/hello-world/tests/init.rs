@@ -20,7 +20,8 @@ fn test_hello_world_init() -> eyre::Result<()> {
             r#"{  greeting = "Bonjour" }"#,
         ),
         |message| async move {
-            let mut instance = keystone::test_create_keystone(&message).await.unwrap();
+            let (mut instance, mut rpc_systems) =
+                keystone::test_create_keystone(&message).await.unwrap();
             let hello_client: root::Client = instance.get_api_pipe("Hello World").unwrap();
 
             let fut = async move {
@@ -35,10 +36,10 @@ fn test_hello_world_init() -> eyre::Result<()> {
             };
 
             tokio::select! {
-                r = keystone::drive_stream(&mut instance.rpc_systems) => Ok(r?),
+                r = keystone::drive_stream(&mut rpc_systems) => Ok(r?),
                 r = fut => r,
             }?;
-            keystone::test_shutdown(&mut instance).await
+            keystone::test_shutdown(&mut instance, &mut rpc_systems).await
         },
     )
 }
@@ -67,7 +68,7 @@ fn test_hello_world_empty() -> eyre::Result<()> {
             r#"{  greeting = "Bonjour" }"#,
         ),
         |message| async move {
-            let mut instance = keystone::Keystone::new(
+            let (mut instance, mut rpc_systems) = keystone::Keystone::new(
                 message
                     .get_root_as_reader::<keystone::keystone_capnp::keystone_config::Reader>()?,
                 false,
@@ -79,15 +80,16 @@ fn test_hello_world_empty() -> eyre::Result<()> {
                     message
                         .get_root_as_reader::<keystone::keystone_capnp::keystone_config::Reader>(
                         )?,
+                    &rpc_systems,
                 )
                 .await?;
 
             eprintln!("Attempting graceful shutdown...");
-            let (mut shutdown, rpc_systems) = instance.shutdown();
+            let mut shutdown = instance.shutdown();
 
             tokio::join!(
                 drive_stream_with_error("Error during shutdown!", &mut shutdown),
-                drive_stream_with_error("Error during shutdown!", rpc_systems)
+                drive_stream_with_error("Error during shutdown!", &mut rpc_systems)
             );
             Ok::<(), eyre::Report>(())
         },

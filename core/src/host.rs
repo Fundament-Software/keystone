@@ -31,10 +31,12 @@ where
     }
 }
 
+/*
 #[macro_export]
 macro_rules! dyn_event {
     ($lvl:ident, $($arg:tt)+) => {
         match $lvl {
+            $crate::keystone_capnp::LogLevel::None => (),
             $crate::keystone_capnp::LogLevel::Trace => ::tracing::trace!($($arg)+),
             $crate::keystone_capnp::LogLevel::Debug => ::tracing::debug!($($arg)+),
             $crate::keystone_capnp::LogLevel::Info => ::tracing::info!($($arg)+),
@@ -48,6 +50,7 @@ macro_rules! dyn_event {
 macro_rules! dyn_span {
     ($lvl:ident, $($arg:tt)+) => {
         match $lvl {
+            $crate::keystone_capnp::LogLevel::None => (),
             $crate::keystone_capnp::LogLevel::Trace => ::tracing::trace_span!($($arg)+),
             $crate::keystone_capnp::LogLevel::Debug => ::tracing::debug_span!($($arg)+),
             $crate::keystone_capnp::LogLevel::Info => ::tracing::info_span!($($arg)+),
@@ -56,6 +59,7 @@ macro_rules! dyn_span {
         }
     };
 }
+ */
 
 impl<State> save::Server<capnp::any_pointer::Owned> for HostImpl<State>
 where
@@ -122,11 +126,12 @@ where
         Ok(())
     }
 
-    async fn log(
+    /*async fn log(
         &self,
         params: host::LogParams<State>,
         _: host::LogResults<State>,
     ) -> Result<(), ::capnp::Error> {
+
         let params = params.get()?;
         let obj: capnp::dynamic_value::Reader = params.get_obj()?.into();
         let level = params.get_level()?;
@@ -135,7 +140,7 @@ where
         dyn_event!(level, "{:?}", obj);
 
         Ok(())
-    }
+    }*/
 }
 
 pub struct HostSubscriber<State: capnp::traits::Owned> {

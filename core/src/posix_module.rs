@@ -20,6 +20,7 @@ use futures_util::future::LocalBoxFuture;
 use futures_util::FutureExt;
 use std::process::ExitStatus;
 use std::{cell::RefCell, rc::Rc};
+use tokio::io::AsyncReadExt;
 use tokio::sync::mpsc;
 
 pub struct PosixModuleProcessImpl {
@@ -29,6 +30,7 @@ pub struct PosixModuleProcessImpl {
     api: RemotePromise<module_start::start_results::Owned<any_pointer, cap_pointer>>,
     pub(crate) debug_name: Option<String>,
     pub(crate) pause: mpsc::Sender<bool>,
+    //pub(crate) stderr: ByteStreamBufferImpl,
 }
 
 type AnyPointerClient = process::Client<cap_pointer, module_error::Owned<any_pointer>>;
@@ -48,7 +50,7 @@ impl process::Server<cap_pointer, module_error::Owned<any_pointer>>
         let span = tracing::trace_span!("posix_module_process");
         let _enter = span.enter();
         tracing::trace!("get_error()");
-        let request = self.borrow_mut().posix_process.get_error_request();
+        let request = self.borrow().posix_process.get_error_request();
         let posix_err = request.send().promise.await?;
         let builder = results.get().init_result();
         builder
@@ -65,7 +67,7 @@ impl process::Server<cap_pointer, module_error::Owned<any_pointer>>
         let span = tracing::trace_span!("posix_module_process");
         let _enter = span.enter();
         tracing::trace!("kill()");
-        let request = self.borrow_mut().posix_process.kill_request();
+        let request = self.borrow().posix_process.kill_request();
         request.send().promise.await?;
         Ok(())
     }
@@ -81,7 +83,7 @@ impl process::Server<cap_pointer, module_error::Owned<any_pointer>>
         results
             .get()
             .init_api()
-            .set_as_capability(self.borrow_mut().api.pipeline.get_api().as_cap());
+            .set_as_capability(self.borrow().api.pipeline.get_api().as_cap());
         Ok(())
     }
 
@@ -93,7 +95,7 @@ impl process::Server<cap_pointer, module_error::Owned<any_pointer>>
         let span = tracing::trace_span!("posix_module_process");
         let _enter = span.enter();
         tracing::trace!("join()");
-        let request = self.borrow_mut().posix_process.join_request();
+        let request = self.borrow().posix_process.join_request();
         let posix_err = request.send().promise.await?;
         let builder = results.get().init_result();
         builder
@@ -141,6 +143,7 @@ impl
 
         prog_args.set_stdout(capnp_rpc::new_client(stdout.clone()));
         prog_args.set_stderr(capnp_rpc::new_client(stderr.clone()));
+
         match request.send().promise.await {
             Ok(h) => {
                 let process = h.get()?.get_result()?;
@@ -268,6 +271,7 @@ impl
                                 api,
                                 debug_name: None,
                                 pause: send,
+                                //stderr,
                             }))
                         });
 

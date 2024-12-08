@@ -18,9 +18,11 @@ use eyre::WrapErr;
 use futures_util::stream::FuturesUnordered;
 use futures_util::FutureExt;
 use std::future::Future;
+use std::io::Write;
 use std::pin::Pin;
 use std::time::Duration;
 use std::{cell::RefCell, collections::HashMap, path::Path, rc::Rc};
+use tokio::io::AsyncReadExt;
 use tokio::task::JoinHandle;
 
 pub trait CapnpResult<T> {
@@ -165,6 +167,7 @@ impl Keystone {
         let config = message.get_root_as_reader::<keystone_config::Reader>()?;
         let modules = config.get_modules()?;
         let mut target = None;
+        let default_log = Self::default_log_env(&config);
         for s in modules.iter() {
             let id = instance.get_id(s)?;
             if s.get_name()?.to_str()? == module.as_ref() {
@@ -172,7 +175,13 @@ impl Keystone {
             } else {
                 rpc_systems.push(
                     instance
-                        .init_module(id, s, &std::env::current_dir()?, config.get_cap_table()?)
+                        .init_module(
+                            id,
+                            s,
+                            &std::env::current_dir()?,
+                            config.get_cap_table()?,
+                            default_log.to_string(),
+                        )
                         .await?,
                 );
             }
@@ -393,10 +402,11 @@ impl Keystone {
         dir: &Path,
         module_process_set: Rc<RefCell<ModuleProcessCapSet>>,
         process_set: Rc<RefCell<crate::posix_process::ProcessCapSet>>,
+        log_filter: String,
     ) -> Result<SpawnProgram> {
         let path = dir.join(Path::new(config.get_path()?.to_str()?));
         let spawn_process_server =
-            PosixProgramImpl::new_std(std::fs::File::open(&path)?, process_set.clone());
+            PosixProgramImpl::new_std(std::fs::File::open(&path)?, process_set.clone(), log_filter);
 
         let spawn_process_client: crate::posix_process::PosixProgramClient =
             capnp_rpc::new_client(spawn_process_server);
@@ -558,6 +568,7 @@ impl Keystone {
         config: keystone_config::module_config::Reader<'_, any_pointer>,
         config_dir: &Path,
         cap_table: capnp::struct_list::Reader<'_, cap_expr::Owned>,
+        log_filter: String,
     ) -> Result<Pin<Box<dyn Future<Output = Result<()>>>>> {
         self.modules
             .get_mut(&id)
@@ -576,6 +587,7 @@ impl Keystone {
             config_dir,
             self.module_process_set.clone(),
             self.process_set.clone(),
+            log_filter,
         )
         .await
         else {
@@ -683,17 +695,35 @@ impl Keystone {
             .get_string_index(config.get_name()?.to_str()?)? as u64)
     }
 
+    fn default_log_env(config: &keystone_config::Reader<'_>) -> &'static str {
+        match config
+            .get_default_log()
+            .unwrap_or(crate::keystone_capnp::LogLevel::Warning)
+        {
+            crate::keystone_capnp::LogLevel::None => "",
+            crate::keystone_capnp::LogLevel::Trace => "trace",
+            crate::keystone_capnp::LogLevel::Debug => "debug",
+            crate::keystone_capnp::LogLevel::Info => "info",
+            crate::keystone_capnp::LogLevel::Warning => "warn",
+            crate::keystone_capnp::LogLevel::Error => "error",
+        }
+    }
+
     pub async fn init(
         &mut self,
         dir: &Path,
         config: keystone_config::Reader<'_>,
         rpc_systems: &RpcSystemSet,
     ) -> Result<()> {
+        let default_log = Self::default_log_env(&config);
         let modules = config.get_modules()?;
         for s in modules.iter() {
             let id = self.get_id(s)?;
 
-            match self.init_module(id, s, dir, config.get_cap_table()?).await {
+            match self
+                .init_module(id, s, dir, config.get_cap_table()?, default_log.to_string())
+                .await
+            {
                 Ok(f) => rpc_systems.push(f),
                 Err(e) => tracing::error!("Module Start Failure: {}", e),
             }
@@ -707,6 +737,36 @@ impl Keystone {
 
         self.scheduler_thread = stage;
         Ok(())
+    }
+
+    pub fn reflect_to_stderr(&self, id: u64) -> Result<JoinHandle<Result<()>>> {
+        if let Some(m) = self.modules.get(&id) {
+            if let Some(client) = m.process.as_ref() {
+                if let Some(inner) = self
+                    .module_process_set
+                    .borrow()
+                    .get_local_server_of_resolved(client)
+                {
+                    /*let mut child_stderr = inner.server.borrow_mut().stderr.clone();
+
+                    return Ok(tokio::task::spawn_local(async move {
+                        let mut buf = [0u8; 1024];
+                        let mut stderr = std::io::stderr();
+                        loop {
+                            let len = child_stderr.read(&mut buf).await?;
+
+                            if len == 0 {
+                                break;
+                            }
+                            stderr.write_all(&buf[..len])?;
+                        }
+                        Ok::<(), eyre::Report>(())
+                    }));*/
+                }
+            }
+        }
+
+        return Err(eyre::eyre!("Invalid module or module not running"));
     }
 
     pub fn shutdown(&mut self) -> FuturesUnordered<impl Future<Output = Result<()>> + use<'_>> {

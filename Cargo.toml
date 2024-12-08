@@ -26,7 +26,7 @@ readme = "README.md"
 color-eyre = "0.6"
 eyre = "0.6"
 rand = { version = "0.8.5", features = ["std_rng"] }
-tracing-subscriber = { version = "0.3.18", features = ["time"] }
+tracing-subscriber = { version = "0.3.18", features = ["time", "env-filter"] }
 tracing = "0.1.40"
 tokio = { version = "1.40", features = [
   "net",

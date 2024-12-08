@@ -277,6 +277,19 @@ struct TuiModule {
     name: String,
     state: ModuleState,
     selected: Option<usize>,
+    trace: tracing::Level,
+}
+
+impl TuiModule {
+    fn rotate_trace(&self) -> tracing::Level {
+        match self.trace {
+            tracing::Level::TRACE => tracing::Level::DEBUG,
+            tracing::Level::DEBUG => tracing::Level::INFO,
+            tracing::Level::INFO => tracing::Level::WARN,
+            tracing::Level::WARN => tracing::Level::ERROR,
+            tracing::Level::ERROR => tracing::Level::TRACE,
+        }
+    }
 }
 
 struct TuiNetworkNode {
@@ -294,6 +307,14 @@ struct Tui<'a> {
     dir: &'a Path,
     config: keystone_config::Reader<'a>,
     list_state: ListState,
+}
+
+fn invert_style(selected: bool, style: ratatui::prelude::Style) -> ratatui::prelude::Style {
+    if selected {
+        style.add_modifier(ratatui::prelude::Modifier::REVERSED)
+    } else {
+        style
+    }
 }
 
 impl ratatui::widgets::Widget for &mut Tui<'_> {
@@ -560,7 +581,20 @@ impl ratatui::widgets::Widget for &mut Tui<'_> {
                 ]))
                 .render(header[3], buf);
 
-                Tabs::new(match module.state {
+                let actionbar = Layout::default()
+                    .direction(Direction::Horizontal)
+                    .constraints([
+                        Constraint::Length(10),
+                        Constraint::Min(15),
+                        Constraint::Length(18),
+                        Constraint::Length(13),
+                        Constraint::Min(5),
+                    ])
+                    .split(main[1]);
+
+                Paragraph::new("Commands: ").render(actionbar[0], buf);
+
+                let tabs = match module.state {
                     ModuleState::NotStarted
                     | ModuleState::Closed
                     | ModuleState::Aborted
@@ -583,11 +617,58 @@ impl ratatui::widgets::Widget for &mut Tui<'_> {
                         "Kill 🕱",
                         Style::new().red().bold(),
                     ))],
+                };
+                let count = tabs.len();
+
+                Tabs::new(tabs)
+                    .highlight_style(Style::new().black().on_white().bold())
+                    .divider(symbols::DOT)
+                    .select(module.selected)
+                    .render(actionbar[1], buf);
+
+                // TODO: not currently selectable
+                Paragraph::new(Span::styled(
+                    "[API Explorer]",
+                    Style::new().dark_gray().bold(),
+                ))
+                .render(actionbar[2], buf);
+
+                Paragraph::new("Trace Level: ").render(actionbar[3], buf);
+
+                let is_selected = if let Some(x) = module.selected.map(|s| s == (count + 0)) {
+                    x
+                } else {
+                    false
+                };
+
+                Paragraph::new(match module.trace {
+                    tracing::Level::TRACE => Span::styled(
+                        "[· TRACE]",
+                        invert_style(is_selected, Style::new().gray().bold()),
+                    ),
+                    tracing::Level::DEBUG => Span::styled(
+                        "[⁇ DEBUG]",
+                        invert_style(is_selected, Style::new().white().bold()),
+                    ),
+                    tracing::Level::INFO => Span::styled(
+                        "[🛈 INFO]",
+                        invert_style(is_selected, Style::new().blue().bold()),
+                    ),
+                    tracing::Level::WARN => Span::styled(
+                        "[❢ WARNING]",
+                        invert_style(is_selected, Style::new().yellow().bold()),
+                    ),
+                    tracing::Level::ERROR => Span::styled(
+                        "[🗙 ERROR]",
+                        invert_style(is_selected, Style::new().red().bold()),
+                    ),
                 })
-                .highlight_style(Style::new().black().on_white().bold())
-                .divider(symbols::DOT)
-                .select(module.selected)
-                .render(main[1], buf);
+                .render(actionbar[4], buf);
+
+                let block = Block::bordered()
+                    .border_set(border::PLAIN)
+                    .borders(Borders::BOTTOM);
+                block.render(main[2], buf);
             }
             TabPage::Network => {
                 let title = Line::from(" Network Status ".bold());
@@ -680,27 +761,38 @@ impl Tui<'_> {
                             | ModuleState::CloseFailure
                                 if m.selected.is_some() =>
                             {
-                                let s =
-                                    Self::find_module_config(&self.config, &self.instance, m.id)?;
-                                if let Err(t) = rpc_tx.send(
-                                    self.instance
-                                        .init_module(
+                                match m.selected.unwrap() {
+                                    0 => {
+                                        let s = Self::find_module_config(
+                                            &self.config,
+                                            &self.instance,
                                             m.id,
-                                            s,
-                                            self.dir,
-                                            self.config.get_cap_table()?,
-                                        )
-                                        .await?,
-                                ) {
-                                    tokio::try_join!(
-                                        self.instance
-                                            .modules
-                                            .get_mut(&m.id)
-                                            .unwrap()
-                                            .stop(self.instance.timeout),
-                                        t.0
-                                    )
-                                    .expect("Failed to recover from failed module start");
+                                        )?;
+
+                                        if let Err(t) = rpc_tx.send(
+                                            self.instance
+                                                .init_module(
+                                                    m.id,
+                                                    s,
+                                                    self.dir,
+                                                    self.config.get_cap_table()?,
+                                                    m.trace.as_str().to_ascii_lowercase(),
+                                                )
+                                                .await?,
+                                        ) {
+                                            tokio::try_join!(
+                                                self.instance
+                                                    .modules
+                                                    .get_mut(&m.id)
+                                                    .unwrap()
+                                                    .stop(self.instance.timeout),
+                                                t.0
+                                            )
+                                            .expect("Failed to recover from failed module start");
+                                        }
+                                    }
+                                    1 => m.trace = m.rotate_trace(),
+                                    _ => (),
                                 }
                             }
                             ModuleState::Initialized | ModuleState::Ready
@@ -719,6 +811,7 @@ impl Tui<'_> {
                                     }
                                     2 => {
                                         let id = m.id;
+                                        let log_state = m.trace.as_str().to_ascii_lowercase();
                                         if let Some(x) = self.instance.modules.get_mut(&id) {
                                             x.stop(self.instance.timeout).await?;
                                         }
@@ -734,6 +827,7 @@ impl Tui<'_> {
                                                     s,
                                                     self.dir,
                                                     self.config.get_cap_table()?,
+                                                    log_state,
                                                 )
                                                 .await?,
                                         ) {
@@ -748,6 +842,7 @@ impl Tui<'_> {
                                             .expect("Failed to recover from failed module start");
                                         }
                                     }
+                                    3 => m.trace = m.rotate_trace(),
                                     _ => (),
                                 }
                             }
@@ -765,6 +860,7 @@ impl Tui<'_> {
                                     }
                                     2 => {
                                         let id = m.id;
+                                        let log_state = m.trace.as_str().to_ascii_lowercase();
                                         if let Some(x) = self.instance.modules.get_mut(&id) {
                                             x.stop(self.instance.timeout).await?;
                                         }
@@ -780,6 +876,7 @@ impl Tui<'_> {
                                                     s,
                                                     self.dir,
                                                     self.config.get_cap_table()?,
+                                                    log_state,
                                                 )
                                                 .await?,
                                         ) {
@@ -794,12 +891,19 @@ impl Tui<'_> {
                                             .expect("Failed to recover from failed module start");
                                         }
                                     }
+                                    3 => m.trace = m.rotate_trace(),
                                     _ => (),
                                 }
                             }
-                            ModuleState::Closing => {
-                                if let Some(x) = self.instance.modules.get_mut(&m.id) {
-                                    x.kill().await;
+                            ModuleState::Closing if m.selected.is_some() => {
+                                match m.selected.unwrap() {
+                                    0 => {
+                                        if let Some(x) = self.instance.modules.get_mut(&m.id) {
+                                            x.kill().await;
+                                        }
+                                    }
+                                    1 => m.trace = m.rotate_trace(),
+                                    _ => (),
                                 }
                             }
 
@@ -826,10 +930,11 @@ impl Tui<'_> {
                 TabPage::Module if self.module.is_some() => {
                     if let Some(x) = self.module.as_ref() {
                         if let Some(m) = self.modules.get_mut(x) {
-                            m.selected = m
-                                .selected
-                                .map(|x| x.checked_sub(1).unwrap_or(999))
-                                .or(Some(999));
+                            m.selected = if let Some(x) = m.selected {
+                                x.checked_sub(1)
+                            } else {
+                                None
+                            };
                         }
                     }
                 }
@@ -840,6 +945,20 @@ impl Tui<'_> {
                     if let Some(x) = self.module.as_ref() {
                         if let Some(m) = self.modules.get_mut(x) {
                             m.selected = m.selected.map(|x| x + 1).or(Some(0));
+                            m.selected = Some(std::cmp::min(
+                                m.selected.unwrap(),
+                                match m.state {
+                                    ModuleState::NotStarted
+                                    | ModuleState::Closed
+                                    | ModuleState::Aborted
+                                    | ModuleState::StartFailure
+                                    | ModuleState::CloseFailure
+                                    | ModuleState::Closing => 1,
+                                    ModuleState::Initialized
+                                    | ModuleState::Ready
+                                    | ModuleState::Paused => 3,
+                                },
+                            ))
                         }
                     }
                 }
@@ -978,6 +1097,7 @@ async fn event_loop<B: ratatui::prelude::Backend>(
                                 name: m.name.clone(),
                                 state: m.state,
                                 selected: None,
+                                trace: tracing::Level::WARN,
                             },
                         );
                     }

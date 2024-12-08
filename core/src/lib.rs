@@ -43,18 +43,6 @@ use tracing_subscriber::filter::LevelFilter;
 
 include!(concat!(env!("OUT_DIR"), "/capnproto.rs"));
 
-impl From<keystone_capnp::LogLevel> for tracing::Level {
-    fn from(val: keystone_capnp::LogLevel) -> Self {
-        match val {
-            keystone_capnp::LogLevel::Trace => tracing::Level::TRACE,
-            keystone_capnp::LogLevel::Debug => tracing::Level::DEBUG,
-            keystone_capnp::LogLevel::Info => tracing::Level::INFO,
-            keystone_capnp::LogLevel::Warning => tracing::Level::WARN,
-            keystone_capnp::LogLevel::Error => tracing::Level::ERROR,
-        }
-    }
-}
-
 pub fn fmt(filter: impl Into<LevelFilter>) -> impl Into<tracing::Dispatch> {
     tracing_subscriber::fmt()
         .with_max_level(filter)
@@ -211,6 +199,16 @@ pub async fn main<
 >(
     future: impl Future,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    if std::env::var("KEYSTONE_MODULE_LOG").is_ok() {
+        tracing_subscriber::fmt()
+            .with_env_filter(tracing_subscriber::EnvFilter::from_env(
+                "KEYSTONE_MODULE_LOG",
+            ))
+            .with_writer(std::io::stderr)
+            .with_ansi(true)
+            .init();
+    }
+
     tokio::task::LocalSet::new()
         .run_until(async move {
             future.await;
@@ -247,7 +245,7 @@ pub fn build_temp_config(
     format!(
         r#"
     database = "{escaped}"
-    defaultLog = "debug"
+    defaultLog = "trace"
     caplog = {{ trieFile = "{trie_escaped}", dataPrefix = "{prefix_escaped}" }}"#
     )
 }
@@ -267,6 +265,11 @@ pub async fn test_create_keystone(
             &mut rpc_systems,
         )
         .await?;
+
+    //let keys = instance.modules.keys();
+    //for k in keys {
+    //    let _ = instance.reflect_to_stderr(*k)?;
+    //}
 
     Ok((instance, rpc_systems))
 }

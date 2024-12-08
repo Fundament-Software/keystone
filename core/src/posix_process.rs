@@ -4,6 +4,7 @@ use crate::keystone::CapnpResult;
 pub fn spawn_process_native<'i, I>(
     source: &cap_std::fs::File,
     args: I,
+    log_filter: &str,
 ) -> capnp::Result<tokio::process::Child>
 where
     I: IntoIterator<Item = capnp::Result<&'i str>>,
@@ -24,19 +25,24 @@ where
     let path = format!("/proc/{}/fd/{}", std::process::id(), fd);
 
     // We can't called fexecve without reimplementing the entire process handling logic, so we just do this
-    Command::new(path)
-        .args(argv)
+    let mut cmd = Command::new(path);
+    cmd.args(argv)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .stdin(Stdio::piped())
-        .spawn()
-        .to_capnp()
+        .stdin(Stdio::piped());
+
+    if !log_filter.is_empty() {
+        cmd.env("KEYSTONE_MODULE_LOG", log_filter);
+    }
+
+    cmd.spawn().to_capnp()
 }
 
 #[cfg(windows)]
 pub fn spawn_process_native<'i, I>(
     source: &cap_std::fs::File,
     args: I,
+    log_filter: &str,
 ) -> capnp::Result<tokio::process::Child>
 where
     I: IntoIterator<Item = capnp::Result<&'i str>>,
@@ -61,13 +67,17 @@ where
     };
 
     // Note: it is actually possible to call libc::wexecve on windows, but this is unreliable.
-    Command::new(program)
-        .args(argv)
+    let mut cmd = Command::new(program);
+    cmd.args(argv)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .stdin(Stdio::piped())
-        .spawn()
-        .to_capnp()
+        .stdin(Stdio::piped());
+
+    if !log_filter.is_empty() {
+        cmd.env("KEYSTONE_MODULE_LOG", log_filter);
+    }
+
+    cmd.spawn().to_capnp()
 }
 
 use crate::byte_stream_capnp::{
@@ -159,19 +169,18 @@ impl PosixProcessImpl {
     }
 
     /// Creates a new instance of `PosixProcessImpl` by spawning a child process.
-    ///
-    /// **Warning**: This function uses [spawn_local] and must be called in a LocalSet context.
     fn spawn_process<'i, I>(
         program: &cap_std::fs::File,
         args_iter: I,
+        log_filter: &str,
         stdout_stream: ByteStreamClient,
-        _stderr_stream: ByteStreamClient,
+        stderr_stream: ByteStreamClient,
     ) -> Result<PosixProcessImpl>
     where
         I: IntoIterator<Item = capnp::Result<&'i str>>,
     {
         // Create the child process
-        let mut child = spawn_process_native(program, args_iter)?;
+        let mut child = spawn_process_native(program, args_iter, log_filter)?;
 
         // Stealing stdin also prevents the `child.wait()` call from closing it.
         let stdin = child.stdin.take();
@@ -192,17 +201,18 @@ impl PosixProcessImpl {
             }
         });
 
-        // TODO: Technically we should be forwarding the child's stderr so it can be redirected,
-        // but we don't use that feature right now, so instead we dump it directly to our stderr.
-        let stderr_token = cancellation_token.child_token();
+        /*let stderr_token = cancellation_token.child_token();
         let mut child_stderr = child.stderr.take().unwrap();
-        /*tasks.spawn_local(async move {
+        tasks.spawn_local(async move {
             tokio::select! {
                 _ = stderr_token.cancelled() => Ok(None),
-                result = stdout_stream.copy(&mut child_stderr) => result.map(|i| i as i64).map(Some)
+                result = stderr_stream.copy(&mut child_stderr) => result.map(|_| None)
             }
         });*/
+
         let mut stderr = std::io::stderr();
+        let stderr_token = cancellation_token.child_token();
+        let mut child_stderr = child.stderr.take().unwrap();
         tasks.spawn_local(async move {
             tokio::select! {
                 _ = stderr_token.cancelled() => Ok(None),
@@ -335,24 +345,32 @@ impl process::Server<ByteStream, PosixError> for PosixProcessImpl {
 pub struct PosixProgramImpl {
     program: File,
     process_set: Rc<RefCell<crate::posix_process::ProcessCapSet>>,
+    log_filter: String,
 }
 
 impl PosixProgramImpl {
-    pub fn new(handle: u64, process_set: Rc<RefCell<crate::posix_process::ProcessCapSet>>) -> Self {
+    pub fn new(
+        handle: u64,
+        process_set: Rc<RefCell<crate::posix_process::ProcessCapSet>>,
+        log_filter: String,
+    ) -> Self {
         unsafe {
             Self {
                 program: File::from_raw_filelike(handle as RawFilelike),
                 process_set,
+                log_filter,
             }
         }
     }
     pub fn new_std(
         file: std::fs::File,
         process_set: Rc<RefCell<crate::posix_process::ProcessCapSet>>,
+        log_filter: String,
     ) -> Self {
         Self {
             program: cap_std::fs::File::from_std(file),
             process_set,
+            log_filter,
         }
     }
 }
@@ -374,7 +392,13 @@ impl program::Server<PosixArgs, ByteStream, PosixError> for PosixProgramImpl {
             Err(e) => Err(e),
         });
 
-        match PosixProcessImpl::spawn_process(&self.program, argv_iter, stdout, stderr) {
+        match PosixProcessImpl::spawn_process(
+            &self.program,
+            argv_iter,
+            &self.log_filter,
+            stdout,
+            stderr,
+        ) {
             Err(e) => Err(capnp::Error::failed(e.to_string())),
             Ok(process_impl) => {
                 let process_client: PosixProcessClient =
@@ -385,82 +409,3 @@ impl program::Server<PosixArgs, ByteStream, PosixError> for PosixProgramImpl {
         }
     }
 }
-/*
-#[cfg(test)]
-mod tests {
-    use super::Rc;
-    use super::RefCell;
-    use super::{PosixProgramClient, PosixProgramImpl};
-    use crate::byte_stream::ByteStreamImpl;
-    use cap_std::io_lifetimes::{FromFilelike, IntoFilelike};
-    use std::fs::File;
-    use tokio::task;
-
-    #[tokio::test]
-    async fn test_posix_process_creation() {
-        let spawn_process_server = PosixProgramImpl {
-            #[cfg(windows)]
-            program: cap_std::fs::File::from_filelike(
-                File::open("C:/Windows/System32/cmd.exe")
-                    .unwrap()
-                    .into_filelike(),
-            ),
-            #[cfg(not(windows))]
-            program: cap_std::fs::File::from_filelike(
-                File::open("/bin/sh").unwrap().into_filelike(),
-            ),
-            process_set: Rc::new(RefCell::new(crate::posix_process::ProcessCapSet::new())),
-        };
-        let spawn_process_client: PosixProgramClient = capnp_rpc::new_client(spawn_process_server);
-
-        let e = task::LocalSet::new()
-            .run_until(async {
-                // Setting up stuff needed for RPC
-                let stdout_server = ByteStreamImpl::new(|bytes| {
-                    println!("remote stdout: {}", std::str::from_utf8(bytes).unwrap());
-                    std::future::ready(Ok(()))
-                });
-                let stdout_client: super::ByteStreamClient = capnp_rpc::new_client(stdout_server);
-                let stderr_server = ByteStreamImpl::new(|bytes| {
-                    println!("remote stderr: {}", std::str::from_utf8(bytes).unwrap());
-                    std::future::ready(Ok(()))
-                });
-                let stderr_client: super::ByteStreamClient = capnp_rpc::new_client(stderr_server);
-
-                let mut spawn_request = spawn_process_client.spawn_request();
-                let params_builder = spawn_request.get();
-                let mut args_builder = params_builder.init_args();
-                args_builder.set_stdout(stdout_client);
-                args_builder.set_stderr(stderr_client);
-                let mut list_builder = args_builder.init_args(2);
-
-                #[cfg(windows)]
-                list_builder.set(0, "/C".into());
-                #[cfg(not(windows))]
-                list_builder.set(0, "-c".into());
-
-                #[cfg(windows)]
-                list_builder.set(1, r#"echo "Hello World!" & exit 2"#.into());
-                #[cfg(not(windows))]
-                list_builder.set(1, r#"echo "Hello World!"; exit 2"#.into());
-
-                let response = spawn_request.send().promise.await?;
-                let process_client = response.get()?.get_result()?;
-
-                let join_response = process_client.join_request().send().promise.await?;
-                let error_reader = join_response.get()?.get_result()?;
-
-                let error_code = error_reader.get_error_code();
-                assert_eq!(error_code, 2);
-
-                let error_message = error_reader.get_error_message()?;
-                assert!(error_message.is_empty() == true);
-
-                Ok::<(), eyre::Error>(())
-            })
-            .await;
-
-        e.unwrap();
-    }
-}
-*/

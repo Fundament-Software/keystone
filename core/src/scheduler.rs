@@ -864,12 +864,6 @@ mod tests {
         mpsc::Sender<i64>,
         Rc<restore::ServerDispatch<TestModule, any_pointer>>,
     )> {
-        //tracing_subscriber::fmt()
-        //    .with_max_level(tracing::Level::DEBUG)
-        //    .with_writer(std::io::stderr)
-        //    .with_ansi(true)
-        //    .init();
-
         let db = crate::database::open_database(
             db_path.to_path_buf(),
             SqliteDatabase::new_connection,

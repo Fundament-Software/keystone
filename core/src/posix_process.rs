@@ -195,42 +195,23 @@ impl PosixProcessImpl {
         let stdout_token = cancellation_token.child_token();
         // Create the tasks to read stdout and stderr to the byte stream
         tasks.spawn_local(async move {
-            tokio::select! {
+            let r = tokio::select! {
                 _ = stdout_token.cancelled() => Ok(None),
                 result = stdout_stream.copy(&mut child_stdout) => result.map(|_| None)
-            }
+            };
+            let _ = stdout_stream.end_request().send().promise.await;
+            r
         });
 
-        /*let stderr_token = cancellation_token.child_token();
-        let mut child_stderr = child.stderr.take().unwrap();
-        tasks.spawn_local(async move {
-            tokio::select! {
-                _ = stderr_token.cancelled() => Ok(None),
-                result = stderr_stream.copy(&mut child_stderr) => result.map(|_| None)
-            }
-        });*/
-
-        let mut stderr = std::io::stderr();
         let stderr_token = cancellation_token.child_token();
         let mut child_stderr = child.stderr.take().unwrap();
         tasks.spawn_local(async move {
-            tokio::select! {
-                _ = stderr_token.cancelled() => Ok(None),
-                result = async {
-                    let mut count = 0;
-                    let mut buf = [0u8; 1024];
-                    loop {
-                        let len = child_stderr.read(&mut buf).await?;
-
-                        if len == 0 {
-                            break;
-                        }
-                        stderr.write_all(&buf[..len])?;
-                        count += len;
-                      }
-                      Ok::<usize, eyre::Report>(count)
-                } => result.map(|_| None)
-            }
+            let r = tokio::select! {
+                _ = stderr_token.cancelled() => Ok(Some(ExitStatus::default())),
+                result = stderr_stream.copy(&mut child_stderr) => result.map(|_| None)
+            };
+            let _ = stderr_stream.end_request().send().promise.await;
+            r
         });
 
         tasks.spawn_local(async move {

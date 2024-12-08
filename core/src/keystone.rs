@@ -1,3 +1,4 @@
+use crate::byte_stream::ByteStreamBufferImpl;
 use crate::cap_replacement::CapReplacement;
 use crate::cell::SimpleCellImpl;
 use crate::database::DatabaseExt;
@@ -181,6 +182,7 @@ impl Keystone {
                             &std::env::current_dir()?,
                             config.get_cap_table()?,
                             default_log.to_string(),
+                            Self::passthrough_stderr,
                         )
                         .await?,
                 );
@@ -377,16 +379,21 @@ impl Keystone {
     pub fn log_capnp_params(params: &capnp::dynamic_value::Reader<'_>) {
         tracing::event!(tracing::Level::TRACE, parameters = format!("{:?}", params));
     }
-    pub async fn wrap_posix(
+    pub async fn wrap_posix<
+        Fut: std::future::Future<Output = eyre::Result<()>> + 'static,
+        F: (Fn(ByteStreamBufferImpl) -> Fut) + 'static + Clone,
+    >(
         host: crate::keystone_capnp::host::Client<any_pointer>,
         client: crate::posix_process::PosixProgramClient,
         module_process_set: Rc<RefCell<ModuleProcessCapSet>>,
         process_set: Rc<RefCell<crate::posix_process::ProcessCapSet>>,
+        sink: F,
     ) -> Result<SpawnProgram> {
         let wrapper_server = PosixModuleImpl {
             host,
             module_process_set: module_process_set,
             process_set: process_set,
+            stderr_sink: sink,
         };
         let wrapper_client: posix_module::Client = capnp_rpc::new_client(wrapper_server);
 
@@ -396,13 +403,17 @@ impl Keystone {
         Ok(wrap_response.get()?.get_result()?)
     }
 
-    pub async fn posix_spawn(
+    pub async fn posix_spawn<
+        Fut: std::future::Future<Output = eyre::Result<()>> + 'static,
+        F: (Fn(ByteStreamBufferImpl) -> Fut) + 'static + Clone,
+    >(
         host: crate::keystone_capnp::host::Client<any_pointer>,
         config: keystone_config::module_config::Reader<'_, any_pointer>,
         dir: &Path,
         module_process_set: Rc<RefCell<ModuleProcessCapSet>>,
         process_set: Rc<RefCell<crate::posix_process::ProcessCapSet>>,
         log_filter: String,
+        sink: F,
     ) -> Result<SpawnProgram> {
         let path = dir.join(Path::new(config.get_path()?.to_str()?));
         let spawn_process_server =
@@ -411,7 +422,14 @@ impl Keystone {
         let spawn_process_client: crate::posix_process::PosixProgramClient =
             capnp_rpc::new_client(spawn_process_server);
 
-        Self::wrap_posix(host, spawn_process_client, module_process_set, process_set).await
+        Self::wrap_posix(
+            host,
+            spawn_process_client,
+            module_process_set,
+            process_set,
+            sink,
+        )
+        .await
     }
 
     #[inline]
@@ -562,13 +580,17 @@ impl Keystone {
         Err(e.into())
     }
 
-    pub async fn init_module(
+    pub async fn init_module<
+        Fut: std::future::Future<Output = eyre::Result<()>> + 'static,
+        F: (Fn(ByteStreamBufferImpl) -> Fut) + 'static + Clone,
+    >(
         &mut self,
         id: u64,
         config: keystone_config::module_config::Reader<'_, any_pointer>,
         config_dir: &Path,
         cap_table: capnp::struct_list::Reader<'_, cap_expr::Owned>,
         log_filter: String,
+        sink: F,
     ) -> Result<Pin<Box<dyn Future<Output = Result<()>>>>> {
         self.modules
             .get_mut(&id)
@@ -588,6 +610,7 @@ impl Keystone {
             self.module_process_set.clone(),
             self.process_set.clone(),
             log_filter,
+            sink,
         )
         .await
         else {
@@ -709,11 +732,15 @@ impl Keystone {
         }
     }
 
-    pub async fn init(
+    pub async fn init<
+        Fut: std::future::Future<Output = eyre::Result<()>> + 'static,
+        F: (Fn(ByteStreamBufferImpl) -> Fut) + 'static + Clone,
+    >(
         &mut self,
         dir: &Path,
         config: keystone_config::Reader<'_>,
         rpc_systems: &RpcSystemSet,
+        sink: F,
     ) -> Result<()> {
         let default_log = Self::default_log_env(&config);
         let modules = config.get_modules()?;
@@ -721,7 +748,14 @@ impl Keystone {
             let id = self.get_id(s)?;
 
             match self
-                .init_module(id, s, dir, config.get_cap_table()?, default_log.to_string())
+                .init_module(
+                    id,
+                    s,
+                    dir,
+                    config.get_cap_table()?,
+                    default_log.to_string(),
+                    sink.clone(),
+                )
                 .await
             {
                 Ok(f) => rpc_systems.push(f),
@@ -739,34 +773,20 @@ impl Keystone {
         Ok(())
     }
 
-    pub fn reflect_to_stderr(&self, id: u64) -> Result<JoinHandle<Result<()>>> {
-        if let Some(m) = self.modules.get(&id) {
-            if let Some(client) = m.process.as_ref() {
-                if let Some(inner) = self
-                    .module_process_set
-                    .borrow()
-                    .get_local_server_of_resolved(client)
-                {
-                    /*let mut child_stderr = inner.server.borrow_mut().stderr.clone();
+    pub async fn passthrough_stderr(
+        mut input: crate::byte_stream::ByteStreamBufferImpl,
+    ) -> eyre::Result<()> {
+        let mut buf = [0u8; 1024];
+        let mut output = std::io::stderr();
+        loop {
+            let len = input.read(&mut buf).await?;
 
-                    return Ok(tokio::task::spawn_local(async move {
-                        let mut buf = [0u8; 1024];
-                        let mut stderr = std::io::stderr();
-                        loop {
-                            let len = child_stderr.read(&mut buf).await?;
-
-                            if len == 0 {
-                                break;
-                            }
-                            stderr.write_all(&buf[..len])?;
-                        }
-                        Ok::<(), eyre::Report>(())
-                    }));*/
-                }
+            if len == 0 {
+                break;
             }
+            output.write_all(&buf[..len])?;
         }
-
-        return Err(eyre::eyre!("Invalid module or module not running"));
+        Ok(())
     }
 
     pub fn shutdown(&mut self) -> FuturesUnordered<impl Future<Output = Result<()>> + use<'_>> {

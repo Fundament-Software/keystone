@@ -213,7 +213,7 @@ fn keystone_startup(
 
         tokio::join!(
             drive_stream_with_error("Error during shutdown!", &mut shutdown),
-            drive_stream_with_error("Error during shutdown!", &mut rpc_systems)
+            drive_stream_with_error("Error during shutdown RPC!", &mut rpc_systems)
         );
 
         Ok::<(), eyre::Report>(())

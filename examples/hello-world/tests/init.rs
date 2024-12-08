@@ -81,6 +81,7 @@ fn test_hello_world_empty() -> eyre::Result<()> {
                         .get_root_as_reader::<keystone::keystone_capnp::keystone_config::Reader>(
                         )?,
                     &rpc_systems,
+                    keystone::Keystone::passthrough_stderr,
                 )
                 .await?;
 
@@ -89,7 +90,7 @@ fn test_hello_world_empty() -> eyre::Result<()> {
 
             tokio::join!(
                 drive_stream_with_error("Error during shutdown!", &mut shutdown),
-                drive_stream_with_error("Error during shutdown!", &mut rpc_systems)
+                drive_stream_with_error("Error during shutdown RPC!", &mut rpc_systems)
             );
             Ok::<(), eyre::Report>(())
         },

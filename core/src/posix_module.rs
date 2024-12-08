@@ -105,9 +105,12 @@ impl process::Server<cap_pointer, module_error::Owned<any_pointer>>
     }
 }
 
-pub struct PosixModuleProgramImpl {
+pub struct PosixModuleProgramImpl<
+    Fut: std::future::Future<Output = eyre::Result<()>> + 'static,
+    F: Fn(ByteStreamBufferImpl) -> Fut + Clone,
+> {
     posix_program: program::Client<PosixArgs, ByteStream, PosixError>,
-    module: PosixModuleImpl,
+    module: PosixModuleImpl<Fut, F>,
 }
 
 // Flattens nested results into a capnp::Result
@@ -122,12 +125,15 @@ fn flatten_to_capnp<T, E: ToString, E2: ToString>(
 }
 
 #[capnproto_rpc(program)]
-impl
+impl<
+        Fut: std::future::Future<Output = eyre::Result<()>> + 'static,
+        F: Fn(ByteStreamBufferImpl) -> Fut + Clone,
+    >
     program::Server<
         posix_module_args::Owned<any_pointer>,
         cap_pointer,
         module_error::Owned<any_pointer>,
-    > for PosixModuleProgramImpl
+    > for PosixModuleProgramImpl<Fut, F>
 {
     async fn spawn(&self, args: Reader) -> Result<(), ::capnp::Error> {
         let span = tracing::span!(tracing::Level::DEBUG, "posix_program::spawn");
@@ -186,7 +192,11 @@ impl
                             )
                         };
 
-                        let mut process_handle = tokio::task::spawn_local(process_future);
+                        let sink = (self.module.stderr_sink)(stderr.clone());
+
+                        let mut process_handle = tokio::task::spawn_local(async move {
+                            tokio::try_join!(process_future, sink).map(|(f, _)| f)
+                        });
 
                         let (send, mut pause_recv) = mpsc::channel::<bool>(1);
 
@@ -271,7 +281,6 @@ impl
                                 api,
                                 debug_name: None,
                                 pause: send,
-                                //stderr,
                             }))
                         });
 
@@ -291,19 +300,41 @@ impl
     }
 }
 
-#[derive(Clone)]
-pub struct PosixModuleImpl {
+pub struct PosixModuleImpl<
+    Fut: std::future::Future<Output = eyre::Result<()>> + 'static,
+    F: (Fn(ByteStreamBufferImpl) -> Fut) + Clone,
+> {
     pub host: crate::keystone_capnp::host::Client<any_pointer>,
     pub module_process_set: Rc<RefCell<ModuleProcessCapSet>>,
     pub process_set: Rc<RefCell<crate::posix_process::ProcessCapSet>>,
+    pub stderr_sink: F,
+}
+
+impl<
+        Fut: std::future::Future<Output = eyre::Result<()>> + 'static,
+        F: (Fn(ByteStreamBufferImpl) -> Fut) + Clone,
+    > Clone for PosixModuleImpl<Fut, F>
+{
+    fn clone(&self) -> Self {
+        Self {
+            host: self.host.clone(),
+            module_process_set: self.module_process_set.clone(),
+            process_set: self.process_set.clone(),
+            stderr_sink: self.stderr_sink.clone(),
+        }
+    }
 }
 
 #[capnproto_rpc(posix_module)]
-impl posix_module::Server for PosixModuleImpl {
+impl<
+        Fut: std::future::Future<Output = eyre::Result<()>> + 'static,
+        F: (Fn(ByteStreamBufferImpl) -> Fut) + 'static + Clone,
+    > posix_module::Server for PosixModuleImpl<Fut, F>
+{
     async fn wrap(&self, prog: Client) {
         let span = tracing::span!(tracing::Level::DEBUG, "posix_module::wrap");
         let _enter = span.enter();
-        let program = PosixModuleProgramImpl {
+        let program = PosixModuleProgramImpl::<Fut, F> {
             posix_program: prog,
             module: self.clone(),
         };
@@ -316,206 +347,3 @@ impl posix_module::Server for PosixModuleImpl {
         Ok(())
     }
 }
-/*
-#[cfg(test)]
-mod tests {
-    use super::{any_pointer, PosixModuleImpl};
-    use crate::byte_stream::ByteStreamBufferImpl;
-    use crate::byte_stream::ByteStreamImpl;
-    use crate::keystone::CellCapSet;
-    use crate::posix_process::PosixProgramImpl;
-    use cap_std::io_lifetimes::{FromFilelike, IntoFilelike};
-    use std::cell::RefCell;
-    use std::fs::File;
-    use std::rc::Rc;
-    use tempfile::NamedTempFile;
-    use tokio::io::AsyncWriteExt;
-    use tokio::task;
-    use tokio_util::sync::CancellationToken;
-
-    #[tokio::test]
-    async fn test_raw_pipes() {
-        let spawn_process_server = cap_std::fs::File::from_filelike(
-            File::open(crate::keystone::get_binary_path("hello-world-module"))
-                .unwrap()
-                .into_filelike(),
-        );
-        let temp_db = NamedTempFile::new().unwrap().into_temp_path();
-
-        let args: Vec<Result<&str, ::capnp::Error>> = Vec::new();
-        let mut child =
-            crate::posix_process::spawn_process_native(&spawn_process_server, args.into_iter())
-                .unwrap();
-
-        let stdinref = Rc::new(RefCell::new(child.stdin.take().unwrap()));
-
-        let stdin_stream_server = ByteStreamImpl::new(move |bytes| {
-            let this_inner = stdinref.clone();
-            let owned_bytes = bytes.to_owned();
-            async move {
-                let mut stdin = this_inner.borrow_mut();
-                match stdin.write_all(&owned_bytes).await {
-                    Ok(_) => stdin
-                        .flush()
-                        .await
-                        .to_capnp(),
-                    Err(e) => Err(capnp::Error::failed(e.to_string())),
-                }
-            }
-        });
-
-        let stdinclient =
-            crate::byte_stream::ClientWriter::new(capnp_rpc::new_client(stdin_stream_server));
-
-        let cancellation_token = CancellationToken::new();
-
-        let stdoutbuf = ByteStreamBufferImpl::new();
-        let stdoutclient: crate::byte_stream_capnp::byte_stream::Client =
-            capnp_rpc::new_client(stdoutbuf.clone());
-
-        let mut stdout = child.stdout.take().unwrap();
-
-        let network = capnp_rpc::twoparty::VatNetwork::new(
-            stdoutbuf,   // read from the output stream of the process
-            stdinclient, // write into the input stream of the process
-            capnp_rpc::rpc_twoparty_capnp::Side::Client,
-            Default::default(),
-        );
-
-        let db: crate::sqlite::SqliteDatabase = crate::database::Manager::open_database(
-            std::path::Path::new(temp_db.as_os_str()),
-            crate::database::OpenOptions::Create,
-        )
-        .unwrap();
-
-        let keystone_client: crate::keystone_capnp::host::Client<any_pointer> =
-            capnp_rpc::new_client(crate::host::HostImpl::new(
-                0,
-                Rc::new(RefCell::new(db)),
-                Rc::new(RefCell::new(CellCapSet::new())),
-            ));
-        let mut rpc_system =
-            capnp_rpc::RpcSystem::new(Box::new(network), Some(keystone_client.clone().client));
-
-        let _ = rpc_system.get_disconnector();
-
-        task::LocalSet::new()
-            .run_until(async {
-                let bootstrap: crate::module_capnp::module_start::Client<
-                    hello_world::hello_world_capnp::config::Owned,
-                    hello_world::hello_world_capnp::root::Owned,
-                > = rpc_system.bootstrap(capnp_rpc::rpc_twoparty_capnp::Side::Server);
-
-                tokio::task::spawn_local(async move {
-                    tokio::select! {
-                        _ = cancellation_token.cancelled() => Ok(None),
-                        result = stdoutclient.copy(&mut stdout) => result.map(Some)
-                    }
-                });
-
-                tokio::task::spawn_local(rpc_system);
-
-                let start_request = bootstrap.start_request();
-                //start_request.get().set_config()
-                let root_response = start_request.send().promise.await?;
-                let hello_world = root_response.get()?.get_api()?;
-
-                let mut request = hello_world.say_hello_request();
-                request.get().init_request().set_name("Keystone".into());
-
-                let reply = request.send().promise.await?;
-                let msg = reply.get()?.get_reply()?.get_message()?;
-
-                println!("Got reply! {}", msg.to_string()?);
-
-                Ok::<(), eyre::Error>(())
-            })
-            .await
-            .unwrap();
-    }
-
-    #[tokio::test]
-    async fn test_process_creation() {
-        let process_set = Rc::new(RefCell::new(crate::posix_process::ProcessCapSet::new()));
-        let spawn_process_server = PosixProgramImpl::new_std(
-            File::open(crate::keystone::get_binary_path("hello-world-module")).unwrap(),
-            process_set.clone(),
-        );
-        let spawn_process_client: crate::posix_process::PosixProgramClient =
-            capnp_rpc::new_client(spawn_process_server);
-
-        let temp_db = NamedTempFile::new().unwrap().into_temp_path();
-        let db: crate::sqlite::SqliteDatabase = crate::database::Manager::open_database(
-            std::path::Path::new(temp_db.as_os_str()),
-            crate::database::OpenOptions::Create,
-        )
-        .unwrap();
-
-        let wrapper_server = PosixModuleImpl {
-            host: capnp_rpc::new_client(crate::host::HostImpl::new(
-                0,
-                Rc::new(RefCell::new(db)),
-                Rc::new(RefCell::new(CellCapSet::new())),
-            )),
-            module_process_set: Rc::new(RefCell::new(super::ModuleProcessCapSet::new())),
-            process_set: process_set,
-        };
-        let wrapper_client: super::posix_module::Client = capnp_rpc::new_client(wrapper_server);
-
-        let mut wrap_request = wrapper_client.wrap_request();
-        wrap_request.get().set_prog(spawn_process_client);
-        let wrap_response = wrap_request.send().promise.await.unwrap();
-        let wrapped_client = wrap_response.get().unwrap().get_result().unwrap();
-
-        let e = task::LocalSet::new()
-            .run_until(async {
-                let mut spawn_request = wrapped_client.spawn_request();
-                let builder = spawn_request.get();
-                let posix_args = builder.init_args();
-                let args = posix_args.init_config();
-                let mut config: hello_world::hello_world_capnp::config::Builder = args.init_as();
-                config.set_greeting("Hello".into());
-
-                // TODO: Pass in the hello_world structural config parameters
-
-                let promise = spawn_request.send().promise;
-                let response = promise.await?;
-                let process_client = response.get()?.get_result()?;
-
-                let api_response = process_client.get_api_request().send().promise.await?;
-                let hello_client: hello_world::hello_world_capnp::root::Client =
-                    api_response.get()?.get_api()?.get_as_capability()?;
-
-                let mut sayhello = hello_client.say_hello_request();
-                sayhello.get().init_request().set_name("Keystone".into());
-                let hello_response = sayhello.send().promise.await?;
-
-                let msg = hello_response.get()?.get_reply()?.get_message()?;
-
-                assert_eq!(msg, "Hello, Keystone!");
-
-                let geterror_response = process_client.get_error_request().send().promise.await?;
-                let error_reader = geterror_response.get()?.get_result()?;
-
-                let error_message = match error_reader.which()? {
-                    crate::module_capnp::module_error::Which::Backing(Ok(e)) => e
-                        .get_as::<crate::posix_spawn_capnp::posix_error::Reader<'_>>()?
-                        .get_error_message()?
-                        .to_str()?,
-
-                    crate::module_capnp::module_error::Which::ProtocolViolation(Ok(e)) => {
-                        e.to_str()?
-                    }
-
-                    _ => "Error getting error!!!",
-                };
-                assert!(error_message.is_empty() == true);
-
-                Ok::<(), eyre::Error>(())
-            })
-            .await;
-
-        e.unwrap();
-    }
-}
-*/

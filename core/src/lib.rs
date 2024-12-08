@@ -263,6 +263,7 @@ pub async fn test_create_keystone(
             &std::env::current_dir()?,
             message.get_root_as_reader::<keystone_config::Reader>()?,
             &mut rpc_systems,
+            Keystone::passthrough_stderr,
         )
         .await?;
 

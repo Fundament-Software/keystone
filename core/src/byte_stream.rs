@@ -177,6 +177,9 @@ impl AsyncRead for ByteStreamBufferImpl {
                 w.wake()
             }
             std::task::Poll::Ready(Ok(()))
+        } else if this.closed {
+            // Write 0 bytes and indicate that EOF has been reached
+            std::task::Poll::Ready(Ok(()))
         } else {
             this.read_waker = Some(cx.waker().clone());
             std::task::Poll::Pending

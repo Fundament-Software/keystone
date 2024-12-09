@@ -81,6 +81,7 @@ fn value_to_list<F>(
     mut builder: ::capnp::dynamic_list::Builder,
     schema: capnp::schema_capnp::type_::Reader,
     schemas: &SchemaPool,
+    dir: &Path,
     callback: &mut F,
 ) -> Result<()>
 where
@@ -96,7 +97,7 @@ where
                     let builder = builder.reborrow();
                     let dynamic: dynamic_struct::Builder = builder.get(idx)?.downcast();
                     if let Value::Table(t) = &l[idx as usize] {
-                        toml_to_config(t, dynamic.downcast()?, schemas, callback)?;
+                        toml_to_config(t, dynamic.downcast()?, schemas, dir, callback)?;
                     } else {
                         return Err(Error::InvalidTypeTOML(
                             "ModuleConfig List Element".into(),
@@ -142,11 +143,14 @@ where
                         builder.init(idx, l.len() as u32)?.downcast(),
                         s.get_element_type()?,
                         schemas,
+                        dir,
                         callback,
                     )?
                 }
             }
-            Value::Table(t) => value_to_struct(t, builder.get(idx)?.downcast(), schemas, callback)?,
+            Value::Table(t) => {
+                value_to_struct(t, builder.get(idx)?.downcast(), schemas, dir, callback)?
+            }
         }
     }
     Ok(())
@@ -196,10 +200,25 @@ fn toml_to_capnp(v: &Value, mut builder: toml_capnp::value::Builder) -> Result<(
     Ok(())
 }
 
+pub fn message_from_file(
+    path: impl AsRef<Path>,
+) -> capnp::Result<capnp::message::Reader<capnp::serialize::OwnedSegments>> {
+    let f = File::open(path)?;
+    let bufread = BufReader::new(f);
+    capnp::serialize::read_message(
+        bufread,
+        capnp::message::ReaderOptions {
+            traversal_limit_in_words: None,
+            nesting_limit: 128,
+        },
+    )
+}
+
 fn toml_to_config<F>(
     v: &Table,
     mut builder: keystone_config::module_config::Builder<capnp::any_pointer::Owned>,
     schemas: &SchemaPool,
+    dir: &Path,
     callback: &mut F,
 ) -> Result<()>
 where
@@ -217,6 +236,8 @@ where
         path.as_str()
             .ok_or(Error::InvalidTypeTOML("path".into(), "string".into()))?,
     );
+    let path = dir.join(path);
+
     let mut name = None;
 
     if let Some(n) = v.get("name") {
@@ -238,15 +259,7 @@ where
                     .ok_or(Error::InvalidTypeTOML("schema".into(), "string".into()))?,
             );
 
-            let f = File::open(schemafile)?;
-            let bufread = BufReader::new(f);
-            capnp::serialize::read_message(
-                bufread,
-                capnp::message::ReaderOptions {
-                    traversal_limit_in_words: None,
-                    nesting_limit: 128,
-                },
-            )?
+            message_from_file(schemafile)?
         } else {
             let file_contents = std::fs::read(path)?;
 
@@ -271,7 +284,7 @@ where
                 if let Some(n) = name {
                     schemas.insert(Some(n), schema);
                 }
-                value_to_struct(t, dynobj, schemas, callback)
+                value_to_struct(t, dynobj, schemas, dir, callback)
             } else {
                 Err(Error::InvalidTypeTOML("Config".into(), "table".into()).into())
             }
@@ -287,6 +300,7 @@ fn value_to_struct<F>(
     t: &Table,
     mut builder: dynamic_struct::Builder,
     schemas: &SchemaPool,
+    dir: &Path,
     callback: &mut F,
 ) -> Result<()>
 where
@@ -371,6 +385,7 @@ where
                         builder.initn(field, l.len() as u32)?.downcast(),
                         x.get_type()?,
                         schemas,
+                        dir,
                         callback,
                     )?
                 } else {
@@ -378,7 +393,7 @@ where
                 }
             }
             Value::Table(t) => {
-                value_to_struct(t, builder.init(field)?.downcast(), schemas, callback)?
+                value_to_struct(t, builder.init(field)?.downcast(), schemas, dir, callback)?
             }
         }
     }
@@ -443,6 +458,7 @@ fn get_type_by_id<'a>(
         .ok_or(Error::MissingType(name.into(), id))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_cap_field<'a, F>(
     name: &str,
     expr: cap_expr::Builder<'a>,
@@ -451,6 +467,7 @@ fn build_cap_field<'a, F>(
     callback: &mut F,
     list: &[Value],
     s: capnp::schema::StructSchema,
+    dir: &Path,
 ) -> Result<cap_expr::Builder<'a>>
 where
     F: FnMut(*const Value) -> Option<u32>,
@@ -475,6 +492,7 @@ where
                                 callback,
                                 &list[1..],
                                 (*st).into(),
+                                dir,
                             )?
                             .init_field()
                         } else {
@@ -518,6 +536,7 @@ where
                             schemas,
                             callback,
                             &list[3..],
+                            dir,
                         )?
                         .init_field()
                     }
@@ -556,6 +575,7 @@ fn build_cap_method<'a, F>(
     schemas: &SchemaPool,
     callback: &mut F,
     list: &[Value],
+    dir: &Path,
 ) -> Result<Result<cap_expr::Builder<'a>, cap_expr::Builder<'a>>>
 where
     F: FnMut(*const Value) -> Option<u32>,
@@ -568,7 +588,7 @@ where
                     format!("{} return values", name),
                     method.get_result_struct_type(),
                 ))? {
-                build_cap_field(name, expr, root, schemas, callback, list, (*st).into())?
+                build_cap_field(name, expr, root, schemas, callback, list, (*st).into(), dir)?
             } else {
                 return Err(Error::TypeMismatchCapstone(
                     format!("Results for {}", name),
@@ -590,7 +610,7 @@ where
             if let TypeVariant::Struct(st) = params {
                 let builder = expr.reborrow().init_args();
                 let dynobj = builder.init_dynamic((*st).into())?;
-                value_to_struct(v, dynobj, schemas, callback)?;
+                value_to_struct(v, dynobj, schemas, dir, callback)?;
             } else {
                 return Err(Error::TypeMismatchCapstone(
                     format!("Params for {}", name),
@@ -616,6 +636,7 @@ fn eval_toml_capability<'a, F>(
     schemas: &SchemaPool,
     callback: &mut F,
     list: &[Value],
+    dir: &Path,
 ) -> Result<cap_expr::Builder<'a>>
 where
     F: FnMut(*const Value) -> Option<u32>,
@@ -631,6 +652,7 @@ where
             schemas,
             callback,
             list,
+            dir,
         )? {
             Ok(builder) => return Ok(builder),
             Err(mut expr) => {
@@ -657,6 +679,7 @@ where
                                 schemas,
                                 callback,
                                 list,
+                                dir,
                             )? {
                                 Ok(builder) => return Ok(builder),
                                 Err(expr) => expr,
@@ -682,6 +705,7 @@ fn compile_toml_expr<F>(
     v: &Value,
     mut expr: cap_expr::Builder,
     schemas: &SchemaPool,
+    dir: &Path,
     callback: &mut F,
 ) -> Result<()>
 where
@@ -765,6 +789,7 @@ where
                         schemas,
                         callback,
                         &l[3..],
+                        dir,
                     )?;
 
                     builder.set_module_ref(module_name.into());
@@ -782,28 +807,32 @@ where
     }
 }
 
-pub fn to_capnp(config: &Table, mut msg: keystone_config::Builder<'_>) -> Result<()> {
+pub fn to_capnp(config: &Table, mut msg: keystone_config::Builder<'_>, dir: &Path) -> Result<()> {
     let span = tracing::span!(tracing::Level::DEBUG, "config::to_capnp", config = ?config);
     let _enter = span.enter();
     let schemas = builtin_schemas()?;
     let dynamic: dynamic_value::Builder = msg.reborrow().into();
     let mut exprs: HashMap<*const Value, u32> = HashMap::new();
     let exprs_ref = &mut exprs;
-    value_to_struct(config, dynamic.downcast(), &schemas, &mut |v| -> Option<
-        u32,
-    > {
-        if v.is_null() {
-            exprs_ref.insert(v, exprs_ref.len() as u32);
-            Some(exprs_ref[&v])
-        } else {
-            expr_recurse(unsafe { v.as_ref().unwrap() }, exprs_ref);
-            if exprs_ref.contains_key(&v) {
+    value_to_struct(
+        config,
+        dynamic.downcast(),
+        &schemas,
+        dir,
+        &mut |v| -> Option<u32> {
+            if v.is_null() {
+                exprs_ref.insert(v, exprs_ref.len() as u32);
                 Some(exprs_ref[&v])
             } else {
-                None
+                expr_recurse(unsafe { v.as_ref().unwrap() }, exprs_ref);
+                if exprs_ref.contains_key(&v) {
+                    Some(exprs_ref[&v])
+                } else {
+                    None
+                }
             }
-        }
-    })?;
+        },
+    )?;
 
     // We've already identified all capexprs that need to be rooted in the cap table
     let mut builder = msg.init_cap_table(exprs.len() as u32);
@@ -816,6 +845,7 @@ pub fn to_capnp(config: &Table, mut msg: keystone_config::Builder<'_>) -> Result
                 unsafe { k.as_ref().unwrap() },
                 builder.reborrow().get(*v),
                 &schemas,
+                dir,
                 &mut |v| -> Option<u32> {
                     if exprs.contains_key(&v) {
                         Some(exprs[&v])
@@ -864,7 +894,11 @@ path = "/test/"
 
 "#;
 
-    to_capnp(&source.parse::<toml::Table>()?, msg.reborrow())?;
+    to_capnp(
+        &source.parse::<toml::Table>()?,
+        msg.reborrow(),
+        Path::new(""),
+    )?;
     //println!("{:#?}", msg.reborrow_as_reader());
 
     Ok(())
@@ -891,7 +925,11 @@ config = {{ greeting = "Bonjour" }}
             .replace('\\', "/")
     );
 
-    to_capnp(&source.parse::<toml::Table>()?, msg.reborrow())?;
+    to_capnp(
+        &source.parse::<toml::Table>()?,
+        msg.reborrow(),
+        &std::env::current_dir()?,
+    )?;
     //println!("{:#?}", msg.reborrow_as_reader());
 
     Ok(())
@@ -928,7 +966,11 @@ config = {{ helloWorld = [ "@Hello World" ] }}
             .replace('\\', "/")
     );
 
-    to_capnp(&source.parse::<toml::Table>()?, msg.reborrow())?;
+    to_capnp(
+        &source.parse::<toml::Table>()?,
+        msg.reborrow(),
+        &std::env::current_dir()?,
+    )?;
     //println!("{:#?}", msg.reborrow_as_reader());
 
     Ok(())
@@ -955,7 +997,11 @@ config = {{ echoWord = "Echo" }}
             .replace('\\', "/")
     );
 
-    to_capnp(&source.parse::<toml::Table>()?, msg.reborrow())?;
+    to_capnp(
+        &source.parse::<toml::Table>()?,
+        msg.reborrow(),
+        &std::env::current_dir()?,
+    )?;
     //println!("{:#?}", msg.reborrow_as_reader());
 
     Ok(())
@@ -982,7 +1028,11 @@ config = {{ nested = {{ state = [ "@keystone", "initCell", {{id = "myCellName"}}
             .replace('\\', "/")
     );
 
-    to_capnp(&source.parse::<toml::Table>()?, msg.reborrow())?;
+    to_capnp(
+        &source.parse::<toml::Table>()?,
+        msg.reborrow(),
+        &std::env::current_dir()?,
+    )?;
     let reader = msg.reborrow_as_reader();
     assert_eq!(reader.get_cap_table()?.len(), 2);
     //println!("{:#?}", msg.reborrow_as_reader());
@@ -1011,7 +1061,11 @@ config = {{ sqlite = [ "@sqlite" ], outer = [ "@keystone", "initCell", {{id = "O
             .replace('\\', "/")
     );
 
-    to_capnp(&source.parse::<toml::Table>()?, msg.reborrow())?;
+    to_capnp(
+        &source.parse::<toml::Table>()?,
+        msg.reborrow(),
+        &std::env::current_dir()?,
+    )?;
     let reader = msg.reborrow_as_reader();
     assert_eq!(reader.get_cap_table()?.len(), 3);
     //println!("{:#?}", msg.reborrow_as_reader());

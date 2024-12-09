@@ -52,13 +52,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         crate::complex_config_capnp::root::Owned,
     >(async move {
         //let _: Vec<String> = ::std::env::args().collect();
-
-        #[cfg(feature = "tracing")]
-        tracing_subscriber::fmt()
-            .with_max_level(Level::DEBUG)
-            .with_writer(std::io::stderr)
-            .with_ansi(true)
-            .init();
     })
     .await
 }
@@ -70,7 +63,7 @@ use tempfile::NamedTempFile;
 fn test_complex_config() -> eyre::Result<()> {
     #[cfg(feature = "tracing")]
     tracing_subscriber::fmt()
-        .with_max_level(Level::DEBUG)
+        .with_max_level(tracing::Level::DEBUG)
         .with_writer(std::io::stderr)
         .with_ansi(true)
         .init();

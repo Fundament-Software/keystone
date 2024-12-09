@@ -1,0 +1,5 @@
+
+[[modules]]
+name = "Hello World"
+path = "../target/debug/hello-world-module"
+config = { greeting = "Bonjour" }

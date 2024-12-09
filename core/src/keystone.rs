@@ -732,7 +732,7 @@ impl Keystone {
         }
     }
 
-    pub async fn init<
+    pub async fn init_custom<
         Fut: std::future::Future<Output = eyre::Result<()>> + 'static,
         F: (Fn(ByteStreamBufferImpl) -> Fut) + 'static + Clone,
     >(
@@ -740,7 +740,7 @@ impl Keystone {
         dir: &Path,
         config: keystone_config::Reader<'_>,
         rpc_systems: &RpcSystemSet,
-        sink: F,
+        sink: impl Fn(u64) -> F,
     ) -> Result<()> {
         let default_log = Self::default_log_env(&config);
         let modules = config.get_modules()?;
@@ -754,7 +754,7 @@ impl Keystone {
                     dir,
                     config.get_cap_table()?,
                     default_log.to_string(),
-                    sink.clone(),
+                    sink(id),
                 )
                 .await
             {
@@ -771,6 +771,20 @@ impl Keystone {
 
         self.scheduler_thread = stage;
         Ok(())
+    }
+
+    pub async fn init<
+        Fut: std::future::Future<Output = eyre::Result<()>> + 'static,
+        F: (Fn(ByteStreamBufferImpl) -> Fut) + 'static + Clone,
+    >(
+        &mut self,
+        dir: &Path,
+        config: keystone_config::Reader<'_>,
+        rpc_systems: &RpcSystemSet,
+        sink: F,
+    ) -> Result<()> {
+        self.init_custom(dir, config, rpc_systems, |_| sink.clone())
+            .await
     }
 
     pub async fn passthrough_stderr(

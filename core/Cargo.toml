@@ -81,6 +81,7 @@ chrono-tz = "0.10"
 atomicbox = "0.4"
 convert_case = { version = "0.6", optional = true }
 safemem = "0.3"
+memchr = "2.7"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2"

@@ -36,6 +36,7 @@ use std::io::Write;
 use std::path::Path;
 use std::pin::Pin;
 use std::{convert::Into, fs, io::Read};
+use tokio::io::AsyncReadExt;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio_util::sync::CancellationToken;
 
@@ -194,14 +195,39 @@ fn keystone_startup(
     let (mut instance, mut rpc_systems) = Keystone::new(message, false)?;
 
     let fut = pool.run_until(async move {
-        instance.init(dir, message.reborrow(), &rpc_systems).await?;
-
         // TODO: Eventually the terminal interface should be factored out into a module using a monitoring capability.
         if interactive {
-            if let Err(e) = run_interface(&mut instance, &mut rpc_systems, dir, message).await {
+            let (log_tx, log_rx) = mpsc::unbounded_channel::<(u64, String)>();
+            let log_tx_copy = log_tx.clone();
+
+            instance
+                .init_custom(dir, message.reborrow(), &rpc_systems, move |id| {
+                    let tx = log_tx_copy.clone();
+                    log_capture!(id, tx)
+                })
+                .await?;
+
+            if let Err(e) = run_interface(
+                &mut instance,
+                &mut rpc_systems,
+                dir,
+                message,
+                log_rx,
+                log_tx,
+            )
+            .await
+            {
                 eprintln!("{}", e.to_string());
             }
         } else {
+            instance
+                .init(
+                    dir,
+                    message.reborrow(),
+                    &rpc_systems,
+                    keystone::Keystone::passthrough_stderr,
+                )
+                .await?;
             tokio::select! {
                 _ = drive_stream_with_error("Module crashed!", &mut rpc_systems) => (),
                 r = tokio::signal::ctrl_c() => r.expect("failed to listen to shutdown signal"),
@@ -278,6 +304,7 @@ struct TuiModule {
     state: ModuleState,
     selected: Option<usize>,
     trace: tracing::Level,
+    log: CircularBuffer<512, String>,
 }
 
 impl TuiModule {
@@ -307,6 +334,7 @@ struct Tui<'a> {
     dir: &'a Path,
     config: keystone_config::Reader<'a>,
     list_state: ListState,
+    log_tx: UnboundedSender<(u64, String)>,
 }
 
 fn invert_style(selected: bool, style: ratatui::prelude::Style) -> ratatui::prelude::Style {
@@ -483,7 +511,10 @@ impl ratatui::widgets::Widget for &mut Tui<'_> {
                         ])),
                         Cell::from(Text::from("<TODO>")),
                         Cell::from(Text::from("<TODO>")),
-                        Cell::from(Text::from("<TODO>")),
+                        Cell::from(
+                            Text::from(m.log.front().map(|s| s.as_str()).unwrap_or(""))
+                                .right_aligned(),
+                        ),
                     ])
                     .height(1)
                 });
@@ -669,6 +700,17 @@ impl ratatui::widgets::Widget for &mut Tui<'_> {
                     .border_set(border::PLAIN)
                     .borders(Borders::BOTTOM);
                 block.render(main[2], buf);
+
+                // Ratatui doesn't seem to clear the table widget properly, but this doesn't work either
+                //Widget::render(Clear, main[3], buf);
+
+                let items: Vec<_> = module
+                    .log
+                    .iter()
+                    .map(|s| Line::from(vec![Span::raw(s.as_str())]))
+                    .collect();
+                let list = List::new(items).direction(ratatui::widgets::ListDirection::TopToBottom);
+                ratatui::prelude::Widget::render(list, main[3], buf);
             }
             TabPage::Network => {
                 let title = Line::from(" Network Status ".bold());
@@ -763,20 +805,23 @@ impl Tui<'_> {
                             {
                                 match m.selected.unwrap() {
                                     0 => {
+                                        let id = m.id;
+                                        let tx = self.log_tx.clone();
                                         let s = Self::find_module_config(
                                             &self.config,
                                             &self.instance,
-                                            m.id,
+                                            id,
                                         )?;
 
                                         if let Err(t) = rpc_tx.send(
                                             self.instance
                                                 .init_module(
-                                                    m.id,
+                                                    id,
                                                     s,
                                                     self.dir,
                                                     self.config.get_cap_table()?,
                                                     m.trace.as_str().to_ascii_lowercase(),
+                                                    log_capture!(id, tx),
                                                 )
                                                 .await?,
                                         ) {
@@ -811,6 +856,7 @@ impl Tui<'_> {
                                     }
                                     2 => {
                                         let id = m.id;
+                                        let tx = self.log_tx.clone();
                                         let log_state = m.trace.as_str().to_ascii_lowercase();
                                         if let Some(x) = self.instance.modules.get_mut(&id) {
                                             x.stop(self.instance.timeout).await?;
@@ -828,6 +874,7 @@ impl Tui<'_> {
                                                     self.dir,
                                                     self.config.get_cap_table()?,
                                                     log_state,
+                                                    log_capture!(id, tx),
                                                 )
                                                 .await?,
                                         ) {
@@ -860,6 +907,7 @@ impl Tui<'_> {
                                     }
                                     2 => {
                                         let id = m.id;
+                                        let tx = self.log_tx.clone();
                                         let log_state = m.trace.as_str().to_ascii_lowercase();
                                         if let Some(x) = self.instance.modules.get_mut(&id) {
                                             x.stop(self.instance.timeout).await?;
@@ -877,6 +925,7 @@ impl Tui<'_> {
                                                     self.dir,
                                                     self.config.get_cap_table()?,
                                                     log_state,
+                                                    log_capture!(id, tx),
                                                 )
                                                 .await?,
                                         ) {
@@ -1003,6 +1052,8 @@ async fn event_loop<B: ratatui::prelude::Backend>(
     mut terminal: ratatui::Terminal<B>,
     mut event_rx: UnboundedReceiver<TerminalEvent>,
     rpc_tx: UnboundedSender<Pin<Box<dyn Future<Output = Result<()>>>>>,
+    mut log_rx: UnboundedReceiver<(u64, String)>,
+    log_tx: UnboundedSender<(u64, String)>,
     cancellation_token: CancellationToken,
     dir: &Path,
     config: keystone_config::Reader<'_>,
@@ -1029,6 +1080,7 @@ async fn event_loop<B: ratatui::prelude::Backend>(
         dir,
         config,
         list_state: ListState::default(),
+        log_tx,
     };
 
     let mut sys =
@@ -1070,6 +1122,11 @@ async fn event_loop<B: ratatui::prelude::Backend>(
                     })
                     .collect::<Vec<_>>();
 
+                if let Ok((id, line)) = log_rx.try_recv() {
+                    if let Some(m) = app.modules.get_mut(&id) {
+                        m.log.push_front(line);
+                    }
+                }
                 for id in remove {
                     app.modules.remove(&id);
                 }
@@ -1098,6 +1155,7 @@ async fn event_loop<B: ratatui::prelude::Backend>(
                                 state: m.state,
                                 selected: None,
                                 trace: tracing::Level::WARN,
+                                log: CircularBuffer::new(),
                             },
                         );
                     }
@@ -1153,11 +1211,52 @@ async fn event_stream(
     Ok(())
 }
 
+#[macro_export]
+macro_rules! log_capture {
+    ($id:ident, $send:ident) => {
+        move |mut input: crate::byte_stream::ByteStreamBufferImpl| {
+            let send = $send.clone();
+            async move {
+            let mut buf = [0u8; 1024];
+            loop {
+                let mut line = String::new();
+                loop {
+                    let len = input.read(&mut buf).await?;
+
+                    if len == 0 {
+                        break;
+                    }
+
+                    // If we find a newline, write up to the newline, shift the buffer over, then break
+                    if let Some(n) = memchr::memchr(b'\n', &buf[..len]) {
+                        if let Ok(s) = std::str::from_utf8(&buf[..n]) {
+                            line += s;
+                        }
+                        buf.copy_within(n..len, 0);
+                        break;
+                    } else if let Ok(s) = std::str::from_utf8(&buf[..len]) {
+                        line += s;
+                    }
+                }
+                // This IS the log function so we can't really do anything if this errors
+                if line.is_empty() {
+                    break;
+                }
+                let _ = send.send(($id, line));
+            }
+            Ok::<(), eyre::Report>(())
+        }
+    }
+    }
+}
+
 async fn run_interface(
     instance: &mut Keystone,
     rpc_systems: &mut keystone::RpcSystemSet,
     dir: &Path,
     config: keystone_config::Reader<'_>,
+    log_rx: UnboundedReceiver<(u64, String)>,
+    log_tx: UnboundedSender<(u64, String)>,
 ) -> Result<()> {
     let mut terminal = ratatui::init();
     terminal.clear()?;
@@ -1175,6 +1274,8 @@ async fn run_interface(
             terminal,
             event_rx,
             rpc_tx,
+            log_rx,
+            log_tx,
             cancellation_token.clone(),
             dir,
             config

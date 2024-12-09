@@ -245,7 +245,7 @@ pub fn build_temp_config(
     format!(
         r#"
     database = "{escaped}"
-    defaultLog = "trace"
+    defaultLog = "none"
     caplog = {{ trieFile = "{trie_escaped}", dataPrefix = "{prefix_escaped}" }}"#
     )
 }

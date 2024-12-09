@@ -20,7 +20,6 @@ use futures_util::future::LocalBoxFuture;
 use futures_util::FutureExt;
 use std::process::ExitStatus;
 use std::{cell::RefCell, rc::Rc};
-use tokio::io::AsyncReadExt;
 use tokio::sync::mpsc;
 
 pub struct PosixModuleProcessImpl {

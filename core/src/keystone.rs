@@ -391,8 +391,8 @@ impl Keystone {
     ) -> Result<SpawnProgram> {
         let wrapper_server = PosixModuleImpl {
             host,
-            module_process_set: module_process_set,
-            process_set: process_set,
+            module_process_set,
+            process_set,
             stderr_sink: sink,
         };
         let wrapper_client: posix_module::Client = capnp_rpc::new_client(wrapper_server);

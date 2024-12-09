@@ -23,20 +23,19 @@ pub enum ModuleState {
     CloseFailure,
 }
 
-impl std::string::ToString for ModuleState {
-    fn to_string(&self) -> String {
+impl std::fmt::Display for ModuleState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ModuleState::NotStarted => "Not Started",
-            ModuleState::Initialized => "Initialized",
-            ModuleState::Ready => "Ready",
-            ModuleState::Paused => "Paused",
-            ModuleState::Closing => "Closing",
-            ModuleState::Closed => "Closed",
-            ModuleState::Aborted => "Aborted",
-            ModuleState::StartFailure => "Start Failure",
-            ModuleState::CloseFailure => "Close Failure",
+            ModuleState::NotStarted => write!(f, "Not Started"),
+            ModuleState::Initialized => write!(f, "Initialized"),
+            ModuleState::Ready => write!(f, "Ready"),
+            ModuleState::Paused => write!(f, "Paused"),
+            ModuleState::Closing => write!(f, "Closing"),
+            ModuleState::Closed => write!(f, "Closed"),
+            ModuleState::Aborted => write!(f, "Aborted"),
+            ModuleState::StartFailure => write!(f, "Start Failure"),
+            ModuleState::CloseFailure => write!(f, "Close Failure"),
         }
-        .to_string()
     }
 }
 

@@ -16,10 +16,7 @@ unsafe fn get_mac() -> Option<u64> {
     let mut padapter = info[0].assume_init_mut() as *mut IpHelper::IP_ADAPTER_INFO;
     let mut i = 0;
     while !padapter.is_null() {
-        safemem::write_bytes(
-            &mut (*padapter).Address[(*padapter).AddressLength as usize..],
-            0,
-        );
+        (*padapter).Address[(*padapter).AddressLength as usize..].fill(0);
         all.push(u64::from_le_bytes((*padapter).Address));
         padapter = (*padapter).Next;
         info[i].assume_init_drop();
@@ -40,6 +37,12 @@ pub struct SnowflakeSource {
     machine: u64,
     instance: u64,
     sequence: std::sync::atomic::AtomicU32,
+}
+
+impl Default for SnowflakeSource {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl SnowflakeSource {

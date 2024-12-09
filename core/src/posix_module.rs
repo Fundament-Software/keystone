@@ -219,7 +219,7 @@ impl<
                                     let mut rpc_handle = tokio::task::spawn_local(async move {
                                         loop {
                                             // If the RPC system, finishes, break out of the loop. If we recieve a "go ahead" signal, continue the loop. Otherwise, pause the RPC system
-                                            tokio::select! { r = &mut rpc_system => break r, q = pause_recv.recv() => if q.unwrap_or(false) { () } else { continue; }, }
+                                            tokio::select! { r = &mut rpc_system => break r, q = pause_recv.recv() => if q.unwrap_or(false) { } else { continue; }, }
                                             // Wait until we recieve a false value from the signaler
                                             while pause_recv.recv().await.unwrap_or(false) {}
                                         }

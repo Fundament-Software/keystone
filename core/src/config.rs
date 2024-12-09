@@ -458,6 +458,7 @@ fn get_type_by_id<'a>(
         .ok_or(Error::MissingType(name.into(), id))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_cap_field<'a, F>(
     name: &str,
     expr: cap_expr::Builder<'a>,

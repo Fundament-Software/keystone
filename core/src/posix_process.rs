@@ -258,6 +258,7 @@ impl PosixProcessImpl {
 }
 
 impl PosixProcessImpl {
+    #[allow(clippy::needless_return)]
     async fn finish(&self) -> capnp::Result<i32> {
         #[cfg(not(windows))]
         use std::os::unix::process::ExitStatusExt;

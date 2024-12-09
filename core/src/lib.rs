@@ -253,7 +253,7 @@ pub fn build_temp_config(
 pub async fn test_create_keystone(
     message: &capnp::message::Builder<capnp::message::HeapAllocator>,
 ) -> eyre::Result<(Keystone, RpcSystemSet)> {
-    let (mut instance, mut rpc_systems) = Keystone::new(
+    let (mut instance, rpc_systems) = Keystone::new(
         message.get_root_as_reader::<keystone_config::Reader>()?,
         false,
     )?;
@@ -262,15 +262,10 @@ pub async fn test_create_keystone(
         .init(
             &std::env::current_dir()?,
             message.get_root_as_reader::<keystone_config::Reader>()?,
-            &mut rpc_systems,
+            &rpc_systems,
             Keystone::passthrough_stderr,
         )
         .await?;
-
-    //let keys = instance.modules.keys();
-    //for k in keys {
-    //    let _ = instance.reflect_to_stderr(*k)?;
-    //}
 
     Ok((instance, rpc_systems))
 }

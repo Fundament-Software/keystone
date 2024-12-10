@@ -118,6 +118,28 @@ enum FutureStaging {
     Running(JoinHandle<Result<()>>),
 }
 
+pub trait LogCapture: Clone
+where
+    Self: 'static,
+{
+    fn call(
+        &self,
+        input: ByteStreamBufferImpl,
+    ) -> impl std::future::Future<Output = Result<()>> + 'static;
+}
+
+impl<Fut, F: (Fn(ByteStreamBufferImpl) -> Fut) + 'static + Clone> LogCapture for F
+where
+    Fut: std::future::Future<Output = Result<()>> + 'static,
+{
+    fn call(
+        &self,
+        input: ByteStreamBufferImpl,
+    ) -> impl std::future::Future<Output = Result<()>> + 'static {
+        self(input)
+    }
+}
+
 pub type ModuleJoinSet = Rc<RefCell<tokio::task::JoinSet<Result<()>>>>;
 pub type RpcSystemSet = FuturesUnordered<Pin<Box<dyn Future<Output = Result<()>>>>>;
 pub struct Keystone {
@@ -379,15 +401,12 @@ impl Keystone {
     pub fn log_capnp_params(params: &capnp::dynamic_value::Reader<'_>) {
         tracing::event!(tracing::Level::TRACE, parameters = format!("{:?}", params));
     }
-    pub async fn wrap_posix<
-        Fut: std::future::Future<Output = eyre::Result<()>> + 'static,
-        F: (Fn(ByteStreamBufferImpl) -> Fut) + 'static + Clone,
-    >(
+    pub async fn wrap_posix(
         host: crate::keystone_capnp::host::Client<any_pointer>,
         client: crate::posix_process::PosixProgramClient,
         module_process_set: Rc<RefCell<ModuleProcessCapSet>>,
         process_set: Rc<RefCell<crate::posix_process::ProcessCapSet>>,
-        sink: F,
+        sink: impl LogCapture,
     ) -> Result<SpawnProgram> {
         let wrapper_server = PosixModuleImpl {
             host,
@@ -403,17 +422,14 @@ impl Keystone {
         Ok(wrap_response.get()?.get_result()?)
     }
 
-    pub async fn posix_spawn<
-        Fut: std::future::Future<Output = eyre::Result<()>> + 'static,
-        F: (Fn(ByteStreamBufferImpl) -> Fut) + 'static + Clone,
-    >(
+    pub async fn posix_spawn(
         host: crate::keystone_capnp::host::Client<any_pointer>,
         config: keystone_config::module_config::Reader<'_, any_pointer>,
         dir: &Path,
         module_process_set: Rc<RefCell<ModuleProcessCapSet>>,
         process_set: Rc<RefCell<crate::posix_process::ProcessCapSet>>,
         log_filter: String,
-        sink: F,
+        sink: impl LogCapture,
     ) -> Result<SpawnProgram> {
         let path = dir.join(Path::new(config.get_path()?.to_str()?));
         let spawn_process_server =
@@ -580,17 +596,14 @@ impl Keystone {
         Err(e.into())
     }
 
-    pub async fn init_module<
-        Fut: std::future::Future<Output = eyre::Result<()>> + 'static,
-        F: (Fn(ByteStreamBufferImpl) -> Fut) + 'static + Clone,
-    >(
+    pub async fn init_module(
         &mut self,
         id: u64,
         config: keystone_config::module_config::Reader<'_, any_pointer>,
         config_dir: &Path,
         cap_table: capnp::struct_list::Reader<'_, cap_expr::Owned>,
         log_filter: String,
-        sink: F,
+        sink: impl LogCapture,
     ) -> Result<Pin<Box<dyn Future<Output = Result<()>>>>> {
         self.modules
             .get_mut(&id)
@@ -732,10 +745,7 @@ impl Keystone {
         }
     }
 
-    pub async fn init_custom<
-        Fut: std::future::Future<Output = eyre::Result<()>> + 'static,
-        F: (Fn(ByteStreamBufferImpl) -> Fut) + 'static + Clone,
-    >(
+    pub async fn init_custom<F: LogCapture>(
         &mut self,
         dir: &Path,
         config: keystone_config::Reader<'_>,
@@ -773,15 +783,12 @@ impl Keystone {
         Ok(())
     }
 
-    pub async fn init<
-        Fut: std::future::Future<Output = eyre::Result<()>> + 'static,
-        F: (Fn(ByteStreamBufferImpl) -> Fut) + 'static + Clone,
-    >(
+    pub async fn init(
         &mut self,
         dir: &Path,
         config: keystone_config::Reader<'_>,
         rpc_systems: &RpcSystemSet,
-        sink: F,
+        sink: impl LogCapture,
     ) -> Result<()> {
         self.init_custom(dir, config, rpc_systems, |_| sink.clone())
             .await

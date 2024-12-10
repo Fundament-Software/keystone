@@ -19,6 +19,7 @@ pub mod sqlite;
 mod sturdyref;
 mod util;
 
+use crate::byte_stream::ByteStreamBufferImpl;
 use crate::keystone_capnp::keystone_config;
 use capnp::any_pointer::Owned as any_pointer;
 use circular_buffer::CircularBuffer;
@@ -203,7 +204,7 @@ fn keystone_startup(
             instance
                 .init_custom(dir, message.reborrow(), &rpc_systems, move |id| {
                     let tx = log_tx_copy.clone();
-                    log_capture!(id, tx)
+                    log_capture(id, tx)
                 })
                 .await?;
 
@@ -701,8 +702,13 @@ impl ratatui::widgets::Widget for &mut Tui<'_> {
                     .borders(Borders::BOTTOM);
                 block.render(main[2], buf);
 
-                // Ratatui doesn't seem to clear the table widget properly, but this doesn't work either
-                //Widget::render(Clear, main[3], buf);
+                // Ratatui doesn't like it when a stateful widget stops existing, so we render a blank one.
+                let table = StatefulWidget::render(
+                    Table::default(),
+                    main[3],
+                    buf,
+                    &mut self.keystone.table_state,
+                );
 
                 let items: Vec<_> = module
                     .log
@@ -821,7 +827,7 @@ impl Tui<'_> {
                                                     self.dir,
                                                     self.config.get_cap_table()?,
                                                     m.trace.as_str().to_ascii_lowercase(),
-                                                    log_capture!(id, tx),
+                                                    log_capture(id, tx),
                                                 )
                                                 .await?,
                                         ) {
@@ -874,7 +880,7 @@ impl Tui<'_> {
                                                     self.dir,
                                                     self.config.get_cap_table()?,
                                                     log_state,
-                                                    log_capture!(id, tx),
+                                                    log_capture(id, tx),
                                                 )
                                                 .await?,
                                         ) {
@@ -925,7 +931,7 @@ impl Tui<'_> {
                                                     self.dir,
                                                     self.config.get_cap_table()?,
                                                     log_state,
-                                                    log_capture!(id, tx),
+                                                    log_capture(id, tx),
                                                 )
                                                 .await?,
                                         ) {
@@ -1211,12 +1217,10 @@ async fn event_stream(
     Ok(())
 }
 
-#[macro_export]
-macro_rules! log_capture {
-    ($id:ident, $send:ident) => {
-        move |mut input: crate::byte_stream::ByteStreamBufferImpl| {
-            let send = $send.clone();
-            async move {
+fn log_capture(id: u64, log_tx: UnboundedSender<(u64, String)>) -> impl LogCapture {
+    move |mut input: ByteStreamBufferImpl| {
+        let send = log_tx.clone();
+        async move {
             let mut buf = [0u8; 1024];
             loop {
                 let mut line = String::new();
@@ -1242,11 +1246,10 @@ macro_rules! log_capture {
                 if line.is_empty() {
                     break;
                 }
-                let _ = send.send(($id, line));
+                let _ = send.send((id, line));
             }
             Ok::<(), eyre::Report>(())
         }
-    }
     }
 }
 

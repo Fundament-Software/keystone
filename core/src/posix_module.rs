@@ -1,6 +1,7 @@
 use crate::byte_stream::ByteStreamBufferImpl;
 use crate::byte_stream_capnp::byte_stream::Owned as ByteStream;
 use crate::keystone::CapnpResult;
+use crate::keystone::LogCapture;
 use crate::module_capnp::module_error;
 use crate::module_capnp::module_start;
 use crate::posix_module_capnp::posix_module;
@@ -104,12 +105,9 @@ impl process::Server<cap_pointer, module_error::Owned<any_pointer>>
     }
 }
 
-pub struct PosixModuleProgramImpl<
-    Fut: std::future::Future<Output = eyre::Result<()>> + 'static,
-    F: Fn(ByteStreamBufferImpl) -> Fut + Clone,
-> {
+pub struct PosixModuleProgramImpl<F: LogCapture> {
     posix_program: program::Client<PosixArgs, ByteStream, PosixError>,
-    module: PosixModuleImpl<Fut, F>,
+    module: PosixModuleImpl<F>,
 }
 
 // Flattens nested results into a capnp::Result
@@ -124,15 +122,12 @@ fn flatten_to_capnp<T, E: ToString, E2: ToString>(
 }
 
 #[capnproto_rpc(program)]
-impl<
-        Fut: std::future::Future<Output = eyre::Result<()>> + 'static,
-        F: Fn(ByteStreamBufferImpl) -> Fut + Clone,
-    >
+impl<F: LogCapture>
     program::Server<
         posix_module_args::Owned<any_pointer>,
         cap_pointer,
         module_error::Owned<any_pointer>,
-    > for PosixModuleProgramImpl<Fut, F>
+    > for PosixModuleProgramImpl<F>
 {
     async fn spawn(&self, args: Reader) -> Result<(), ::capnp::Error> {
         let span = tracing::span!(tracing::Level::DEBUG, "posix_program::spawn");
@@ -191,7 +186,7 @@ impl<
                             )
                         };
 
-                        let sink = (self.module.stderr_sink)(stderr.clone());
+                        let sink = self.module.stderr_sink.call(stderr.clone());
 
                         let mut process_handle = tokio::task::spawn_local(async move {
                             tokio::try_join!(process_future, sink).map(|(f, _)| f)
@@ -299,21 +294,14 @@ impl<
     }
 }
 
-pub struct PosixModuleImpl<
-    Fut: std::future::Future<Output = eyre::Result<()>> + 'static,
-    F: (Fn(ByteStreamBufferImpl) -> Fut) + Clone,
-> {
+pub struct PosixModuleImpl<F: LogCapture> {
     pub host: crate::keystone_capnp::host::Client<any_pointer>,
     pub module_process_set: Rc<RefCell<ModuleProcessCapSet>>,
     pub process_set: Rc<RefCell<crate::posix_process::ProcessCapSet>>,
     pub stderr_sink: F,
 }
 
-impl<
-        Fut: std::future::Future<Output = eyre::Result<()>> + 'static,
-        F: (Fn(ByteStreamBufferImpl) -> Fut) + Clone,
-    > Clone for PosixModuleImpl<Fut, F>
-{
+impl<F: LogCapture> Clone for PosixModuleImpl<F> {
     fn clone(&self) -> Self {
         Self {
             host: self.host.clone(),
@@ -325,15 +313,11 @@ impl<
 }
 
 #[capnproto_rpc(posix_module)]
-impl<
-        Fut: std::future::Future<Output = eyre::Result<()>> + 'static,
-        F: (Fn(ByteStreamBufferImpl) -> Fut) + 'static + Clone,
-    > posix_module::Server for PosixModuleImpl<Fut, F>
-{
+impl<F: LogCapture> posix_module::Server for PosixModuleImpl<F> {
     async fn wrap(&self, prog: Client) {
         let span = tracing::span!(tracing::Level::DEBUG, "posix_module::wrap");
         let _enter = span.enter();
-        let program = PosixModuleProgramImpl::<Fut, F> {
+        let program = PosixModuleProgramImpl::<F> {
             posix_program: prog,
             module: self.clone(),
         };

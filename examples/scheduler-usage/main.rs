@@ -10,13 +10,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         root::Owned,
     >(async move {
         //let _: Vec<String> = ::std::env::args().collect();
-
-        #[cfg(feature = "tracing")]
-        tracing_subscriber::fmt()
-            .with_max_level(tracing::Level::DEBUG)
-            .with_writer(std::io::stderr)
-            .with_ansi(true)
-            .init();
     })
     .await
 }

@@ -11,6 +11,7 @@ mod database;
 pub mod host;
 pub mod http;
 mod keystone;
+mod module;
 mod posix_module;
 mod posix_process;
 mod posix_spawn;
@@ -18,6 +19,7 @@ mod proxy;
 pub mod scheduler;
 pub mod sqlite;
 mod sturdyref;
+mod util;
 
 use atomic_take::AtomicTake;
 use capnp::any_pointer::Owned as any_pointer;
@@ -29,6 +31,7 @@ use eyre::Context;
 use futures_util::StreamExt;
 pub use keystone::*;
 use keystone_capnp::keystone_config;
+pub use module::*;
 use module_capnp::module_start;
 use std::cell::RefCell;
 use std::future::Future;
@@ -39,18 +42,6 @@ use tokio::sync::oneshot;
 use tracing_subscriber::filter::LevelFilter;
 
 include!(concat!(env!("OUT_DIR"), "/capnproto.rs"));
-
-impl From<keystone_capnp::LogLevel> for tracing::Level {
-    fn from(val: keystone_capnp::LogLevel) -> Self {
-        match val {
-            keystone_capnp::LogLevel::Trace => tracing::Level::TRACE,
-            keystone_capnp::LogLevel::Debug => tracing::Level::DEBUG,
-            keystone_capnp::LogLevel::Info => tracing::Level::INFO,
-            keystone_capnp::LogLevel::Warning => tracing::Level::WARN,
-            keystone_capnp::LogLevel::Error => tracing::Level::ERROR,
-        }
-    }
-}
 
 pub fn fmt(filter: impl Into<LevelFilter>) -> impl Into<tracing::Dispatch> {
     tracing_subscriber::fmt()
@@ -130,9 +121,9 @@ impl<
 }
 
 pub async fn start<
-    Config: 'static + capnp::traits::Owned,
+    Config: 'static + capnp::traits::Owned + Unpin,
     Impl: 'static + Module<Config>,
-    API: 'static + for<'c> capnp::traits::Owned<Reader<'c>: capnp::capability::FromServer<Impl>>,
+    API: 'static + for<'c> capnp::traits::Owned<Reader<'c>: capnp::capability::FromServer<Impl>> + Unpin,
     T: tokio::io::AsyncRead + 'static + Unpin,
     U: tokio::io::AsyncWrite + 'static + Unpin,
 >(
@@ -177,7 +168,16 @@ pub async fn start<
         }
     });
     tracing::debug!("Spawning RPC system");
-    let err = rpc_system.await;
+
+    // We install a ctrl-C handler here so we can shutdown properly when the parent process gets a ctrl-C signal
+    let err = tokio::select! {
+        r = &mut rpc_system => r,
+        r = tokio::signal::ctrl_c() => {
+            r.expect("failed to capture ctrl-c");
+            let call = module_client.stop_request().send();
+            tokio::try_join!(call.promise, rpc_system).map(|_| ())
+        },
+    };
 
     if let Err(e) = err {
         // Don't report disconnects as an error.
@@ -193,12 +193,22 @@ pub async fn start<
 
 #[inline(always)]
 pub async fn main<
-    Config: 'static + capnp::traits::Owned,
+    Config: 'static + capnp::traits::Owned + Unpin,
     Impl: 'static + Module<Config>,
-    API: 'static + for<'c> capnp::traits::Owned<Reader<'c>: capnp::capability::FromServer<Impl>>,
+    API: 'static + for<'c> capnp::traits::Owned<Reader<'c>: capnp::capability::FromServer<Impl>> + Unpin,
 >(
     future: impl Future,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    if std::env::var("KEYSTONE_MODULE_LOG").is_ok() {
+        tracing_subscriber::fmt()
+            .with_env_filter(tracing_subscriber::EnvFilter::from_env(
+                "KEYSTONE_MODULE_LOG",
+            ))
+            .with_writer(std::io::stderr)
+            .with_ansi(true)
+            .init();
+    }
+
     tokio::task::LocalSet::new()
         .run_until(async move {
             future.await;
@@ -235,24 +245,29 @@ pub fn build_temp_config(
     format!(
         r#"
     database = "{escaped}"
-    defaultLog = "debug"
+    defaultLog = "none"
     caplog = {{ trieFile = "{trie_escaped}", dataPrefix = "{prefix_escaped}" }}"#
     )
 }
 
 pub async fn test_create_keystone(
     message: &capnp::message::Builder<capnp::message::HeapAllocator>,
-) -> eyre::Result<Keystone> {
-    let mut instance = Keystone::new(
+) -> eyre::Result<(Keystone, RpcSystemSet)> {
+    let (mut instance, rpc_systems) = Keystone::new(
         message.get_root_as_reader::<keystone_config::Reader>()?,
         false,
     )?;
 
     instance
-        .init(message.get_root_as_reader::<keystone_config::Reader>()?)
+        .init(
+            &std::env::current_dir()?,
+            message.get_root_as_reader::<keystone_config::Reader>()?,
+            &rpc_systems,
+            Keystone::passthrough_stderr,
+        )
         .await?;
 
-    Ok(instance)
+    Ok((instance, rpc_systems))
 }
 
 pub fn test_harness<F: Future<Output = eyre::Result<()>> + 'static>(
@@ -268,7 +283,11 @@ pub fn test_harness<F: Future<Output = eyre::Result<()>> + 'static>(
     let mut source = build_temp_config(&temp_db, &temp_log, &temp_prefix);
 
     source.push_str(config);
-    config::to_capnp(&source.parse::<toml::Table>()?, msg.reborrow())?;
+    config::to_capnp(
+        &source.parse::<toml::Table>()?,
+        msg.reborrow(),
+        &std::env::current_dir()?,
+    )?;
 
     // TODO: might be able to replace the runtime catch below with .unhandled_panic(UnhandledPanic::ShutdownRuntime) if gets stabilized
     let pool = tokio::task::LocalSet::new();
@@ -291,14 +310,6 @@ pub fn test_harness<F: Future<Output = eyre::Result<()>> + 'static>(
 }
 
 #[inline]
-pub async fn test_runner(instance: &mut Keystone) -> eyre::Result<()> {
-    while let Some(r) = instance.next().await {
-        r?;
-    }
-    Ok(())
-}
-
-#[inline]
 pub async fn drive_stream(
     stream: &mut futures_util::stream::FuturesUnordered<impl Future<Output = eyre::Result<()>>>,
 ) -> eyre::Result<()> {
@@ -309,8 +320,8 @@ pub async fn drive_stream(
 }
 
 #[inline]
-pub async fn test_shutdown(instance: &mut Keystone) -> eyre::Result<()> {
-    let (mut shutdown, runner) = instance.shutdown();
+pub async fn test_shutdown(instance: &mut Keystone, runner: &mut RpcSystemSet) -> eyre::Result<()> {
+    let mut shutdown = instance.shutdown();
 
     tokio::try_join!(drive_stream(&mut shutdown), drive_stream(runner))?;
     Ok::<(), eyre::Report>(())
@@ -318,9 +329,9 @@ pub async fn test_shutdown(instance: &mut Keystone) -> eyre::Result<()> {
 
 #[allow(clippy::unit_arg)]
 pub fn test_module_harness<
-    Config: 'static + capnp::traits::Owned,
+    Config: 'static + capnp::traits::Owned + Unpin,
     Impl: 'static + Module<Config>,
-    API: 'static + for<'c> capnp::traits::Owned<Reader<'c>: capnp::capability::FromServer<Impl>>,
+    API: 'static + for<'c> capnp::traits::Owned<Reader<'c>: capnp::capability::FromServer<Impl>> + Unpin,
     F: Future<Output = eyre::Result<()>> + 'static,
 >(
     config: &str,
@@ -348,16 +359,16 @@ pub fn test_module_harness<
 
     let module = module.to_string();
     let b = pool.run_until(pool.spawn_local(async move {
-        let (mut instance, api): (Keystone, API::Reader<'_>) =
+        let (mut instance, api, mut rpc_systems): (Keystone, API::Reader<'_>, RpcSystemSet) =
             Keystone::init_single_module(&source, &module, server_reader, server_writer)
                 .await
                 .unwrap();
 
         tokio::select! {
-            r = test_runner(&mut instance) => r,
+            r = drive_stream(&mut rpc_systems) => r,
             r = f(api) => r.wrap_err(module),
         }?;
-        test_shutdown(&mut instance).await
+        test_shutdown(&mut instance, &mut rpc_systems).await
     }));
 
     let runtime = tokio::runtime::Builder::new_current_thread()

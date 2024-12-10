@@ -37,6 +37,7 @@ keystone.workspace = true
 [dev-dependencies]
 eyre.workspace = true
 test-binary.workspace = true
+futures-util.workspace = true
 
 [build-dependencies]
 capstone-gen.workspace = true

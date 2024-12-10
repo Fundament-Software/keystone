@@ -20,7 +20,8 @@ fn test_hello_world_init() -> eyre::Result<()> {
             r#"{  greeting = "Bonjour" }"#,
         ),
         |message| async move {
-            let mut instance = keystone::test_create_keystone(&message).await.unwrap();
+            let (mut instance, mut rpc_systems) =
+                keystone::test_create_keystone(&message).await.unwrap();
             let hello_client: root::Client = instance.get_api_pipe("Hello World").unwrap();
 
             let fut = async move {
@@ -35,10 +36,63 @@ fn test_hello_world_init() -> eyre::Result<()> {
             };
 
             tokio::select! {
-                r = keystone::test_runner(&mut instance) => Ok(r?),
+                r = keystone::drive_stream(&mut rpc_systems) => Ok(r?),
                 r = fut => r,
             }?;
-            keystone::test_shutdown(&mut instance).await
+            keystone::test_shutdown(&mut instance, &mut rpc_systems).await
+        },
+    )
+}
+
+#[inline]
+pub async fn drive_stream_with_error(
+    msg: &str,
+    stream: &mut futures_util::stream::FuturesUnordered<
+        impl std::future::Future<Output = eyre::Result<()>>,
+    >,
+) {
+    use futures_util::StreamExt;
+    while let Some(r) = stream.next().await {
+        if let Err(e) = r {
+            eprintln!("{}: {}", msg, e);
+        }
+    }
+}
+
+#[test]
+fn test_hello_world_empty() -> eyre::Result<()> {
+    keystone::test_harness(
+        &keystone::build_module_config(
+            "Hello World",
+            "hello-world-module",
+            r#"{  greeting = "Bonjour" }"#,
+        ),
+        |message| async move {
+            let (mut instance, mut rpc_systems) = keystone::Keystone::new(
+                message
+                    .get_root_as_reader::<keystone::keystone_capnp::keystone_config::Reader>()?,
+                false,
+            )?;
+
+            instance
+                .init(
+                    &std::env::current_dir()?,
+                    message
+                        .get_root_as_reader::<keystone::keystone_capnp::keystone_config::Reader>(
+                        )?,
+                    &rpc_systems,
+                    keystone::Keystone::passthrough_stderr,
+                )
+                .await?;
+
+            eprintln!("Attempting graceful shutdown...");
+            let mut shutdown = instance.shutdown();
+
+            tokio::join!(
+                drive_stream_with_error("Error during shutdown!", &mut shutdown),
+                drive_stream_with_error("Error during shutdown RPC!", &mut rpc_systems)
+            );
+            Ok::<(), eyre::Report>(())
         },
     )
 }

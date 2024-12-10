@@ -9,27 +9,24 @@ fn test_complex_config_init() -> Result<()> {
             r#"{ nested = { state = [ "@keystone", "initCell", {id = "myCellName"}, "result" ], moreState = [ "@keystone", "initCell", {id = "myCellName"}, "result" ] } }"#,
         ),
         |message| async move {
-            let mut instance = keystone::test_create_keystone(&message).await.unwrap();
+            let (mut instance, mut rpc_systems) =
+                keystone::test_create_keystone(&message).await.unwrap();
             let config_client: complex_config::complex_config_capnp::root::Client =
                 instance.get_api_pipe("Complex Config").unwrap();
 
             let fut = async move {
-                println!("got api");
                 let get_config = config_client.get_config_request();
                 let get_response = get_config.send().promise.await?;
-                println!("got response");
 
                 let response = get_response.get()?.get_reply()?;
-                println!("got reply");
-                println!("{:#?}", response);
                 Ok::<(), capnp::Error>(())
             };
 
             tokio::select! {
-                r = keystone::test_runner(&mut instance) => Ok(r?),
+                r = keystone::drive_stream(&mut rpc_systems) => Ok(r?),
                 r = fut => r,
             }?;
-            keystone::test_shutdown(&mut instance).await
+            keystone::test_shutdown(&mut instance, &mut rpc_systems).await
         },
     )
 }

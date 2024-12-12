@@ -21,7 +21,8 @@ impl<'a> local_native_program::Server for LocalNativeProgramImpl<'a> {
         let span = tracing::span!(tracing::Level::DEBUG, "LocalNativeProgram::file");
         let _enter = span.enter();
         if let Some(handle) = self.auth_ref.get_file_handle(&file).await {
-            let program = PosixProgramImpl::new(handle, self.process_set.clone());
+            let program =
+                PosixProgramImpl::new(handle, self.process_set.clone(), "warn".to_string());
 
             let program_client: PosixProcessClient = capnp_rpc::new_client(program);
             results.get().set_result(program_client);

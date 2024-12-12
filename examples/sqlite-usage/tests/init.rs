@@ -10,7 +10,8 @@ fn test_sqlite_usage_init() -> eyre::Result<()> {
         ),
         |message| async move {
             {
-                let mut instance = keystone::test_create_keystone(&message).await.unwrap();
+                let (mut instance, mut rpc_systems) =
+                    keystone::test_create_keystone(&message).await.unwrap();
                 let usage_client: root::Client = instance.get_api_pipe("Sqlite Usage").unwrap();
 
                 let fut = async move {
@@ -47,13 +48,16 @@ fn test_sqlite_usage_init() -> eyre::Result<()> {
                 };
 
                 tokio::select! {
-                    r = keystone::test_runner(&mut instance) => Ok(r?),
+                    r = keystone::drive_stream(&mut rpc_systems) => Ok(r?),
                     r = fut => r,
                 }?;
-                keystone::test_shutdown(&mut instance).await?;
+                keystone::test_shutdown(&mut instance, &mut rpc_systems)
+                    .await
+                    .unwrap()
             }
 
-            let mut instance = keystone::test_create_keystone(&message).await.unwrap();
+            let (mut instance, mut rpc_systems) =
+                keystone::test_create_keystone(&message).await.unwrap();
             let usage_client: root::Client = instance.get_api_pipe("Sqlite Usage").unwrap();
 
             let fut = async move {
@@ -69,10 +73,10 @@ fn test_sqlite_usage_init() -> eyre::Result<()> {
             };
 
             tokio::select! {
-                r = keystone::test_runner(&mut instance) => Ok(r?),
+                r = keystone::drive_stream(&mut rpc_systems) => Ok(r?),
                 r = fut => r,
             }?;
-            keystone::test_shutdown(&mut instance).await
+            keystone::test_shutdown(&mut instance, &mut rpc_systems).await
         },
     )
 }

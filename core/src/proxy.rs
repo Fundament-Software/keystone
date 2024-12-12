@@ -1,3 +1,5 @@
+use crate::util::SnowflakeSource;
+use caplog::{CapLog, MAX_BUFFER_SIZE};
 use capnp::capability::Client;
 use capnp::capability::Params;
 use capnp::capability::Request;
@@ -6,6 +8,7 @@ use capnp::capability::Server;
 use capnp::private::capability::ClientHook;
 use capnp::private::layout::CapTable;
 use capnp::traits::FromPointerReader;
+use capnp::MessageSize;
 use capnp_rpc::CapabilityServerSet;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -28,13 +31,22 @@ impl<'a> FromPointerReader<'a> for GetPointerReader<'a> {
 pub struct ProxyServer {
     pub target: Client,
     pub set: Rc<RefCell<CapSet>>,
+    pub log: Rc<RefCell<CapLog<MAX_BUFFER_SIZE>>>,
+    snowflake: Rc<SnowflakeSource>,
 }
 
 impl ProxyServer {
-    pub fn new(hook: Box<dyn ClientHook>, set: Rc<RefCell<CapSet>>) -> Self {
+    pub fn new(
+        hook: Box<dyn ClientHook>,
+        set: Rc<RefCell<CapSet>>,
+        log: Rc<RefCell<CapLog<MAX_BUFFER_SIZE>>>,
+        snowflake: Rc<SnowflakeSource>,
+    ) -> Self {
         Self {
             target: Client::new(hook),
             set,
+            log,
+            snowflake,
         }
     }
 }
@@ -52,6 +64,27 @@ impl Server for ProxyServer {
         let caps = reader.reader.get_cap_table();
 
         let mut table = CapTable::with_capacity(caps.len());
+
+        if self
+            .log
+            .borrow_mut()
+            .append(
+                self.snowflake.get(),
+                self.snowflake.machine_id(),
+                self.snowflake.instance_id(),
+                0, // TODO: encapsulate this with the originating module and target module id
+                p,
+                p.target_size()
+                    .unwrap_or(MessageSize {
+                        word_count: 0,
+                        cap_count: 0,
+                    })
+                    .word_count as usize,
+            )
+            .is_err()
+        {
+            eprintln!("Log failed in dispatch_call!");
+        }
 
         for index in 0..caps.len() {
             table.push(if let Some(cap) = caps.extract_cap(index) {
@@ -80,7 +113,12 @@ impl Server for ProxyServer {
                         // Not a proxy, belongs to some other RPC connection, needs a proxy
                         self.set
                             .borrow_mut()
-                            .new_client(ProxyServer::new(cap, self.set.clone()))
+                            .new_client(ProxyServer::new(
+                                cap,
+                                self.set.clone(),
+                                self.log.clone(),
+                                self.snowflake.clone(),
+                            ))
                             .hook
                     },
                 )

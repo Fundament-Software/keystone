@@ -19,10 +19,10 @@ use chrono_tz::Tz;
 use eyre::Result;
 use futures_util::TryFutureExt;
 use rusqlite::params;
+use std::future::Future;
 use std::rc::Rc;
 use std::str::FromStr;
 use tokio::sync::mpsc;
-use tokio::task::JoinHandle;
 use tokio::time::Duration;
 use tokio::time::Instant;
 
@@ -90,7 +90,6 @@ impl TimeSource for () {
 
 pub struct Scheduler {
     db: Rc<ServerDispatch<SqliteDatabase>>,
-    pub thread: JoinHandle<Result<()>>,
     signal: tokio::sync::mpsc::Sender<Queue>,
 }
 
@@ -274,7 +273,7 @@ impl Scheduler {
     pub fn new<TS: TimeSource + 'static>(
         db: Rc<ServerDispatch<SqliteDatabase>>,
         mut ts: TS,
-    ) -> Result<Self> {
+    ) -> Result<(Self, impl Future<Output = Result<()>>)> {
         // Prep database
         db.server.connection.execute(
             "
@@ -298,7 +297,7 @@ CREATE TABLE IF NOT EXISTS scheduler (
         let (send, mut recv) = mpsc::channel(20);
 
         // This absolutely must be in a spawn() call of some kind because a multithreaded runtime must be able to give it as much wakeup granularity as possible.
-        let handle = tokio::task::spawn_local(async move {
+        let fut = async move {
             let mut get_range = db.server.connection.prepare_cached(
                 "SELECT id, timestamp, action, every_months, every_days, every_hours, every_millis, tz, repeat FROM scheduler WHERE timestamp <= ?1",
             )?;
@@ -494,13 +493,15 @@ CREATE TABLE IF NOT EXISTS scheduler (
                     }
                 }
             }
-        });
+        };
 
-        Ok(Self {
-            db: db2,
-            thread: handle,
-            signal: send,
-        })
+        Ok((
+            Self {
+                db: db2,
+                signal: send,
+            },
+            fut,
+        ))
     }
 }
 
@@ -863,12 +864,6 @@ mod tests {
         mpsc::Sender<i64>,
         Rc<restore::ServerDispatch<TestModule, any_pointer>>,
     )> {
-        //tracing_subscriber::fmt()
-        //    .with_max_level(tracing::Level::DEBUG)
-        //    .with_writer(std::io::stderr)
-        //    .with_ansi(true)
-        //    .init();
-
         let db = crate::database::open_database(
             db_path.to_path_buf(),
             SqliteDatabase::new_connection,
@@ -889,14 +884,14 @@ mod tests {
         );
         let (sleep, waker) = mpsc::channel(1);
         let (time, now) = mpsc::channel(1);
+        let (s, fut) = super::Scheduler::new(db, TestTimeSource { now, waker })?;
 
         let scheduler =
-            capnp_rpc::local::Client::new(crate::scheduler_capnp::root::Client::from_server(
-                super::Scheduler::new(db, TestTimeSource { now, waker })?,
-            ));
+            capnp_rpc::local::Client::new(crate::scheduler_capnp::root::Client::from_server(s));
 
         let hook = scheduler.add_ref();
 
+        tokio::task::spawn_local(fut);
         Ok((FromClientHook::new(hook), sleep, time, module))
     }
 

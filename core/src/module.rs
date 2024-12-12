@@ -163,11 +163,12 @@ impl ModuleInstance {
     }
 
     pub async fn pause(&mut self, pause: bool) -> Result<()> {
-        self.pause.send(pause).await?;
-
-        if pause {
+        // Only change pause state if we're in a Ready or Paused state.
+        if pause && self.state == ModuleState::Ready {
+            self.pause.send(true).await?;
             self.state = ModuleState::Paused;
-        } else {
+        } else if !pause && self.state == ModuleState::Paused {
+            self.pause.send(false).await?;
             self.state = ModuleState::Ready;
         }
         Ok(())

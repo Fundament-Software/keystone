@@ -2738,12 +2738,14 @@ mod tests {
     #[tokio::test]
     async fn test_sqlite() -> eyre::Result<()> {
         let db_path = NamedTempFile::new().unwrap().into_temp_path();
-        let hook = capnp_rpc::local::Client::from_rc(SqliteDatabase::new(
-            db_path.to_path_buf(),
-            OpenFlags::default(),
-            Default::default(),
-            Default::default(),
-        )?)
+        let hook = capnp_rpc::local::Client::new(crate::sqlite_capnp::root::Client::from_server(
+            SqliteDatabase::new(
+                db_path.to_path_buf(),
+                OpenFlags::default(),
+                Default::default(),
+                Default::default(),
+            )?,
+        ))
         .add_ref();
         let client: add_d_b::Client = FromClientHook::new(hook);
 
@@ -2946,12 +2948,14 @@ mod tests {
     #[tokio::test]
     async fn test_parsing_sql() -> eyre::Result<()> {
         let db_path = NamedTempFile::new().unwrap().into_temp_path();
-        let hook = capnp_rpc::local::Client::from_rc(SqliteDatabase::new(
-            db_path.to_path_buf(),
-            OpenFlags::default(),
-            Default::default(),
-            Default::default(),
-        )?)
+        let hook = capnp_rpc::local::Client::new(crate::sqlite_capnp::root::Client::from_server(
+            SqliteDatabase::new(
+                db_path.to_path_buf(),
+                OpenFlags::default(),
+                Default::default(),
+                Default::default(),
+            )?,
+        ))
         .add_ref();
         let client: add_d_b::Client = FromClientHook::new(hook);
 

@@ -662,12 +662,12 @@ mod tests {
         send: AtomicTake<oneshot::Sender<()>>,
         count: AtomicI32,
         key: String,
-        parent: Rc<restore::ServerDispatch<TestModule, any_pointer>>,
+        parent: Rc<TestModule>,
     }
 
     #[capnproto_rpc(action)]
     impl action::Server for TestActionImpl {
-        async fn run(&self) -> capnp::Result<()> {
+        async fn run(self: Rc<Self>) -> capnp::Result<()> {
             let prev = self
                 .count
                 .fetch_sub(1, std::sync::atomic::Ordering::Release);
@@ -697,7 +697,7 @@ mod tests {
 
     #[capnproto_rpc(saveable)]
     impl saveable::Server<action::Owned> for TestActionImpl {
-        async fn save(&self) -> capnp::Result<()> {
+        async fn save(self: Rc<Self>) -> capnp::Result<()> {
             tracing::info!("{}::save() {:?}", self.key, &self.send);
             let sturdyref =
                 crate::sturdyref::SturdyRefImpl::init(1, self.key.as_str(), self.parent.db.clone())
@@ -716,7 +716,7 @@ mod tests {
 
             // After our final expected call of run(), send will be empty, and us calling save() on it is not a bug, so we can't detect it here.
             if let Some(send) = self.send.take() {
-                self.parent.server.actions.borrow_mut().insert(
+                self.parent.actions.borrow_mut().insert(
                     self.key.clone(),
                     (self.count.load(std::sync::atomic::Ordering::Relaxed), send),
                 );
@@ -756,7 +756,7 @@ mod tests {
 
     #[capnproto_rpc(repeat_callback)]
     impl repeat_callback::Server for TestRepeatCallback {
-        async fn repeat(&self, time: Reader) -> capnp::Result<()> {
+        async fn repeat(self: Rc<Self>, time: Reader) -> capnp::Result<()> {
             let tz_index = time.get_tz()?;
             let datetime = super::from_ymd_hms_ms(time, tz_index, 0)?
                 .earliest()
@@ -779,7 +779,7 @@ mod tests {
 
     #[capnproto_rpc(saveable)]
     impl saveable::Server<repeat_callback::Owned> for TestRepeatCallback {
-        async fn save(&self) -> capnp::Result<()> {
+        async fn save(self: Rc<Self>) -> capnp::Result<()> {
             let sturdyref = crate::sturdyref::SturdyRefImpl::init(1, "__callback", self.db.clone())
                 .await
                 .to_capnp()?;
@@ -845,11 +845,11 @@ mod tests {
         crate::scheduler_capnp::root::Client,
         mpsc::Sender<()>,
         mpsc::Sender<i64>,
-        Rc<restore::ServerDispatch<TestModule, any_pointer>>,
+        Rc<TestModule>,
     )> {
         let db = crate::database::open_database(
             db_path.to_path_buf(),
-            SqliteDatabase::new_connection,
+            |c| SqliteDatabase::new_connection(c).map(|s| Rc::new(s)),
             crate::database::OpenOptions::Create,
         )?;
 
@@ -880,7 +880,7 @@ mod tests {
         datetime: chrono::DateTime<chrono::Utc>,
         delay: i64,
         scheduler: &crate::scheduler_capnp::root::Client,
-        module: Rc<restore::ServerDispatch<TestModule, any_pointer>>,
+        module: Rc<TestModule>,
     ) -> capnp::Result<(
         oneshot::Receiver<()>,
         crate::scheduler_capnp::registration::Client,
@@ -925,7 +925,7 @@ mod tests {
         millis: i64,
         miss: MissBehavior,
         scheduler: &crate::scheduler_capnp::root::Client,
-        module: Rc<restore::ServerDispatch<TestModule, any_pointer>>,
+        module: Rc<TestModule>,
     ) -> capnp::Result<(
         oneshot::Receiver<()>,
         crate::scheduler_capnp::registration::Client,
@@ -974,7 +974,7 @@ mod tests {
         callback: repeat_callback::Client,
         miss: MissBehavior,
         scheduler: &crate::scheduler_capnp::root::Client,
-        module: Rc<restore::ServerDispatch<TestModule, any_pointer>>,
+        module: Rc<TestModule>,
     ) -> capnp::Result<(
         oneshot::Receiver<()>,
         crate::scheduler_capnp::registration::Client,

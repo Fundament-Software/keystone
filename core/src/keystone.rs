@@ -143,8 +143,8 @@ where
 pub type ModuleJoinSet = Rc<RefCell<tokio::task::JoinSet<Result<()>>>>;
 pub type RpcSystemSet = FuturesUnordered<Pin<Box<dyn Future<Output = Result<()>>>>>;
 pub struct Keystone {
-    db: Rc<crate::sqlite_capnp::root::ServerDispatch<SqliteDatabase>>,
-    scheduler: Rc<crate::scheduler_capnp::root::ServerDispatch<Scheduler>>,
+    db: Rc<SqliteDatabase>,
+    scheduler: Rc<Scheduler>,
     scheduler_thread: FutureStaging,
     pub log: Rc<RefCell<CapLog<MAX_BUFFER_SIZE>>>, // TODO: Remove RefCell once CapLog is made thread-safe.
     file_server: Rc<RefCell<AmbientAuthorityImpl>>,
@@ -294,12 +294,12 @@ impl Keystone {
         let caplog_config = config.get_caplog()?;
         let db = crate::database::open_database(
             Path::new(config.get_database()?.to_str()?),
-            SqliteDatabase::new_connection,
+            |c| SqliteDatabase::new_connection(c).map(|r| Rc::new(r)),
             crate::database::OpenOptions::Create,
         )?;
 
         let (s, fut) = Scheduler::new(db.clone(), ())?;
-        let scheduler = Rc::new(crate::scheduler_capnp::root::Client::from_server(s));
+        let scheduler = Rc::new(s);
 
         let builtin =
             BUILTIN_MODULES.map(|s| (s.to_string(), db.get_string_index(s).unwrap() as u64));
@@ -338,7 +338,7 @@ impl Keystone {
             .collect();
 
         {
-            let mut clients = db.server.clients.borrow_mut();
+            let mut clients = db.clients.borrow_mut();
             clients.extend(
                 modules
                     .iter()
@@ -347,12 +347,18 @@ impl Keystone {
 
             clients.insert(
                 namemap[BUILTIN_SQLITE],
-                capnp_rpc::local::Client::from_rc(db.clone()).add_ref(),
+                capnp_rpc::local::Client::new(crate::sqlite_capnp::root::Client::from_rc(
+                    db.clone(),
+                ))
+                .add_ref(),
             );
 
             clients.insert(
                 namemap[BUILTIN_SCHEDULER],
-                capnp_rpc::local::Client::from_rc(scheduler.clone()).add_ref(),
+                capnp_rpc::local::Client::new(crate::scheduler_capnp::root::Client::from_rc(
+                    scheduler.clone(),
+                ))
+                .add_ref(),
             );
         }
 
@@ -466,9 +472,9 @@ impl Keystone {
 
     fn internal_cap(
         id: &str,
-        db: Rc<crate::sqlite_capnp::root::ServerDispatch<SqliteDatabase>>,
+        db: Rc<SqliteDatabase>,
         cells: Rc<RefCell<CellCapSet>>,
-        scheduler: Rc<crate::scheduler_capnp::root::ServerDispatch<Scheduler>>,
+        scheduler: Rc<Scheduler>,
     ) -> Option<Box<dyn ClientHook>> {
         match id {
             BUILTIN_KEYSTONE => Some(
@@ -481,10 +487,18 @@ impl Keystone {
                 .client
                 .hook,
             ),
-            BUILTIN_SQLITE => Some(capnp_rpc::local::Client::from_rc(db.clone()).add_ref()),
-            BUILTIN_SCHEDULER => {
-                Some(capnp_rpc::local::Client::from_rc(scheduler.clone()).add_ref())
-            }
+            BUILTIN_SQLITE => Some(
+                capnp_rpc::local::Client::new(crate::sqlite_capnp::root::Client::from_rc(
+                    db.clone(),
+                ))
+                .add_ref(),
+            ),
+            BUILTIN_SCHEDULER => Some(
+                capnp_rpc::local::Client::new(crate::scheduler_capnp::root::Client::from_rc(
+                    scheduler.clone(),
+                ))
+                .add_ref(),
+            ),
             _ => None,
         }
     }
@@ -562,7 +576,7 @@ impl Keystone {
         mut builder: capnp::any_pointer::Builder<'_>,
         index: u32,
         id: u64,
-        db: Rc<crate::sqlite_capnp::root::ServerDispatch<SqliteDatabase>>,
+        db: Rc<SqliteDatabase>,
         cells: Rc<RefCell<CellCapSet>>,
     ) -> capnp::Result<bool> {
         if let crate::keystone_capnp::cap_expr::Which::ModuleRef(_) =
@@ -703,17 +717,16 @@ impl Keystone {
             Ok(p.pipeline.get_api().as_cap()),
         );
 
-        inner.server.borrow_mut().debug_name = Some(module.name.clone());
+        inner.borrow_mut().debug_name = Some(module.name.clone());
 
         module.process = Some(process);
         module.program = Some(program);
-        module.bootstrap = inner.server.borrow_mut().bootstrap.take();
-        module.pause = inner.server.borrow_mut().pause.clone();
+        module.bootstrap = inner.borrow_mut().bootstrap.take();
+        module.pause = inner.borrow_mut().pause.clone();
         module.api = Some(p);
         module.state = ModuleState::Ready;
 
         let x = inner
-            .server
             .borrow_mut()
             .rpc_future
             .take()
@@ -725,10 +738,7 @@ impl Keystone {
         &self,
         config: keystone_config::module_config::Reader<'_, any_pointer>,
     ) -> Result<u64> {
-        Ok(self
-            .db
-            .server
-            .get_string_index(config.get_name()?.to_str()?)? as u64)
+        Ok(self.db.get_string_index(config.get_name()?.to_str()?)? as u64)
     }
 
     fn default_log_env(config: &keystone_config::Reader<'_>) -> &'static str {
@@ -794,9 +804,7 @@ impl Keystone {
             .await
     }
 
-    pub async fn passthrough_stderr(
-        mut input: crate::byte_stream::ByteStreamBufferImpl,
-    ) -> eyre::Result<()> {
+    pub async fn passthrough_stderr(mut input: ByteStreamBufferImpl) -> eyre::Result<()> {
         let mut buf = [0u8; 1024];
         let mut output = std::io::stderr();
         loop {
@@ -896,7 +904,7 @@ pub fn get_binary_path(name: &str) -> std::path::PathBuf {
 }
 
 pub struct KeystoneRoot {
-    db: Rc<crate::sqlite_capnp::root::ServerDispatch<SqliteDatabase>>,
+    db: Rc<SqliteDatabase>,
     cells: Rc<RefCell<CellCapSet>>,
 }
 
@@ -911,7 +919,7 @@ impl KeystoneRoot {
 
 impl crate::keystone_capnp::root::Server for KeystoneRoot {
     async fn init_cell(
-        &self,
+        self: Rc<Self>,
         params: crate::keystone_capnp::root::InitCellParams,
         mut results: crate::keystone_capnp::root::InitCellResults,
     ) -> Result<(), ::capnp::Error> {
@@ -921,7 +929,6 @@ impl crate::keystone_capnp::root::Server for KeystoneRoot {
         tracing::debug!("init_cell()");
         let id = self
             .db
-            .server
             .get_string_index(params.get_id()?.to_str()?)
             .to_capnp()?;
 
@@ -933,7 +940,6 @@ impl crate::keystone_capnp::root::Server for KeystoneRoot {
 
         if params.has_default() {
             self.db
-                .server
                 .set_state(id, params.get_default()?)
                 .await
                 .to_capnp()?;

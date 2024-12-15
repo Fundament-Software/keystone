@@ -73,8 +73,9 @@ pub struct ModuleImpl<
 > {
     bootstrap: RefCell<Option<keystone_capnp::host::Client<any_pointer>>>,
     disconnector: RefCell<Option<capnp_rpc::Disconnector<rpc_twoparty_capnp::Side>>>,
-    inner: RefCell<Option<Rc<<API::Reader<'static> as FromServer<Impl>>::Dispatch>>>,
+    inner: RefCell<Option<Rc<Impl>>>,
     phantom: PhantomData<Config>,
+    phantomapi: PhantomData<API>,
     sender: AtomicTake<oneshot::Sender<()>>,
 }
 
@@ -85,26 +86,24 @@ impl<
         API: 'static + for<'c> capnp::traits::Owned<Reader<'c>: capnp::capability::FromServer<Impl>>,
     > module_start::Server<Config, API> for ModuleImpl<Config, Impl, API>
 {
-    async fn start(&self, config: Reader) -> capnp::Result<()> {
+    async fn start(self: Rc<Self>, config: Reader) -> capnp::Result<()> {
         if let Some(sender) = self.sender.take() {
             let _ = sender.send(());
         }
         tracing::debug!("Constructing module implementation");
         let bootstrap_ref = self.bootstrap.borrow_mut().as_ref().map(|x| x.clone());
         if let Some(bootstrap) = bootstrap_ref {
-            let inner = Rc::new(API::Reader::from_server(
-                Impl::new(config, bootstrap).await?,
-            ));
+            let inner = Rc::new(Impl::new(config, bootstrap).await?);
             self.inner.borrow_mut().replace(inner.clone());
             let api: API::Reader<'_> = capnp::capability::FromClientHook::new(Box::new(
-                capnp_rpc::local::Client::from_rc(inner),
+                capnp_rpc::local::Client::new(API::Reader::from_rc(inner)),
             ));
             results.get().set_api(api)
         } else {
             Err(capnp::Error::failed("Bootstrap API did not exist?! Was start() called before the RPC connection was fully established?".into()))
         }
     }
-    async fn stop(&self) -> capnp::Result<()> {
+    async fn stop(self: Rc<Self>) -> capnp::Result<()> {
         tracing::debug!("Module recieved stop request");
         let r = self.disconnector.borrow_mut().take();
         if let Some(d) = r {
@@ -133,19 +132,19 @@ pub async fn start<
     tracing::info!("Module starting up...");
     let (sender, recv) = oneshot::channel::<()>();
 
-    let server = Rc::new(module_start::Client::<Config, API>::from_server(
-        ModuleImpl {
-            bootstrap: None.into(),
-            disconnector: None.into(),
-            inner: None.into(),
-            phantom: PhantomData,
-            sender: AtomicTake::new(sender),
-        },
-    ));
+    let module_impl = Rc::new(ModuleImpl {
+        bootstrap: None.into(),
+        disconnector: None.into(),
+        inner: None.into(),
+        phantom: PhantomData,
+        phantomapi: PhantomData,
+        sender: AtomicTake::new(sender),
+    });
 
-    let module_client: module_start::Client<Config, API> = capnp::capability::FromClientHook::new(
-        Box::new(capnp_rpc::local::Client::from_rc(server.clone())),
-    );
+    let module_client: module_start::Client<Config, API> =
+        capnp::capability::FromClientHook::new(Box::new(capnp_rpc::local::Client::new(
+            module_start::Client::<Config, API>::from_rc(module_impl.clone()),
+        )));
 
     let network = twoparty::VatNetwork::new(
         reader,
@@ -155,7 +154,7 @@ pub async fn start<
     );
     let mut rpc_system = RpcSystem::new(Box::new(network), Some(module_client.clone().client));
 
-    let borrow = server.as_ref();
+    let borrow = module_impl.as_ref();
     *borrow.bootstrap.borrow_mut() = Some(rpc_system.bootstrap(rpc_twoparty_capnp::Side::Client));
     *borrow.disconnector.borrow_mut() = Some(rpc_system.get_disconnector());
 

@@ -2,6 +2,7 @@ use crate::stateful_capnp::my_state;
 use crate::stateful_capnp::root;
 use capnp_macros::capnproto_rpc;
 use keystone::storage_capnp::cell;
+use std::rc::Rc;
 
 pub struct StatefulImpl {
     pub echo_word: String,
@@ -10,7 +11,7 @@ pub struct StatefulImpl {
 
 #[capnproto_rpc(root)]
 impl root::Server for StatefulImpl {
-    async fn echo_last(&self, request: Reader) -> Result<(), ::capnp::Error> {
+    async fn echo_last(self: Rc<Self>, request: Reader) -> Result<(), ::capnp::Error> {
         tracing::debug!("echo_last was called!");
         let name = request.get_name()?.to_str()?;
         let prev_request = self.echo_last.get_request().send();

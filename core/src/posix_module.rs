@@ -30,7 +30,6 @@ pub struct PosixModuleProcessImpl {
     api: RemotePromise<module_start::start_results::Owned<any_pointer, cap_pointer>>,
     pub(crate) debug_name: Option<String>,
     pub(crate) pause: mpsc::Sender<bool>,
-    //pub(crate) stderr: ByteStreamBufferImpl,
 }
 
 type AnyPointerClient = process::Client<cap_pointer, module_error::Owned<any_pointer>>;
@@ -43,7 +42,7 @@ impl process::Server<cap_pointer, module_error::Owned<any_pointer>>
     /// In this implementation of `spawn`, the functions returns the exit code of the child
     /// process.
     async fn get_error(
-        &self,
+        self: Rc<Self>,
         _: process::GetErrorParams<cap_pointer, module_error::Owned<any_pointer>>,
         mut results: process::GetErrorResults<cap_pointer, module_error::Owned<any_pointer>>,
     ) -> Result<(), capnp::Error> {
@@ -60,7 +59,7 @@ impl process::Server<cap_pointer, module_error::Owned<any_pointer>>
     }
 
     async fn kill(
-        &self,
+        self: Rc<Self>,
         _: process::KillParams<cap_pointer, module_error::Owned<any_pointer>>,
         _: process::KillResults<cap_pointer, module_error::Owned<any_pointer>>,
     ) -> Result<(), capnp::Error> {
@@ -73,7 +72,7 @@ impl process::Server<cap_pointer, module_error::Owned<any_pointer>>
     }
 
     async fn get_api(
-        &self,
+        self: Rc<Self>,
         _: process::GetApiParams<cap_pointer, module_error::Owned<any_pointer>>,
         mut results: process::GetApiResults<cap_pointer, module_error::Owned<any_pointer>>,
     ) -> Result<(), capnp::Error> {
@@ -88,7 +87,7 @@ impl process::Server<cap_pointer, module_error::Owned<any_pointer>>
     }
 
     async fn join(
-        &self,
+        self: Rc<Self>,
         _: process::JoinParams<cap_pointer, module_error::Owned<any_pointer>>,
         mut results: process::JoinResults<cap_pointer, module_error::Owned<any_pointer>>,
     ) -> Result<(), ::capnp::Error> {
@@ -107,7 +106,7 @@ impl process::Server<cap_pointer, module_error::Owned<any_pointer>>
 
 pub struct PosixModuleProgramImpl<F: LogCapture> {
     posix_program: program::Client<PosixArgs, ByteStream, PosixError>,
-    module: PosixModuleImpl<F>,
+    module: Rc<PosixModuleImpl<F>>,
 }
 
 // Flattens nested results into a capnp::Result
@@ -129,7 +128,7 @@ impl<F: LogCapture>
         module_error::Owned<any_pointer>,
     > for PosixModuleProgramImpl<F>
 {
-    async fn spawn(&self, args: Reader) -> Result<(), ::capnp::Error> {
+    async fn spawn(self: Rc<Self>, args: Reader) -> Result<(), ::capnp::Error> {
         let span = tracing::span!(tracing::Level::DEBUG, "posix_program::spawn");
         let _enter = span.enter();
         let mut request = self.posix_program.spawn_request();
@@ -141,8 +140,8 @@ impl<F: LogCapture>
         let stdout = ByteStreamBufferImpl::new();
         let stderr = ByteStreamBufferImpl::new();
 
-        prog_args.set_stdout(capnp_rpc::new_client(stdout.clone()));
-        prog_args.set_stderr(capnp_rpc::new_client(stderr.clone()));
+        prog_args.set_stdout(stdout.new_client());
+        prog_args.set_stderr(stderr.new_client());
 
         match request.send().promise.await {
             Ok(h) => {
@@ -203,13 +202,8 @@ impl<F: LogCapture>
                                 {
                                     // We must be exceedingly careful that the async block itself only borrows the weak reference, so
                                     // that when we upgrade it here, it will go out of scope after we're finished and not cause a cycle.
-                                    let handle: Rc<
-                                        process::ServerDispatch<
-                                            RefCell<PosixModuleProcessImpl>,
-                                            any_pointer,
-                                            module_error::Owned<any_pointer>,
-                                        >,
-                                    > = this.upgrade().unwrap();
+                                    let handle: Rc<RefCell<PosixModuleProcessImpl>> =
+                                        this.upgrade().unwrap();
 
                                     let mut rpc_handle = tokio::task::spawn_local(async move {
                                         loop {
@@ -268,21 +262,21 @@ impl<F: LogCapture>
                                 }
                             };
 
-                            AnyPointerClient::from_server(RefCell::new(PosixModuleProcessImpl {
+                            RefCell::new(PosixModuleProcessImpl {
                                 posix_process: process,
                                 rpc_future: Some(fut.boxed_local()),
                                 bootstrap: Some(bootstrap),
                                 api,
                                 debug_name: None,
                                 pause: send,
-                            }))
+                            })
                         });
 
                         let module_process_client: AnyPointerClient = self
                             .module
                             .module_process_set
                             .borrow_mut()
-                            .from_rc(module_process);
+                            .new_client_from_rc(module_process);
                         results.get().set_result(module_process_client);
                         Ok(())
                     }
@@ -314,7 +308,7 @@ impl<F: LogCapture> Clone for PosixModuleImpl<F> {
 
 #[capnproto_rpc(posix_module)]
 impl<F: LogCapture> posix_module::Server for PosixModuleImpl<F> {
-    async fn wrap(&self, prog: Client) {
+    async fn wrap(self: Rc<Self>, prog: Client) {
         let span = tracing::span!(tracing::Level::DEBUG, "posix_module::wrap");
         let _enter = span.enter();
         let program = PosixModuleProgramImpl::<F> {

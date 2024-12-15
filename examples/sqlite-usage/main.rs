@@ -21,6 +21,7 @@ use keystone::sqlite_capnp::table_field;
 use keystone::sqlite_capnp::table_or_subquery;
 use keystone::storage_capnp::cell;
 use sqlite_usage_capnp::root;
+use std::rc::Rc;
 
 pub struct SqliteUsageImpl {
     pub outer: cell::Client<keystone::sqlite_capnp::table_ref::Owned>,
@@ -30,7 +31,7 @@ pub struct SqliteUsageImpl {
 
 #[capnproto_rpc(root)]
 impl root::Server for SqliteUsageImpl {
-    async fn echo_alphabetical(&self, request: Reader) -> Result<(), ::capnp::Error> {
+    async fn echo_alphabetical(self: Rc<Self>, request: Reader) -> Result<(), ::capnp::Error> {
         tracing::debug!("echo_alphabetical was called!");
 
         let res = self

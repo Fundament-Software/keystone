@@ -4,6 +4,7 @@ use http_body_util::BodyExt;
 use hyper::{http::uri::Authority, HeaderMap};
 use hyper_tls::HttpsConnector;
 use hyper_util::client::legacy::{connect::HttpConnector, Client as HttpClient, ResponseFuture};
+use std::rc::Rc;
 
 use Path::HttpVerb;
 
@@ -150,13 +151,13 @@ async fn http_request_promise(
 }
 #[capnproto_rpc(Path)]
 impl Path::Server for PathImpl {
-    async fn query(&self, values: Reader) {
+    async fn query(self: Rc<Self>, values: Reader) {
         if !self.query_modifiable {
             return Err(capnp::Error::failed(
                 "Can't add to query, because it was finalized".to_string(),
             ));
         }
-        let mut return_path = self.clone();
+        let mut return_path = self.as_ref().clone();
         for value in values.iter() {
             let k = value.get_key()?.to_string()?;
             let v = value.get_value()?.to_string()?;
@@ -167,13 +168,13 @@ impl Path::Server for PathImpl {
         Ok(())
     }
 
-    async fn path(&self, values: Reader) {
+    async fn path(self: Rc<Self>, values: Reader) {
         if !self.path_modifiable {
             return Err(capnp::Error::failed(
                 "Can't add to path, because it was finalized".to_string(),
             ));
         }
-        let mut return_path = self.clone();
+        let mut return_path = self.as_ref().clone();
         for value in values.iter() {
             let v = value?.to_string()?;
             return_path.path_list.push(v);
@@ -183,71 +184,71 @@ impl Path::Server for PathImpl {
         Ok(())
     }
     // START OF IMPLEMENTATIONS THAT RETURN HTTP RESULT
-    async fn get(&self) {
+    async fn get(self: Rc<Self>) {
         let future = self.http_request(HttpVerb::Get, None)?;
         http_request_promise(results.get().init_result(), future).await
     }
 
-    async fn head(&self) {
+    async fn head(self: Rc<Self>) {
         let future = self.http_request(HttpVerb::Head, None)?;
         http_request_promise(results.get().init_result(), future).await
     }
 
-    async fn post(&self, body: Reader) {
+    async fn post(self: Rc<Self>, body: Reader) {
         let body = body.to_string()?;
         let future = self.http_request(HttpVerb::Post, Some(body))?;
 
         http_request_promise(results.get().init_result(), future).await
     }
 
-    async fn put(&self, body: Reader) {
+    async fn put(self: Rc<Self>, body: Reader) {
         let body = body.to_string()?;
         let future = self.http_request(HttpVerb::Put, Some(body))?;
 
         http_request_promise(results.get().init_result(), future).await
     }
 
-    async fn delete(&self, body: Reader) {
+    async fn delete(self: Rc<Self>, body: Reader) {
         let body = body.to_string()?;
         let future = self.http_request(HttpVerb::Delete, Some(body))?;
 
         http_request_promise(results.get().init_result(), future).await
     }
 
-    async fn options(&self) {
+    async fn options(self: Rc<Self>) {
         let future = self.http_request(HttpVerb::Options, None)?;
         http_request_promise(results.get().init_result(), future).await
     }
 
-    async fn patch(&self, body: Reader) {
+    async fn patch(self: Rc<Self>, body: Reader) {
         let body = body.to_string()?;
         let future = self.http_request(HttpVerb::Patch, Some(body))?;
         http_request_promise(results.get().init_result(), future).await
     }
     // END OF IMPLEMENTATIONS THAT RETURN HTTP RESULT
-    async fn finalize_query(&self) {
-        let mut return_path = self.clone();
+    async fn finalize_query(self: Rc<Self>) {
+        let mut return_path = self.as_ref().clone();
         return_path.query_modifiable = false;
         let client = capnp_rpc::new_client(return_path);
         results.get().set_result(client);
         Ok(())
     }
 
-    async fn finalize_path(&self) {
-        let mut return_path = self.clone();
+    async fn finalize_path(self: Rc<Self>) {
+        let mut return_path = self.as_ref().clone();
         return_path.path_modifiable = false;
         let client = capnp_rpc::new_client(return_path);
         results.get().set_result(client);
         Ok(())
     }
 
-    async fn whitelist_verbs(&self, verbs: Reader) {
+    async fn whitelist_verbs(self: Rc<Self>, verbs: Reader) {
         let mut verbs_vec = vec![];
         for verb in verbs.iter() {
             let v = verb?;
             verbs_vec.push(v);
         }
-        let mut return_path = self.clone();
+        let mut return_path = self.as_ref().clone();
         return_path
             .verb_whitelist
             .retain(|&x| verbs_vec.contains(&x));
@@ -256,13 +257,13 @@ impl Path::Server for PathImpl {
         Ok(())
     }
 
-    async fn headers(&self, headers: Reader) {
+    async fn headers(self: Rc<Self>, headers: Reader) {
         if !self.headers_modifiable {
             return Err(capnp::Error::failed(
                 "Can't add headers, because they were finalized".to_string(),
             ));
         }
-        let mut return_path = self.clone();
+        let mut return_path = self.as_ref().clone();
         for header in headers.iter() {
             let key = header.get_key()?.to_string()?;
             let key = hyper::header::HeaderName::try_from(key);
@@ -287,8 +288,8 @@ impl Path::Server for PathImpl {
         Ok(())
     }
 
-    async fn finalize_headers(&self) {
-        let mut return_path = self.clone();
+    async fn finalize_headers(self: Rc<Self>) {
+        let mut return_path = self.as_ref().clone();
         return_path.headers_modifiable = false;
         let client = capnp_rpc::new_client(return_path);
         results.get().set_result(client);

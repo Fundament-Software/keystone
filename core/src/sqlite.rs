@@ -51,12 +51,12 @@ enum AccessLevel {
 struct PlaceholderResults {
     buffer: Vec<Vec<SqlDBAny>>,
     last_id: Cell<usize>,
-    db: Rc<ServerDispatch<SqliteDatabase>>,
+    db: Rc<SqliteDatabase>,
 }
 
 #[capnproto_rpc(result_stream)]
 impl result_stream::Server for PlaceholderResults {
-    async fn next(&self, size: u16) {
+    async fn next(self: Rc<Self>, size: u16) {
         let last_id = self.last_id.get();
         let mut builder = results.get().init_res();
         if last_id + size as usize >= self.buffer.len() {
@@ -115,7 +115,6 @@ pub struct SqliteDatabase {
         RefCell<CapabilityServerSet<SturdyRefImpl, sturdy_ref::Client<capnp::any_pointer::Owned>>>,
     table_ref_set: Rc<RefCell<CapabilityServerSet<TableRefImpl, table::Client>>>,
     pub clients: Rc<RefCell<HashMap<u64, Box<dyn capnp::private::capability::ClientHook>>>>,
-    pub this: Weak<ServerDispatch<SqliteDatabase>>,
 }
 
 impl SqliteDatabase {
@@ -124,52 +123,44 @@ impl SqliteDatabase {
         flags: OpenFlags,
         table_ref_set: Rc<RefCell<CapabilityServerSet<TableRefImpl, table::Client>>>,
         clients: Rc<RefCell<HashMap<u64, Box<dyn capnp::private::capability::ClientHook>>>>,
-    ) -> capnp::Result<Rc<ServerDispatch<Self>>> {
+    ) -> capnp::Result<Self> {
         let connection =
             Connection::open_with_flags(path, flags).map_err(convert_rusqlite_error)?;
         let column_set = RefCell::new(create_column_set(&connection)?);
-        let result = Rc::new_cyclic(|this| {
-            crate::sqlite_capnp::root::Client::from_server(Self {
-                connection,
-                column_set,
-                alloc: Default::default(),
-                prepared_insert_set: Default::default(),
-                prepared_select_set: Default::default(),
-                prepared_delete_set: Default::default(),
-                prepared_update_set: Default::default(),
-                index_set: Default::default(),
-                sql_function_set: Default::default(),
-                table_function_set: Default::default(),
-                sturdyref_set: Default::default(),
-                table_ref_set,
-                clients,
-                this: this.clone(),
-            })
-        });
-
-        Ok(result)
+        Ok(Self {
+            connection,
+            column_set,
+            alloc: Default::default(),
+            prepared_insert_set: Default::default(),
+            prepared_select_set: Default::default(),
+            prepared_delete_set: Default::default(),
+            prepared_update_set: Default::default(),
+            index_set: Default::default(),
+            sql_function_set: Default::default(),
+            table_function_set: Default::default(),
+            sturdyref_set: Default::default(),
+            table_ref_set,
+            clients,
+        })
     }
 
-    pub fn new_connection(conn: Connection) -> capnp::Result<Rc<ServerDispatch<Self>>> {
+    pub fn new_connection(conn: Connection) -> capnp::Result<Self> {
         let column_set = RefCell::new(create_column_set(&conn)?);
-        Ok(Rc::new_cyclic(|this| {
-            crate::sqlite_capnp::root::Client::from_server(Self {
-                connection: conn,
-                alloc: Default::default(),
-                column_set,
-                prepared_insert_set: Default::default(),
-                prepared_select_set: Default::default(),
-                prepared_delete_set: Default::default(),
-                prepared_update_set: Default::default(),
-                index_set: Default::default(),
-                sql_function_set: Default::default(),
-                table_function_set: Default::default(),
-                sturdyref_set: Default::default(),
-                table_ref_set: Default::default(),
-                clients: Default::default(),
-                this: this.clone(),
-            })
-        }))
+        Ok(Self {
+            connection: conn,
+            alloc: Default::default(),
+            column_set,
+            prepared_insert_set: Default::default(),
+            prepared_select_set: Default::default(),
+            prepared_delete_set: Default::default(),
+            prepared_update_set: Default::default(),
+            index_set: Default::default(),
+            sql_function_set: Default::default(),
+            table_function_set: Default::default(),
+            sturdyref_set: Default::default(),
+            table_ref_set: Default::default(),
+            clients: Default::default(),
+        })
     }
 
     pub fn get_sturdyref_id(
@@ -183,7 +174,6 @@ impl SqliteDatabase {
             .ok_or(capnp::Error::failed(
                 "Sturdyref does not belong to this instance!".into(),
             ))?
-            .server
             .get_id())
     }
 
@@ -1024,7 +1014,7 @@ use crate::storage_capnp::restore;
 
 impl restore::Server<crate::sqlite_capnp::storage::Owned> for SqliteDatabase {
     async fn restore(
-        &self,
+        self: Rc<Self>,
         params: restore::RestoreParams<crate::sqlite_capnp::storage::Owned>,
         mut results: restore::RestoreResults<crate::sqlite_capnp::storage::Owned>,
     ) -> Result<(), ::capnp::Error> {
@@ -1034,10 +1024,7 @@ impl restore::Server<crate::sqlite_capnp::storage::Owned> for SqliteDatabase {
                 .borrow_mut()
                 .new_client(IndexImpl {
                     name: data.get_data(),
-                    db: self
-                        .this
-                        .upgrade()
-                        .ok_or(capnp::Error::failed("Database no longer exists".into()))?,
+                    db: self.clone(),
                 })
                 .client
                 .hook
@@ -1047,10 +1034,7 @@ impl restore::Server<crate::sqlite_capnp::storage::Owned> for SqliteDatabase {
             let cap = TableRefImpl {
                 access: access_level,
                 table_name: data.get_data(),
-                db: self
-                    .this
-                    .upgrade()
-                    .ok_or(capnp::Error::failed("Database no longer exists".into()))?,
+                db: self.clone(),
             };
 
             let mut capset = self.table_ref_set.as_ref().borrow_mut();
@@ -1092,7 +1076,7 @@ impl crate::sqlite_capnp::root::Server for SqliteDatabase {}
 
 #[capnproto_rpc(r_o_database)]
 impl r_o_database::Server for SqliteDatabase {
-    async fn select(&self, q: Select) {
+    async fn select(self: Rc<Self>, q: Select) {
         let statement_and_params = self
             .build_select_statement(q, StatementAndParams::new(80))
             .await?;
@@ -1110,16 +1094,13 @@ impl r_o_database::Server for SqliteDatabase {
             .set_res(capnp_rpc::new_client(PlaceholderResults {
                 buffer: row_vec,
                 last_id: Cell::new(0),
-                db: self
-                    .this
-                    .upgrade()
-                    .ok_or(capnp::Error::failed("Database no longer exists".into()))?,
+                db: self.clone(),
             }));
 
         Ok(())
     }
 
-    async fn prepare_select(&self, q: Select) {
+    async fn prepare_select(self: Rc<Self>, q: Select) {
         let statement_and_params = self
             .build_select_statement(q, StatementAndParams::new(80))
             .await?;
@@ -1130,7 +1111,11 @@ impl r_o_database::Server for SqliteDatabase {
         results.get().set_stmt(client);
         Ok(())
     }
-    async fn run_prepared_select(&self, stmt: PreparedStatement<Select>, bindings: List<DBAny>) {
+    async fn run_prepared_select(
+        self: Rc<Self>,
+        stmt: PreparedStatement<Select>,
+        bindings: List<DBAny>,
+    ) {
         let resolved = capnp::capability::get_resolved_cap(stmt).await;
         let Some(statement_and_params) = self
             .prepared_select_set
@@ -1163,10 +1148,7 @@ impl r_o_database::Server for SqliteDatabase {
             .set_res(capnp_rpc::new_client(PlaceholderResults {
                 buffer: row_vec,
                 last_id: Cell::new(0),
-                db: self
-                    .this
-                    .upgrade()
-                    .ok_or(capnp::Error::failed("Database no longer exists".into()))?,
+                db: self.clone(),
             }));
         Ok(())
     }
@@ -1174,7 +1156,7 @@ impl r_o_database::Server for SqliteDatabase {
 
 #[capnproto_rpc(database)]
 impl database::Server for SqliteDatabase {
-    async fn insert(&self, ins: Insert) {
+    async fn insert(self: Rc<Self>, ins: Insert) {
         let statement_and_params = self
             .build_insert_statement(ins, StatementAndParams::new(100))
             .await?;
@@ -1191,14 +1173,11 @@ impl database::Server for SqliteDatabase {
             .set_res(capnp_rpc::new_client(PlaceholderResults {
                 buffer: row_vec,
                 last_id: Cell::new(0),
-                db: self
-                    .this
-                    .upgrade()
-                    .ok_or(capnp::Error::failed("Database no longer exists".into()))?,
+                db: self.clone(),
             }));
         Ok(())
     }
-    async fn prepare_insert(&self, ins: Insert) {
+    async fn prepare_insert(self: Rc<Self>, ins: Insert) {
         let statement_and_params = self
             .build_insert_statement(ins, StatementAndParams::new(100))
             .await?;
@@ -1210,7 +1189,11 @@ impl database::Server for SqliteDatabase {
         Ok(())
     }
 
-    async fn run_prepared_insert(&self, stmt: PreparedStatement<Insert>, bindings: List<DBAny>) {
+    async fn run_prepared_insert(
+        self: Rc<Self>,
+        stmt: PreparedStatement<Insert>,
+        bindings: List<DBAny>,
+    ) {
         let resolved = capnp::capability::get_resolved_cap(stmt).await;
         let Some(statement_and_params) = self
             .prepared_insert_set
@@ -1242,14 +1225,11 @@ impl database::Server for SqliteDatabase {
             .set_res(capnp_rpc::new_client(PlaceholderResults {
                 buffer: row_vec,
                 last_id: Cell::new(0),
-                db: self
-                    .this
-                    .upgrade()
-                    .ok_or(capnp::Error::failed("Database no longer exists".into()))?,
+                db: self.clone(),
             }));
         Ok(())
     }
-    async fn update(&self, upd: Update) {
+    async fn update(self: Rc<Self>, upd: Update) {
         let statement_and_params = self
             .build_update_statement(upd, StatementAndParams::new(120))
             .await?;
@@ -1266,14 +1246,11 @@ impl database::Server for SqliteDatabase {
             .set_res(capnp_rpc::new_client(PlaceholderResults {
                 buffer: row_vec,
                 last_id: Cell::new(0),
-                db: self
-                    .this
-                    .upgrade()
-                    .ok_or(capnp::Error::failed("Database no longer exists".into()))?,
+                db: self.clone(),
             }));
         Ok(())
     }
-    async fn prepare_update(&self, upd: Update) {
+    async fn prepare_update(self: Rc<Self>, upd: Update) {
         let statement_and_params = self
             .build_update_statement(upd, StatementAndParams::new(120))
             .await?;
@@ -1284,7 +1261,11 @@ impl database::Server for SqliteDatabase {
         results.get().set_stmt(client);
         Ok(())
     }
-    async fn run_prepared_update(&self, stmt: PreparedStatement<Update>, bindings: List<DBAny>) {
+    async fn run_prepared_update(
+        self: Rc<Self>,
+        stmt: PreparedStatement<Update>,
+        bindings: List<DBAny>,
+    ) {
         let resolved = capnp::capability::get_resolved_cap(stmt).await;
         let Some(statement_and_params) = self
             .prepared_update_set
@@ -1316,14 +1297,11 @@ impl database::Server for SqliteDatabase {
             .set_res(capnp_rpc::new_client(PlaceholderResults {
                 buffer: row_vec,
                 last_id: Cell::new(0),
-                db: self
-                    .this
-                    .upgrade()
-                    .ok_or(capnp::Error::failed("Database no longer exists".into()))?,
+                db: self.clone(),
             }));
         Ok(())
     }
-    async fn delete(&self, del: Delete) {
+    async fn delete(self: Rc<Self>, del: Delete) {
         let statement_and_params = self
             .build_delete_statement(del, StatementAndParams::new(80))
             .await?;
@@ -1340,14 +1318,11 @@ impl database::Server for SqliteDatabase {
             .set_res(capnp_rpc::new_client(PlaceholderResults {
                 buffer: row_vec,
                 last_id: Cell::new(0),
-                db: self
-                    .this
-                    .upgrade()
-                    .ok_or(capnp::Error::failed("Database no longer exists".into()))?,
+                db: self.clone(),
             }));
         Ok(())
     }
-    async fn prepare_delete(&self, del: Delete) {
+    async fn prepare_delete(self: Rc<Self>, del: Delete) {
         let statement_and_params = self
             .build_delete_statement(del, StatementAndParams::new(80))
             .await?;
@@ -1358,7 +1333,11 @@ impl database::Server for SqliteDatabase {
         results.get().set_stmt(client);
         Ok(())
     }
-    async fn run_prepared_delete(&self, stmt: PreparedStatement<Delete>, bindings: List<DBAny>) {
+    async fn run_prepared_delete(
+        self: Rc<Self>,
+        stmt: PreparedStatement<Delete>,
+        bindings: List<DBAny>,
+    ) {
         let resolved = capnp::capability::get_resolved_cap(stmt).await;
         let Some(statement_and_params) = self
             .prepared_delete_set
@@ -1390,10 +1369,7 @@ impl database::Server for SqliteDatabase {
             .set_res(capnp_rpc::new_client(PlaceholderResults {
                 buffer: row_vec,
                 last_id: Cell::new(0),
-                db: self
-                    .this
-                    .upgrade()
-                    .ok_or(capnp::Error::failed("Database no longer exists".into()))?,
+                db: self.clone(),
             }));
         Ok(())
     }
@@ -1402,7 +1378,7 @@ impl database::Server for SqliteDatabase {
 pub struct TableRefImpl {
     access: AccessLevel,
     table_name: u64,
-    db: Rc<ServerDispatch<SqliteDatabase>>,
+    db: Rc<SqliteDatabase>,
 }
 
 impl TableRefImpl {
@@ -1440,7 +1416,6 @@ impl TableRefImpl {
         } else {
             Ok(self
                 .db
-                .server
                 .table_ref_set
                 .as_ref()
                 .borrow_mut()
@@ -1455,7 +1430,7 @@ impl TableRefImpl {
 
 #[capnproto_rpc(saveable)]
 impl saveable::Server<r_o_table_ref::Owned> for TableRefImpl {
-    async fn save(&self) {
+    async fn save(self: Rc<Self>) {
         results
             .get()
             .set_ref(self.save_generic::<r_o_table_ref::Owned>().await?);
@@ -1465,7 +1440,7 @@ impl saveable::Server<r_o_table_ref::Owned> for TableRefImpl {
 
 #[capnproto_rpc(saveable)]
 impl saveable::Server<r_a_table_ref::Owned> for TableRefImpl {
-    async fn save(&self) {
+    async fn save(self: Rc<Self>) {
         results
             .get()
             .set_ref(self.save_generic::<r_a_table_ref::Owned>().await?);
@@ -1475,7 +1450,7 @@ impl saveable::Server<r_a_table_ref::Owned> for TableRefImpl {
 
 #[capnproto_rpc(saveable)]
 impl saveable::Server<table_ref::Owned> for TableRefImpl {
-    async fn save(&self) {
+    async fn save(self: Rc<Self>) {
         results
             .get()
             .set_ref(self.save_generic::<table_ref::Owned>().await?);
@@ -1485,7 +1460,7 @@ impl saveable::Server<table_ref::Owned> for TableRefImpl {
 
 #[capnproto_rpc(saveable)]
 impl saveable::Server<table::Owned> for TableRefImpl {
-    async fn save(&self) {
+    async fn save(self: Rc<Self>) {
         results
             .get()
             .set_ref(self.save_generic::<table::Owned>().await?);
@@ -1498,7 +1473,7 @@ impl r_o_table_ref::Server for TableRefImpl {}
 
 #[capnproto_rpc(r_a_table_ref)]
 impl r_a_table_ref::Server for TableRefImpl {
-    async fn readonly(&self) {
+    async fn readonly(self: Rc<Self>) {
         results
             .get()
             .set_res(self.restrict_generic(AccessLevel::ReadOnly)?);
@@ -1507,7 +1482,7 @@ impl r_a_table_ref::Server for TableRefImpl {
 }
 #[capnproto_rpc(table_ref)]
 impl table_ref::Server for TableRefImpl {
-    async fn appendonly(&self) {
+    async fn appendonly(self: Rc<Self>) {
         results
             .get()
             .set_res(self.restrict_generic(AccessLevel::AppendOnly)?);
@@ -1516,7 +1491,7 @@ impl table_ref::Server for TableRefImpl {
 }
 #[capnproto_rpc(table)]
 impl table::Server for TableRefImpl {
-    async fn adminless(&self) {
+    async fn adminless(self: Rc<Self>) {
         results
             .get()
             .set_res(self.restrict_generic(AccessLevel::ReadWrite)?);
@@ -1525,7 +1500,7 @@ impl table::Server for TableRefImpl {
 }
 struct IndexImpl {
     name: u64,
-    db: Rc<ServerDispatch<SqliteDatabase>>,
+    db: Rc<SqliteDatabase>,
 }
 
 #[capnproto_rpc(index)]
@@ -1533,7 +1508,7 @@ impl index::Server for IndexImpl {}
 
 #[capnproto_rpc(saveable)]
 impl saveable::Server<index::Owned> for IndexImpl {
-    async fn save(&self) {
+    async fn save(self: Rc<Self>) {
         let id = self
             .db
             .get_string_index(crate::keystone::BUILTIN_SQLITE)
@@ -1564,13 +1539,8 @@ impl saveable::Server<index::Owned> for IndexImpl {
 
 #[capnproto_rpc(add_d_b)]
 impl add_d_b::Server for SqliteDatabase {
-    async fn create_table(&self, def: List) {
-        let table = generate_table_name(
-            AccessLevel::Admin,
-            self.this
-                .upgrade()
-                .ok_or(capnp::Error::failed("Database no longer exists".into()))?,
-        );
+    async fn create_table(self: Rc<Self>, def: List) {
+        let table = generate_table_name(AccessLevel::Admin, self.clone());
         let mut statement = String::new();
         statement.push_str(
             format!(
@@ -1613,13 +1583,9 @@ impl add_d_b::Server for SqliteDatabase {
         results.get().set_res(table_client);
         Ok(())
     }
-    async fn create_view(&self, names: List<Text>, def: Select) {
+    async fn create_view(self: Rc<Self>, names: List<Text>, def: Select) {
         let mut statement = String::new();
-        let view_name = create_view_name(
-            self.this
-                .upgrade()
-                .ok_or(capnp::Error::failed("Database no longer exists".into()))?,
-        );
+        let view_name = create_view_name(self.clone());
         statement
             .push_str(format!("CREATE VIEW {}{} ", VIEW_PREFIX, view_name.table_name).as_str());
 
@@ -1656,17 +1622,17 @@ impl add_d_b::Server for SqliteDatabase {
         Ok(())
     }
     #[allow(unused_variables)]
-    async fn create_restricted_table(&self, base: Table, restriction: List<TableRestriction>) {
+    async fn create_restricted_table(
+        self: Rc<Self>,
+        base: Table,
+        restriction: List<TableRestriction>,
+    ) {
         results.get();
         todo!()
     }
-    async fn create_index(&self, base: TableRef, cols: List<IndexedColumn>) {
+    async fn create_index(self: Rc<Self>, base: TableRef, cols: List<IndexedColumn>) {
         let mut statement_and_params = StatementAndParams::new(80);
-        let index_name = create_index_name(
-            self.this
-                .upgrade()
-                .ok_or(capnp::Error::failed("Database no longer exists".into()))?,
-        );
+        let index_name = create_index_name(self.clone());
         statement_and_params
             .statement
             .push_str(format!("CREATE INDEX {}{} ON ", INDEX_PREFIX, index_name.name,).as_str());
@@ -1758,23 +1724,20 @@ const TABLE_PREFIX: &str = "table";
 const INDEX_PREFIX: &str = "index";
 const VIEW_PREFIX: &str = "view";
 
-fn generate_table_name(
-    access: AccessLevel,
-    db: Rc<ServerDispatch<SqliteDatabase>>,
-) -> TableRefImpl {
+fn generate_table_name(access: AccessLevel, db: Rc<SqliteDatabase>) -> TableRefImpl {
     TableRefImpl {
         access,
         table_name: rand::random::<u64>(),
         db,
     }
 }
-fn create_index_name(db: Rc<ServerDispatch<SqliteDatabase>>) -> IndexImpl {
+fn create_index_name(db: Rc<SqliteDatabase>) -> IndexImpl {
     IndexImpl {
         name: rand::random::<u64>(),
         db,
     }
 }
-fn create_view_name(db: Rc<ServerDispatch<SqliteDatabase>>) -> TableRefImpl {
+fn create_view_name(db: Rc<SqliteDatabase>) -> TableRefImpl {
     TableRefImpl {
         access: AccessLevel::ReadOnly,
         table_name: rand::random::<u64>(),

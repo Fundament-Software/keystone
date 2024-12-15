@@ -109,8 +109,8 @@ use tokio::sync::watch;
 use tokio::task::JoinSet;
 
 #[capnproto_rpc(crate::byte_stream_capnp::byte_stream)]
-impl crate::byte_stream_capnp::byte_stream::Server for Rc<Mutex<Option<ChildStdin>>> {
-    async fn write(&self, bytes: &[u8]) {
+impl crate::byte_stream_capnp::byte_stream::Server for Mutex<Option<ChildStdin>> {
+    async fn write(self: Rc<Self>, bytes: &[u8]) {
         // TODO: This holds our borrow_mut across an await point, which may deadlock
         if let Some(stdin) = self.lock().await.as_mut() {
             match stdin.write_all(bytes).await {
@@ -124,7 +124,7 @@ impl crate::byte_stream_capnp::byte_stream::Server for Rc<Mutex<Option<ChildStdi
         }
     }
 
-    async fn end(&self) {
+    async fn end(self: Rc<Self>) {
         let take = self.lock().await.take();
         if let Some(mut stdin) = take {
             stdin.shutdown().await.to_capnp()
@@ -133,7 +133,7 @@ impl crate::byte_stream_capnp::byte_stream::Server for Rc<Mutex<Option<ChildStdi
         }
     }
 
-    async fn get_substream(&self) {
+    async fn get_substream(self: Rc<Self>) {
         Err(capnp::Error::unimplemented("Not implemented".into()))
     }
 }
@@ -284,7 +284,7 @@ impl PosixProcessImpl {
 #[capnproto_rpc(process)]
 impl process::Server<ByteStream, PosixError> for PosixProcessImpl {
     /// In this implementation of `spawn`, the functions returns the exit code of the child process
-    async fn get_error(&self) -> capnp::Result<()> {
+    async fn get_error(self: Rc<Self>) -> capnp::Result<()> {
         let results_builder = results.get();
         let mut process_error_builder = results_builder.init_result();
 
@@ -299,7 +299,7 @@ impl process::Server<ByteStream, PosixError> for PosixProcessImpl {
         Ok(())
     }
 
-    async fn kill(&self) -> capnp::Result<()> {
+    async fn kill(self: Rc<Self>) -> capnp::Result<()> {
         if let Some(sender) = self.killsender.take() {
             let _ = sender.send(());
             self.cancellation_token.cancel();
@@ -309,13 +309,13 @@ impl process::Server<ByteStream, PosixError> for PosixProcessImpl {
         }
     }
 
-    async fn get_api(&self) -> capnp::Result<()> {
+    async fn get_api(self: Rc<Self>) -> capnp::Result<()> {
         results
             .get()
-            .set_api(capnp_rpc::new_client(self.stdin.clone()))
+            .set_api(capnp_rpc::new_client_from_rc(self.stdin.clone()))
     }
 
-    async fn join(&self) -> capnp::Result<()> {
+    async fn join(self: Rc<Self>) -> capnp::Result<()> {
         let results_builder = results.get();
         let mut process_error_builder = results_builder.init_result();
         process_error_builder.set_error_code(self.finish().await?.into());
@@ -358,7 +358,7 @@ impl PosixProgramImpl {
 
 impl program::Server<PosixArgs, ByteStream, PosixError> for PosixProgramImpl {
     async fn spawn(
-        &self,
+        self: Rc<Self>,
         params: SpawnParams<PosixArgs, ByteStream, PosixError>,
         mut results: SpawnResults<PosixArgs, ByteStream, PosixError>,
     ) -> capnp::Result<()> {

@@ -10,17 +10,17 @@ use crate::posix_spawn_capnp::{posix_args::Owned as PosixArgs, posix_error::Owne
 use crate::byte_stream_capnp::byte_stream::Owned as ByteStream;
 type PosixProcessClient = crate::spawn_capnp::program::Client<PosixArgs, ByteStream, PosixError>;
 
-pub struct LocalNativeProgramImpl<'a> {
-    auth_ref: &'a AmbientAuthorityImpl,
+pub struct LocalNativeProgramImpl {
+    auth_ref: Rc<RefCell<AmbientAuthorityImpl>>,
     process_set: Rc<RefCell<crate::posix_process::ProcessCapSet>>,
 }
 
 #[capnproto_rpc(local_native_program)]
-impl<'a> local_native_program::Server for LocalNativeProgramImpl<'a> {
-    async fn file(&self, file: Client) {
+impl local_native_program::Server for LocalNativeProgramImpl {
+    async fn file(self: Rc<Self>, file: Client) {
         let span = tracing::span!(tracing::Level::DEBUG, "LocalNativeProgram::file");
         let _enter = span.enter();
-        if let Some(handle) = self.auth_ref.get_file_handle(&file).await {
+        if let Some(handle) = self.auth_ref.borrow().get_file_handle(&file).await {
             let program =
                 PosixProgramImpl::new(handle, self.process_set.clone(), "warn".to_string());
 

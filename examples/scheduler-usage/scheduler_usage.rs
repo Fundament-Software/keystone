@@ -11,6 +11,7 @@ use keystone::scheduler_capnp::action;
 use keystone::storage_capnp::restore;
 use keystone::storage_capnp::saveable;
 use keystone::CapnpResult;
+use std::rc::Rc;
 use tokio::sync::oneshot;
 
 pub struct SchedulerUsageImpl {
@@ -26,7 +27,7 @@ struct CallbackImpl {
 
 #[capnproto_rpc(callback)]
 impl callback::Server for CallbackImpl {
-    async fn run(&self, name: Reader) -> capnp::Result<()> {
+    async fn run(self: Rc<Self>, name: Reader) -> capnp::Result<()> {
         tracing::info!("callback called");
         self.sender
             .take()
@@ -45,7 +46,7 @@ struct OurActionImpl {
 
 #[capnproto_rpc(action)]
 impl action::Server for OurActionImpl {
-    async fn run(&self) -> capnp::Result<()> {
+    async fn run(self: Rc<Self>) -> capnp::Result<()> {
         tracing::info!("run called");
         self.callback
             .build_run_request(self.msg.clone())
@@ -58,7 +59,7 @@ impl action::Server for OurActionImpl {
 
 #[capnproto_rpc(saveable)]
 impl saveable::Server<action::Owned> for OurActionImpl {
-    async fn save(&self) -> capnp::Result<()> {
+    async fn save(self: Rc<Self>) -> capnp::Result<()> {
         tracing::info!("save called");
         let save: keystone::storage_capnp::save::Client<any_pointer> =
             self.ks.client.clone().cast_to();
@@ -78,7 +79,7 @@ impl saveable::Server<action::Owned> for OurActionImpl {
 
 #[capnproto_rpc(root)]
 impl root::Server for SchedulerUsageImpl {
-    async fn echo_delay(&self, request: Reader) -> capnp::Result<()> {
+    async fn echo_delay(self: Rc<Self>, request: Reader) -> capnp::Result<()> {
         tracing::debug!("echo_delay was called!");
         let name = request.get_name()?.to_str()?;
         let greet = self.greeting.as_str();
@@ -116,7 +117,7 @@ impl root::Server for SchedulerUsageImpl {
 
 #[capnproto_rpc(restore)]
 impl restore::Server<storage::Owned> for SchedulerUsageImpl {
-    async fn restore(&self, data: Reader) -> Result<(), ::capnp::Error> {
+    async fn restore(self: Rc<Self>, data: Reader) -> Result<(), ::capnp::Error> {
         tracing::info!("restore called");
 
         let action = match data.get_storage().which()? {

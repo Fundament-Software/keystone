@@ -1,7 +1,6 @@
 use crate::database::DatabaseExt;
 use crate::keystone::CapnpResult;
 use crate::sqlite::SqliteDatabase;
-use crate::sqlite_capnp::root::ServerDispatch;
 use crate::storage_capnp::sturdy_ref;
 use capnp::any_pointer::Owned as any_pointer;
 use capnp::traits::SetPointerBuilder;
@@ -9,14 +8,14 @@ use std::rc::Rc;
 
 pub struct SturdyRefImpl {
     id: i64,
-    db: Rc<ServerDispatch<SqliteDatabase>>,
+    db: Rc<SqliteDatabase>,
 }
 
 impl SturdyRefImpl {
     pub async fn init<'a, R: SetPointerBuilder + Clone>(
         module_id: u64,
         data: R,
-        db: Rc<ServerDispatch<SqliteDatabase>>,
+        db: Rc<SqliteDatabase>,
     ) -> eyre::Result<Self> {
         let id = db.add_sturdyref(module_id, data, None).await.to_capnp()?;
 
@@ -30,7 +29,7 @@ impl SturdyRefImpl {
 
 impl sturdy_ref::Server<any_pointer> for SturdyRefImpl {
     async fn restore(
-        &self,
+        self: Rc<Self>,
         _: sturdy_ref::RestoreParams<any_pointer>,
         mut results: sturdy_ref::RestoreResults<any_pointer>,
     ) -> Result<(), ::capnp::Error> {

@@ -47,6 +47,7 @@
             rust-custom-toolchain
 
             cargo-edit
+            just
           ];
 
           # fetch with cli instead of native

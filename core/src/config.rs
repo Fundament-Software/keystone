@@ -11,7 +11,7 @@ use capnp::{
     dynamic_struct, dynamic_value, introspect::TypeVariant, schema::DynamicSchema, schema_capnp,
     traits::HasTypeId,
 };
-use eyre::Result;
+use eyre::{Context, Result};
 use toml::{value::Offset, Table, Value};
 
 fn expr_recurse(val: &Value, exprs: &mut HashMap<*const Value, u32>) {
@@ -261,7 +261,8 @@ where
 
             message_from_file(schemafile)?
         } else {
-            let file_contents = std::fs::read(path)?;
+            let file_contents = std::fs::read(&path)
+                .with_context(|| format!("toml_to_config failed to read {}", path.display()))?;
 
             let binary = crate::binary_embed::load_deps_from_binary(&file_contents)?;
             let bufread = BufReader::new(binary);

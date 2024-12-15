@@ -1,5 +1,5 @@
 set windows-shell := ["powershell", "-c"]
-set shell := ["bash"]
+set shell := ["/usr/bin/env", "bash", "-c"]
 set export
 
 # if unset default CC to clang on Linux because capstone is incompatible with GCC

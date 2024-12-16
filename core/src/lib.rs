@@ -142,9 +142,7 @@ pub async fn start<
     });
 
     let module_client: module_start::Client<Config, API> =
-        capnp::capability::FromClientHook::new(Box::new(capnp_rpc::local::Client::new(
-            module_start::Client::<Config, API>::from_rc(module_impl.clone()),
-        )));
+        capnp_rpc::new_client_from_rc(module_impl.clone());
 
     let network = twoparty::VatNetwork::new(
         reader,

@@ -25,13 +25,13 @@ pub trait DatabaseExt {
     fn init(self: &Rc<Self>) -> Result<()>;
 
     fn get_generic<const TABLE: usize>(
-        self: &Rc<Self>,
+        &self,
         id: i64,
         builder: capnp::dynamic_value::Builder<'_>,
     ) -> Result<()>;
 
     fn get_state(
-        self: &Rc<Self>,
+        &self,
         string_index: i64,
         builder: capnp::dynamic_value::Builder<'_>,
     ) -> Result<()>;
@@ -45,7 +45,7 @@ pub trait DatabaseExt {
     fn init_state(self: &Rc<Self>, string_index: i64) -> Result<()>;
 
     fn get_sturdyref(
-        self: &Rc<Self>,
+        &self,
         sturdy_id: i64,
     ) -> Result<capnp::capability::RemotePromise<restore_results::Owned<any_pointer, any_pointer>>>;
     async fn add_sturdyref<R: SetPointerBuilder + Clone>(
@@ -54,16 +54,12 @@ pub trait DatabaseExt {
         data: R,
         expires: Option<Microseconds>,
     ) -> Result<i64>;
-    fn drop_sturdyref(self: &Rc<Self>, id: i64) -> Result<()>;
-    fn clean_sturdyrefs(self: &Rc<Self>, ids: &[i64]) -> Result<()>;
+    fn drop_sturdyref(&self, id: i64) -> Result<()>;
+    fn clean_sturdyrefs(&self, ids: &[i64]) -> Result<()>;
     async fn add_object<R: SetPointerBuilder + Clone>(self: &Rc<Self>, data: R) -> Result<i64>;
-    fn get_object(
-        self: &Rc<Self>,
-        id: i64,
-        builder: capnp::dynamic_value::Builder<'_>,
-    ) -> Result<()>;
-    fn drop_object(self: &Rc<Self>, id: i64) -> Result<()>;
-    fn get_string_index(self: &Rc<Self>, s: &str) -> Result<i64>;
+    fn get_object(&self, id: i64, builder: capnp::dynamic_value::Builder<'_>) -> Result<()>;
+    fn drop_object(&self, id: i64) -> Result<()>;
+    fn get_string_index(&self, s: &str) -> Result<i64>;
 }
 
 // Rust's type system does not like enums in generic constants
@@ -163,7 +159,7 @@ fn drop_generic<const TABLE: usize>(conn: &Connection, id: i64) -> Result<()> {
 }
 
 fn get_replacement(
-    db: &Rc<SqliteDatabase>,
+    db: &SqliteDatabase,
     index: u64,
     mut builder: capnp::any_pointer::Builder,
 ) -> capnp::Result<()> {
@@ -224,7 +220,7 @@ impl DatabaseExt for SqliteDatabase {
     }
 
     fn get_generic<const TABLE: usize>(
-        self: &Rc<Self>,
+        &self,
         id: i64,
         builder: capnp::dynamic_value::Builder<'_>,
     ) -> Result<()> {
@@ -268,7 +264,7 @@ impl DatabaseExt for SqliteDatabase {
     }
 
     fn get_state(
-        self: &Rc<Self>,
+        &self,
         string_index: i64,
         builder: capnp::dynamic_value::Builder<'_>,
     ) -> Result<()> {
@@ -328,7 +324,7 @@ impl DatabaseExt for SqliteDatabase {
     }
 
     fn get_sturdyref(
-        self: &Rc<Self>,
+        &self,
         id: i64,
     ) -> Result<capnp::capability::RemotePromise<restore_results::Owned<any_pointer, any_pointer>>>
     {
@@ -434,7 +430,7 @@ impl DatabaseExt for SqliteDatabase {
         Ok(result)
     }
 
-    fn drop_sturdyref(self: &Rc<Self>, id: i64) -> Result<()> {
+    fn drop_sturdyref(&self, id: i64) -> Result<()> {
         expect_change(
             self.connection
                 .prepare_cached(
@@ -449,7 +445,7 @@ impl DatabaseExt for SqliteDatabase {
         )
     }
 
-    fn clean_sturdyrefs(self: &Rc<Self>, ids: &[i64]) -> Result<()> {
+    fn clean_sturdyrefs(&self, ids: &[i64]) -> Result<()> {
         let list: Vec<String> = ids.iter().map(|id| format!("?{}", id)).collect();
 
         expect_change(
@@ -492,19 +488,15 @@ impl DatabaseExt for SqliteDatabase {
         Ok(result)
     }
 
-    fn get_object(
-        self: &Rc<Self>,
-        id: i64,
-        builder: capnp::dynamic_value::Builder<'_>,
-    ) -> Result<()> {
+    fn get_object(&self, id: i64, builder: capnp::dynamic_value::Builder<'_>) -> Result<()> {
         self.get_generic::<ROOT_OBJECTS>(id, builder)
     }
 
-    fn drop_object(self: &Rc<Self>, id: i64) -> Result<()> {
+    fn drop_object(&self, id: i64) -> Result<()> {
         drop_generic::<ROOT_OBJECTS>(&self.connection, id)
     }
 
-    fn get_string_index(self: &Rc<Self>, s: &str) -> Result<i64> {
+    fn get_string_index(&self, s: &str) -> Result<i64> {
         self.connection
             .prepare_cached("INSERT OR IGNORE INTO stringmap (string) VALUES (?1)")?
             .execute(params![s])?;

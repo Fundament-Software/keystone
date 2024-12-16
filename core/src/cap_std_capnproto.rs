@@ -76,8 +76,8 @@ impl Default for AmbientAuthorityImpl {
 }
 
 #[capnproto_rpc(ambient_authority)]
-impl ambient_authority::Server for Rc<RefCell<AmbientAuthorityImpl>> {
-    async fn file_open_ambient(&self, path: Reader) {
+impl ambient_authority::Server for RefCell<AmbientAuthorityImpl> {
+    async fn file_open_ambient(self: Rc<Self>, path: Reader) {
         let path = path.to_str()?;
         let Ok(_file) = File::open_ambient(path, self.as_ref().borrow().authority) else {
             return Err(Error::failed(
@@ -86,10 +86,10 @@ impl ambient_authority::Server for Rc<RefCell<AmbientAuthorityImpl>> {
         };
         results
             .get()
-            .set_file(AmbientAuthorityImpl::new_file(self, _file));
+            .set_file(AmbientAuthorityImpl::new_file(&self, _file));
         Ok(())
     }
-    async fn file_create_ambient(&self, path: Reader) {
+    async fn file_create_ambient(self: Rc<Self>, path: Reader) {
         let path = path.to_str()?;
         let Ok(_file) = File::create_ambient(path, self.as_ref().borrow().authority) else {
             return Err(Error::failed(
@@ -98,10 +98,10 @@ impl ambient_authority::Server for Rc<RefCell<AmbientAuthorityImpl>> {
         };
         results
             .get()
-            .set_file(AmbientAuthorityImpl::new_file(self, _file));
+            .set_file(AmbientAuthorityImpl::new_file(&self, _file));
         Ok(())
     }
-    async fn file_open_ambient_with(&self, path: Reader, open_options: Reader) {
+    async fn file_open_ambient_with(self: Rc<Self>, path: Reader, open_options: Reader) {
         capnp_let!({read, write, append, truncate, create, create_new} = open_options);
         let mut options = OpenOptions::new();
         let path = path.to_str()?;
@@ -121,10 +121,10 @@ impl ambient_authority::Server for Rc<RefCell<AmbientAuthorityImpl>> {
         };
         results
             .get()
-            .set_file(AmbientAuthorityImpl::new_file(self, _file));
+            .set_file(AmbientAuthorityImpl::new_file(&self, _file));
         Ok(())
     }
-    async fn dir_open_ambient(&self, path: Reader) {
+    async fn dir_open_ambient(self: Rc<Self>, path: Reader) {
         let path = path.to_str()?;
         let Ok(_dir) = Dir::open_ambient_dir(path, self.as_ref().borrow().authority) else {
             return Err(Error::failed(
@@ -133,10 +133,10 @@ impl ambient_authority::Server for Rc<RefCell<AmbientAuthorityImpl>> {
         };
         results
             .get()
-            .set_result(AmbientAuthorityImpl::new_dir(self, _dir));
+            .set_result(AmbientAuthorityImpl::new_dir(&self, _dir));
         Ok(())
     }
-    async fn dir_open_parent(&self, dir: Dir) {
+    async fn dir_open_parent(self: Rc<Self>, dir: Dir) {
         let Some(dir_impl) = self
             .as_ref()
             .borrow()
@@ -153,10 +153,10 @@ impl ambient_authority::Server for Rc<RefCell<AmbientAuthorityImpl>> {
         };
         results
             .get()
-            .set_result(AmbientAuthorityImpl::new_dir(self, _dir));
+            .set_result(AmbientAuthorityImpl::new_dir(&self, _dir));
         Ok(())
     }
-    async fn dir_create_ambient_all(&self, path: Reader) {
+    async fn dir_create_ambient_all(self: Rc<Self>, path: Reader) {
         let path = path.to_str()?;
         let Ok(()) = Dir::create_ambient_dir_all(path, self.as_ref().borrow().authority) else {
             return Err(Error::failed(
@@ -165,7 +165,7 @@ impl ambient_authority::Server for Rc<RefCell<AmbientAuthorityImpl>> {
         };
         Ok(())
     }
-    async fn monotonic_clock_new(&self) {
+    async fn monotonic_clock_new(self: Rc<Self>) {
         results
             .get()
             .set_clock(capnp_rpc::new_client(MonotonicClockImpl {
@@ -174,7 +174,7 @@ impl ambient_authority::Server for Rc<RefCell<AmbientAuthorityImpl>> {
             }));
         Ok(())
     }
-    async fn system_clock_new(&self) {
+    async fn system_clock_new(self: Rc<Self>) {
         results
             .get()
             .set_clock(capnp_rpc::new_client(SystemClockImpl {
@@ -183,7 +183,7 @@ impl ambient_authority::Server for Rc<RefCell<AmbientAuthorityImpl>> {
         Ok(())
     }
     async fn project_dirs_from(
-        &self,
+        self: Rc<Self>,
         qualifier: Reader,
         organization: Reader,
         application: Reader,
@@ -204,7 +204,7 @@ impl ambient_authority::Server for Rc<RefCell<AmbientAuthorityImpl>> {
             }));
         Ok(())
     }
-    async fn user_dirs_home_dir(&self) {
+    async fn user_dirs_home_dir(self: Rc<Self>) {
         let Some(user_dirs) = UserDirs::new() else {
             return Err(Error::failed("No valid $HOME directory".into()));
         };
@@ -213,10 +213,10 @@ impl ambient_authority::Server for Rc<RefCell<AmbientAuthorityImpl>> {
         };
         results
             .get()
-            .set_dir(AmbientAuthorityImpl::new_dir(self, _dir));
+            .set_dir(AmbientAuthorityImpl::new_dir(&self, _dir));
         Ok(())
     }
-    async fn user_dirs_audio_dir(&self) {
+    async fn user_dirs_audio_dir(self: Rc<Self>) {
         let Some(user_dirs) = UserDirs::new() else {
             return Err(Error::failed("No valid $HOME directory".into()));
         };
@@ -225,10 +225,10 @@ impl ambient_authority::Server for Rc<RefCell<AmbientAuthorityImpl>> {
         };
         results
             .get()
-            .set_dir(AmbientAuthorityImpl::new_dir(self, _dir));
+            .set_dir(AmbientAuthorityImpl::new_dir(&self, _dir));
         Ok(())
     }
-    async fn user_dirs_desktop_dir(&self) {
+    async fn user_dirs_desktop_dir(self: Rc<Self>) {
         let Some(user_dirs) = UserDirs::new() else {
             return Err(Error::failed("No valid $HOME directory".into()));
         };
@@ -237,10 +237,10 @@ impl ambient_authority::Server for Rc<RefCell<AmbientAuthorityImpl>> {
         };
         results
             .get()
-            .set_dir(AmbientAuthorityImpl::new_dir(self, _dir));
+            .set_dir(AmbientAuthorityImpl::new_dir(&self, _dir));
         Ok(())
     }
-    async fn user_dirs_document_dir(&self) {
+    async fn user_dirs_document_dir(self: Rc<Self>) {
         let Some(user_dirs) = UserDirs::new() else {
             return Err(Error::failed("No valid $HOME directory".into()));
         };
@@ -249,10 +249,10 @@ impl ambient_authority::Server for Rc<RefCell<AmbientAuthorityImpl>> {
         };
         results
             .get()
-            .set_dir(AmbientAuthorityImpl::new_dir(self, _dir));
+            .set_dir(AmbientAuthorityImpl::new_dir(&self, _dir));
         Ok(())
     }
-    async fn user_dirs_download_dir(&self) {
+    async fn user_dirs_download_dir(self: Rc<Self>) {
         let Some(user_dirs) = UserDirs::new() else {
             return Err(Error::failed("No valid $HOME directory".into()));
         };
@@ -261,10 +261,10 @@ impl ambient_authority::Server for Rc<RefCell<AmbientAuthorityImpl>> {
         };
         results
             .get()
-            .set_dir(AmbientAuthorityImpl::new_dir(self, _dir));
+            .set_dir(AmbientAuthorityImpl::new_dir(&self, _dir));
         Ok(())
     }
-    async fn user_dirs_font_dir(&self) {
+    async fn user_dirs_font_dir(self: Rc<Self>) {
         let Some(user_dirs) = UserDirs::new() else {
             return Err(Error::failed("No valid $HOME directory".into()));
         };
@@ -273,10 +273,10 @@ impl ambient_authority::Server for Rc<RefCell<AmbientAuthorityImpl>> {
         };
         results
             .get()
-            .set_dir(AmbientAuthorityImpl::new_dir(self, _dir));
+            .set_dir(AmbientAuthorityImpl::new_dir(&self, _dir));
         Ok(())
     }
-    async fn user_dirs_picture_dir(&self) {
+    async fn user_dirs_picture_dir(self: Rc<Self>) {
         let Some(user_dirs) = UserDirs::new() else {
             return Err(Error::failed("No valid $HOME directory".into()));
         };
@@ -285,10 +285,10 @@ impl ambient_authority::Server for Rc<RefCell<AmbientAuthorityImpl>> {
         };
         results
             .get()
-            .set_dir(AmbientAuthorityImpl::new_dir(self, _dir));
+            .set_dir(AmbientAuthorityImpl::new_dir(&self, _dir));
         Ok(())
     }
-    async fn user_dirs_public_dir(&self) {
+    async fn user_dirs_public_dir(self: Rc<Self>) {
         let Some(user_dirs) = UserDirs::new() else {
             return Err(Error::failed("No valid $HOME directory".into()));
         };
@@ -297,10 +297,10 @@ impl ambient_authority::Server for Rc<RefCell<AmbientAuthorityImpl>> {
         };
         results
             .get()
-            .set_dir(AmbientAuthorityImpl::new_dir(self, _dir));
+            .set_dir(AmbientAuthorityImpl::new_dir(&self, _dir));
         Ok(())
     }
-    async fn user_dirs_template_dir(&self) {
+    async fn user_dirs_template_dir(self: Rc<Self>) {
         let Some(user_dirs) = UserDirs::new() else {
             return Err(Error::failed("No valid $HOME directory".into()));
         };
@@ -309,10 +309,10 @@ impl ambient_authority::Server for Rc<RefCell<AmbientAuthorityImpl>> {
         };
         results
             .get()
-            .set_dir(AmbientAuthorityImpl::new_dir(self, _dir));
+            .set_dir(AmbientAuthorityImpl::new_dir(&self, _dir));
         Ok(())
     }
-    async fn user_dirs_video_dir(&self) {
+    async fn user_dirs_video_dir(self: Rc<Self>) {
         let Some(user_dirs) = UserDirs::new() else {
             return Err(Error::failed("No valid $HOME directory".into()));
         };
@@ -321,10 +321,10 @@ impl ambient_authority::Server for Rc<RefCell<AmbientAuthorityImpl>> {
         };
         results
             .get()
-            .set_dir(AmbientAuthorityImpl::new_dir(self, _dir));
+            .set_dir(AmbientAuthorityImpl::new_dir(&self, _dir));
         Ok(())
     }
-    async fn temp_dir_new(&self) {
+    async fn temp_dir_new(self: Rc<Self>) {
         let Ok(dir) = TempDir::new(self.as_ref().borrow().authority) else {
             return Err(Error::failed("Failed to create temp dir".into()));
         };
@@ -344,7 +344,7 @@ pub struct DirImpl {
 }
 #[capnproto_rpc(dir)]
 impl dir::Server for DirImpl {
-    async fn open(&self, path: Reader) {
+    async fn open(self: Rc<Self>, path: Reader) {
         let path = path.to_str()?;
         let Ok(_file) = self.dir.open(path) else {
             return Err(Error::failed("Failed to open file".into()));
@@ -354,7 +354,7 @@ impl dir::Server for DirImpl {
             .set_file(AmbientAuthorityImpl::new_file(&self.ambient, _file));
         Ok(())
     }
-    async fn open_with(&self, open_options: Reader, path: Reader) {
+    async fn open_with(self: Rc<Self>, open_options: Reader, path: Reader) {
         capnp_let!({read, write, append, truncate, create, create_new} = open_options);
         let mut options = OpenOptions::new();
         let path = path.to_str()?;
@@ -375,21 +375,21 @@ impl dir::Server for DirImpl {
             .set_file(AmbientAuthorityImpl::new_file(&self.ambient, _file));
         Ok(())
     }
-    async fn create_dir(&self, path: Reader) {
+    async fn create_dir(self: Rc<Self>, path: Reader) {
         let path = path.to_str()?;
         let Ok(_dir) = self.dir.create_dir(path) else {
             return Err(Error::failed("Failed to create dir".into()));
         };
         Ok(())
     }
-    async fn create_dir_all(&self, path: Reader) {
+    async fn create_dir_all(self: Rc<Self>, path: Reader) {
         let path = path.to_str()?;
         let Ok(_dir) = self.dir.create_dir_all(path) else {
             return Err(Error::failed("Failed to create dir(all)".into()));
         };
         Ok(())
     }
-    async fn create(&self, path: Reader) {
+    async fn create(self: Rc<Self>, path: Reader) {
         let path = path.to_str()?;
         let Ok(_file) = self.dir.create(path) else {
             return Err(Error::failed(
@@ -401,7 +401,7 @@ impl dir::Server for DirImpl {
             .set_file(AmbientAuthorityImpl::new_file(&self.ambient, _file));
         Ok(())
     }
-    async fn canonicalize(&self, path: Reader) {
+    async fn canonicalize(self: Rc<Self>, path: Reader) {
         let path = path.to_str()?;
         let Ok(path_buf) = self.dir.canonicalize(path) else {
             return Err(Error::failed("Failed to canonicalize path".into()));
@@ -412,7 +412,7 @@ impl dir::Server for DirImpl {
         results.get().set_path_buf(_str.into());
         Ok(())
     }
-    async fn copy(&self, path_from: Reader, path_to: Reader, dir_to: Capability) {
+    async fn copy(self: Rc<Self>, path_from: Reader, path_to: Reader, dir_to: Capability) {
         let from = path_from.to_str()?;
         let to = path_to.to_str()?;
         let Some(dir_impl) = self
@@ -431,7 +431,7 @@ impl dir::Server for DirImpl {
         results.get().set_result(bytes);
         Ok(())
     }
-    async fn hard_link(&self, src_path: Reader, dst_path: Reader, dst_dir: Capability) {
+    async fn hard_link(self: Rc<Self>, src_path: Reader, dst_path: Reader, dst_dir: Capability) {
         let src = src_path.to_str()?;
         let dst = dst_path.to_str()?;
 
@@ -450,7 +450,7 @@ impl dir::Server for DirImpl {
         };
         Ok(())
     }
-    async fn metadata(&self, path: Reader) {
+    async fn metadata(self: Rc<Self>, path: Reader) {
         let path = path.to_str()?;
         let Ok(_metadata) = self.dir.metadata(path) else {
             return Err(Error::failed("Failed to get file metadata".into()));
@@ -462,7 +462,7 @@ impl dir::Server for DirImpl {
             }));
         Ok(())
     }
-    async fn dir_metadata(&self) {
+    async fn dir_metadata(self: Rc<Self>) {
         let Ok(_metadata) = self.dir.dir_metadata() else {
             return Err(Error::failed("Failed to get dir metadata".into()));
         };
@@ -473,7 +473,7 @@ impl dir::Server for DirImpl {
             }));
         Ok(())
     }
-    async fn entries(&self) {
+    async fn entries(self: Rc<Self>) {
         let Ok(mut _iter) = self.dir.entries() else {
             return Err(Error::failed("Failed to get dir entries".into()));
         };
@@ -483,7 +483,7 @@ impl dir::Server for DirImpl {
         }));
         Ok(())
     }
-    async fn read_dir(&self, path: Reader) {
+    async fn read_dir(self: Rc<Self>, path: Reader) {
         let path = path.to_str()?;
         let Ok(mut _iter) = self.dir.read_dir(path) else {
             return Err(Error::failed("Failed to read dir".into()));
@@ -494,7 +494,7 @@ impl dir::Server for DirImpl {
         }));
         Ok(())
     }
-    async fn read(&self, path: Reader) {
+    async fn read(self: Rc<Self>, path: Reader) {
         let path = path.to_str()?;
         let Ok(vec) = self.dir.read(path) else {
             return Err(Error::failed("Failed to read file".into()));
@@ -502,7 +502,7 @@ impl dir::Server for DirImpl {
         results.get().set_result(vec.as_slice());
         Ok(())
     }
-    async fn read_link(&self, path: Readers) {
+    async fn read_link(self: Rc<Self>, path: Readers) {
         let path = path.to_str()?;
         let Ok(_pathbuf) = self.dir.read_link(path) else {
             return Err(Error::failed("Failed to read link".into()));
@@ -513,7 +513,7 @@ impl dir::Server for DirImpl {
         results.get().set_result(_str.into());
         Ok(())
     }
-    async fn read_to_string(&self, path: Reader) {
+    async fn read_to_string(self: Rc<Self>, path: Reader) {
         let path = path.to_str()?;
         let Ok(string) = self.dir.read_to_string(path) else {
             return Err(Error::failed("Failed to read file to string".into()));
@@ -521,21 +521,21 @@ impl dir::Server for DirImpl {
         results.get().set_result(string.as_str().into());
         Ok(())
     }
-    async fn remove_dir(&self, path: Reader) {
+    async fn remove_dir(self: Rc<Self>, path: Reader) {
         let path = path.to_str()?;
         let Ok(()) = self.dir.remove_dir(path) else {
             return Err(Error::failed("Failed to remove dir".into()));
         };
         Ok(())
     }
-    async fn remove_dir_all(&self, path: Reader) {
+    async fn remove_dir_all(self: Rc<Self>, path: Reader) {
         let path = path.to_str()?;
         let Ok(()) = self.dir.remove_dir_all(path) else {
             return Err(Error::failed("Failed to remove dir(all)".into()));
         };
         Ok(())
     }
-    async fn remove_open_dir(&self) {
+    async fn remove_open_dir(self: Rc<Self>) {
         //Original function consumes self so that it can't be used again, not sure how to do that with capnproto
         let Ok(this) = self.dir.try_clone() else {
             return Err(Error::failed("Failed to create an owned dir".into()));
@@ -545,7 +545,7 @@ impl dir::Server for DirImpl {
         };
         Ok(())
     }
-    async fn remove_open_dir_all(&self) {
+    async fn remove_open_dir_all(self: Rc<Self>) {
         //Original function consumes self so that it can't be used again, not sure how to do that with capnproto
         let Ok(this) = self.dir.try_clone() else {
             return Err(Error::failed("Failed to create an owned dir".into()));
@@ -555,14 +555,14 @@ impl dir::Server for DirImpl {
         };
         Ok(())
     }
-    async fn remove_file(&self, path: Reader) {
+    async fn remove_file(self: Rc<Self>, path: Reader) {
         let path = path.to_str()?;
         let Ok(()) = self.dir.remove_file(path) else {
             return Err(Error::failed("Failed to remove file".into()));
         };
         Ok(())
     }
-    async fn rename(&self, from: Reader, to: Reader) {
+    async fn rename(self: Rc<Self>, from: Reader, to: Reader) {
         let from = from.to_str()?;
         let to = to.to_str()?;
         let this = &self.dir;
@@ -571,7 +571,7 @@ impl dir::Server for DirImpl {
         };
         Ok(())
     }
-    async fn set_readonly(&self, path: Reader, readonly: bool) {
+    async fn set_readonly(self: Rc<Self>, path: Reader, readonly: bool) {
         let path = path.to_str()?;
         let Ok(_meta) = self.dir.metadata(path) else {
             return Err(Error::failed(
@@ -587,7 +587,7 @@ impl dir::Server for DirImpl {
         };
         Ok(())
     }
-    async fn symlink_metadata(&self, path: Reader) {
+    async fn symlink_metadata(self: Rc<Self>, path: Reader) {
         let path = path.to_str()?;
         let Ok(_metadata) = self.dir.symlink_metadata(path) else {
             return Err(Error::failed("Failed to get symlink metadata".into()));
@@ -599,14 +599,14 @@ impl dir::Server for DirImpl {
             }));
         Ok(())
     }
-    async fn write(&self, path: Reader, contents: &[u8]) {
+    async fn write(self: Rc<Self>, path: Reader, contents: &[u8]) {
         let path = path.to_str()?;
         let Ok(()) = self.dir.write(path, contents) else {
             return Err(Error::failed("Failed to write to file".into()));
         };
         Ok(())
     }
-    async fn symlink(&self, original: Reader, link: Reader) {
+    async fn symlink(self: Rc<Self>, original: Reader, link: Reader) {
         let original = original.to_str()?;
         let link = link.to_str()?;
         #[cfg(target_os = "windows")]
@@ -619,13 +619,13 @@ impl dir::Server for DirImpl {
         };
         Ok(())
     }
-    async fn exists(&self, path: Reader) {
+    async fn exists(self: Rc<Self>, path: Reader) {
         let path = path.to_str()?;
         let _results = self.dir.exists(path);
         results.get().set_result(_results);
         Ok(())
     }
-    async fn try_exists(&self, path: Reader) {
+    async fn try_exists(self: Rc<Self>, path: Reader) {
         let path = path.to_str()?;
         let Ok(_results) = self.dir.try_exists(path) else {
             return Err(Error::failed("Failed to check if entity exists".into()));
@@ -633,20 +633,20 @@ impl dir::Server for DirImpl {
         results.get().set_result(_results);
         Ok(())
     }
-    async fn is_file(&self, path: Reader) {
+    async fn is_file(self: Rc<Self>, path: Reader) {
         let path = path.to_str()?;
         let _results = self.dir.is_file(path);
         results.get().set_result(_results);
         Ok(())
     }
-    async fn is_dir(&self, path: Reader) {
+    async fn is_dir(self: Rc<Self>, path: Reader) {
         let path = path.to_str()?;
         let _results = self.dir.is_dir(path);
         results.get().set_result(_results);
         Ok(())
     }
 
-    async fn temp_dir_new_in(&self) {
+    async fn temp_dir_new_in(self: Rc<Self>) {
         let Ok(temp_dir) = cap_tempfile::TempDir::new_in(&self.dir) else {
             return Err(Error::failed("Failed to create temp dir".into()));
         };
@@ -658,7 +658,7 @@ impl dir::Server for DirImpl {
             }));
         Ok(())
     } /*
-      async fn temp_file_new(&self,  params: dir::TempFileNewParams, mut results: dir::TempFileNewresultss) {
+      async fn temp_file_new(self: Rc<Self>,  params: dir::TempFileNewParams, mut results: dir::TempFileNewresultss) {
 
           let dir_cap = pry!(params_reader.get_dir());
           let Some(underlying_dir) = DIR_SET.borrow().get_local_server_of_resolved(&dir_cap)) else {
@@ -671,7 +671,7 @@ impl dir::Server for DirImpl {
           results.get().set_temp_file(capnp_rpc::new_client(TempFileImpl{temp_file: Some(temp_file)}));
           Ok(())
       }*/
-    async fn temp_file_new_anonymous(&self) {
+    async fn temp_file_new_anonymous(self: Rc<Self>) {
         let Ok(file) = cap_tempfile::TempFile::new_anonymous(&self.dir) else {
             return Err(Error::failed("Failed to create anonymous temp file".into()));
         };
@@ -688,7 +688,7 @@ pub struct ReadDirImpl {
 }
 #[capnproto_rpc(read_dir)]
 impl read_dir::Server for ReadDirImpl {
-    async fn next(&self) {
+    async fn next(self: Rc<Self>) {
         let Some(_results) = self.iter.borrow_mut().next() else {
             return Err(Error::failed("Final entry reached".into()));
         };
@@ -712,7 +712,7 @@ pub struct DirEntryImpl {
 
 #[capnproto_rpc(dir_entry)]
 impl dir_entry::Server for DirEntryImpl {
-    async fn open(&self) {
+    async fn open(self: Rc<Self>) {
         let Ok(_file) = self.entry.open() else {
             return Err(Error::failed("Failed to open file for reading".into()));
         };
@@ -722,7 +722,7 @@ impl dir_entry::Server for DirEntryImpl {
         Ok(())
     }
 
-    async fn open_with(&self, open_options: Reader) {
+    async fn open_with(self: Rc<Self>, open_options: Reader) {
         capnp_let!({read, write, append, truncate, create, create_new} = open_options);
         let mut options = OpenOptions::new();
         options
@@ -742,7 +742,7 @@ impl dir_entry::Server for DirEntryImpl {
             .set_file(AmbientAuthorityImpl::new_file(&self.ambient, _file));
         Ok(())
     }
-    async fn open_dir(&self) {
+    async fn open_dir(self: Rc<Self>) {
         let Ok(_dir) = self.entry.open_dir() else {
             return Err(Error::failed("Failed to open the entry as a dir".into()));
         };
@@ -751,19 +751,19 @@ impl dir_entry::Server for DirEntryImpl {
             .set_dir(AmbientAuthorityImpl::new_dir(&self.ambient, _dir));
         Ok(())
     }
-    async fn remove_file(&self) {
+    async fn remove_file(self: Rc<Self>) {
         let Ok(()) = self.entry.remove_file() else {
             return Err(Error::failed("Failed to remove file".into()));
         };
         Ok(())
     }
-    async fn remove_dir(&self) {
+    async fn remove_dir(self: Rc<Self>) {
         let Ok(()) = self.entry.remove_dir() else {
             return Err(Error::failed("Failed to remove dir".into()));
         };
         Ok(())
     }
-    async fn metadata(&self) {
+    async fn metadata(self: Rc<Self>) {
         let Ok(_metadata) = self.entry.metadata() else {
             return Err(Error::failed("Failed to get file metadata".into()));
         };
@@ -774,7 +774,7 @@ impl dir_entry::Server for DirEntryImpl {
             }));
         Ok(())
     }
-    async fn file_type(&self) {
+    async fn file_type(self: Rc<Self>) {
         let Ok(_file_type) = self.entry.file_type() else {
             return Err(Error::failed("Failed to get file type".into()));
         };
@@ -790,7 +790,7 @@ impl dir_entry::Server for DirEntryImpl {
         results.get().set_type(_type);
         Ok(())
     }
-    async fn file_name(&self) {
+    async fn file_name(self: Rc<Self>) {
         let _name = self.entry.file_name();
         let Some(_name) = _name.to_str() else {
             return Err(Error::failed("File name not valid utf-8".into()));
@@ -806,7 +806,7 @@ pub struct FileImpl {
 }
 #[capnproto_rpc(file)]
 impl file::Server for FileImpl {
-    async fn sync_all(&self) {
+    async fn sync_all(self: Rc<Self>) {
         let Ok(()) = self.file.sync_all() else {
             return Err(Error::failed(
                 "Failed to sync os-internal metadata to disk".into(),
@@ -814,7 +814,7 @@ impl file::Server for FileImpl {
         };
         Ok(())
     }
-    async fn sync_data(&self) {
+    async fn sync_data(self: Rc<Self>) {
         let Ok(()) = self.file.sync_data() else {
             return Err(Error::failed(
                 "Failed to sync os-internal metadata to sync data".into(),
@@ -822,13 +822,13 @@ impl file::Server for FileImpl {
         };
         Ok(())
     }
-    async fn set_len(&self, size: u64) {
+    async fn set_len(self: Rc<Self>, size: u64) {
         let Ok(()) = self.file.set_len(size) else {
             return Err(Error::failed("Failed to update the size of file".into()));
         };
         Ok(())
     }
-    async fn metadata(&self) {
+    async fn metadata(self: Rc<Self>) {
         let Ok(_metadata) = self.file.metadata() else {
             return Err(Error::failed("Get file metadata".into()));
         };
@@ -839,7 +839,7 @@ impl file::Server for FileImpl {
             }));
         Ok(())
     }
-    async fn try_clone(&self) {
+    async fn try_clone(self: Rc<Self>) {
         let Ok(_file) = self.file.try_clone() else {
             return Err(Error::failed(
                 "Failed to sync os-internal metadata to sync data".into(),
@@ -850,7 +850,7 @@ impl file::Server for FileImpl {
             .set_cloned(AmbientAuthorityImpl::new_file(&self.ambient, _file));
         Ok(())
     }
-    async fn set_readonly(&self, readonly: bool) {
+    async fn set_readonly(self: Rc<Self>, readonly: bool) {
         let Ok(_meta) = self.file.metadata() else {
             return Err(Error::failed("Failed to get file's metadata".into()));
         };
@@ -864,7 +864,7 @@ impl file::Server for FileImpl {
         Ok(())
     }
 
-    async fn open(&self) {
+    async fn open(self: Rc<Self>) {
         let Ok(mut this) = self.file.try_clone() else {
             return Err(Error::failed("Get owned file".into()));
         };
@@ -884,7 +884,7 @@ pub struct MetadataImpl {
 }
 #[capnproto_rpc(metadata)]
 impl metadata::Server for MetadataImpl {
-    async fn file_type(&self) {
+    async fn file_type(self: Rc<Self>) {
         let _file_type = self.metadata.file_type();
         let _type: FileType = if _file_type.is_dir() {
             FileType::Dir
@@ -898,27 +898,27 @@ impl metadata::Server for MetadataImpl {
         results.get().set_file_type(_type);
         Ok(())
     }
-    async fn is_dir(&self) {
+    async fn is_dir(self: Rc<Self>) {
         let _results = self.metadata.is_dir();
         results.get().set_result(_results);
         Ok(())
     }
-    async fn is_file(&self) {
+    async fn is_file(self: Rc<Self>) {
         let _results = self.metadata.is_file();
         results.get().set_result(_results);
         Ok(())
     }
-    async fn is_symlink(&self) {
+    async fn is_symlink(self: Rc<Self>) {
         let _results = self.metadata.is_symlink();
         results.get().set_result(_results);
         Ok(())
     }
-    async fn len(&self) {
+    async fn len(self: Rc<Self>) {
         let _results = self.metadata.len();
         results.get().set_result(_results);
         Ok(())
     }
-    async fn permissions(&self) {
+    async fn permissions(self: Rc<Self>) {
         let _permissions = self.metadata.permissions();
         results
             .get()
@@ -927,7 +927,7 @@ impl metadata::Server for MetadataImpl {
             }));
         Ok(())
     }
-    async fn modified(&self) {
+    async fn modified(self: Rc<Self>) {
         let Ok(_time) = self.metadata.modified() else {
             return Err(Error::failed(
                 "Failed to access modified field of the metadata".into(),
@@ -938,7 +938,7 @@ impl metadata::Server for MetadataImpl {
             .set_time(capnp_rpc::new_client(SystemTimeImpl { system_time: _time }));
         Ok(())
     }
-    async fn accessed(&self) {
+    async fn accessed(self: Rc<Self>) {
         let Ok(_time) = self.metadata.accessed() else {
             return Err(Error::failed(
                 "Failed to access accessed field of the metadata".into(),
@@ -949,7 +949,7 @@ impl metadata::Server for MetadataImpl {
             .set_time(capnp_rpc::new_client(SystemTimeImpl { system_time: _time }));
         Ok(())
     }
-    async fn created(&self) {
+    async fn created(self: Rc<Self>) {
         let Ok(_time) = self.metadata.created() else {
             return Err(Error::failed(
                 "Failed to access created field of the metadata".into(),
@@ -967,12 +967,12 @@ pub struct PermissionsImpl {
 }
 #[capnproto_rpc(permissions)]
 impl permissions::Server for PermissionsImpl {
-    async fn readonly(&self) {
+    async fn readonly(self: Rc<Self>) {
         let _results = self.permissions.borrow().readonly();
         results.get().set_result(_results);
         Ok(())
     }
-    async fn set_readonly(&self, readonly: bool) {
+    async fn set_readonly(self: Rc<Self>, readonly: bool) {
         self.permissions.borrow_mut().set_readonly(readonly);
         Ok(())
     }
@@ -984,7 +984,7 @@ pub struct TempDirImpl {
 }
 #[capnproto_rpc(temp_dir)]
 impl temp_dir::Server for TempDirImpl {
-    async fn close(&self) {
+    async fn close(self: Rc<Self>) {
         let Some(dir) = self.temp_dir.borrow_mut().take() else {
             return Err(Error::failed("Temp dir already closed".into()));
         };
@@ -993,7 +993,7 @@ impl temp_dir::Server for TempDirImpl {
         };
         Ok(())
     }
-    async fn get_as_dir(&self) {
+    async fn get_as_dir(self: Rc<Self>) {
         let Some(dir) = self.temp_dir.take() else {
             return Err(Error::failed("Temp dir already closed".into()));
         };
@@ -1015,7 +1015,7 @@ pub struct TempFileImpl<'a> {
 }
 #[capnproto_rpc(temp_file)]
 impl temp_file::Server for TempFileImpl<'_> {
-    async fn as_file(&self) {
+    async fn as_file(self: Rc<Self>) {
         let Some(_file) = self.temp_file.borrow_mut().take() else {
             return Err(Error::failed("Temp file already removed".into()));
         };
@@ -1030,7 +1030,7 @@ impl temp_file::Server for TempFileImpl<'_> {
             .set_file(AmbientAuthorityImpl::new_file(&self.ambient, _cloned));
         Ok(())
     }
-    async fn replace(&self, dest: Reader) {
+    async fn replace(self: Rc<Self>, dest: Reader) {
         let dest = dest.to_str()?;
         let Some(temp_file) = self.temp_file.borrow_mut().take() else {
             return Err(Error::failed("Temp file already removed".into()));
@@ -1049,7 +1049,7 @@ pub struct SystemTimeImpl {
 }
 #[capnproto_rpc(system_time)]
 impl system_time::Server for SystemTimeImpl {
-    async fn duration_since(&self, earlier: Capability) {
+    async fn duration_since(self: Rc<Self>, earlier: Capability) {
         let Ok(earlier_duration_since_unix_epoch) = earlier
             .get_duration_since_unix_epoch_request()
             .send()
@@ -1072,7 +1072,7 @@ impl system_time::Server for SystemTimeImpl {
         Ok(())
     }
 
-    async fn checked_add(&self, duration: Reader) {
+    async fn checked_add(self: Rc<Self>, duration: Reader) {
         let secs = duration.get_secs();
         let nanos = duration.get_nanos();
         let duration = Duration::new(secs, nanos);
@@ -1087,7 +1087,7 @@ impl system_time::Server for SystemTimeImpl {
         Ok(())
     }
 
-    async fn checked_sub(&self, duration: Reader) {
+    async fn checked_sub(self: Rc<Self>, duration: Reader) {
         let secs = duration.get_secs();
         let nanos = duration.get_nanos();
         let duration = Duration::new(secs, nanos);
@@ -1102,7 +1102,7 @@ impl system_time::Server for SystemTimeImpl {
         Ok(())
     }
 
-    async fn get_duration_since_unix_epoch(&self) {
+    async fn get_duration_since_unix_epoch(self: Rc<Self>) {
         let Ok(_duration) = self
             .system_time
             .into_std()
@@ -1125,7 +1125,7 @@ pub struct InstantImpl {
 }
 #[capnproto_rpc(instant)]
 impl instant::Server for InstantImpl {
-    async fn duration_since(&self, earlier: Reader) {
+    async fn duration_since(self: Rc<Self>, earlier: Reader) {
         let Some(instant_impl) = self
             .ambient
             .as_ref()
@@ -1144,7 +1144,7 @@ impl instant::Server for InstantImpl {
         response.set_nanos(dur.subsec_nanos());
         Ok(())
     }
-    async fn checked_duration_since(&self, earlier: Capability) {
+    async fn checked_duration_since(self: Rc<Self>, earlier: Capability) {
         let Some(instant_impl) = self
             .ambient
             .as_ref()
@@ -1167,7 +1167,7 @@ impl instant::Server for InstantImpl {
         response.set_nanos(dur.subsec_nanos());
         Ok(())
     }
-    async fn saturating_duration_since(&self, earlier: Capability) {
+    async fn saturating_duration_since(self: Rc<Self>, earlier: Capability) {
         let Some(instant_impl) = self
             .ambient
             .as_ref()
@@ -1186,7 +1186,7 @@ impl instant::Server for InstantImpl {
         response.set_nanos(dur.subsec_nanos());
         Ok(())
     }
-    async fn checked_add(&self, duration: Reader) {
+    async fn checked_add(self: Rc<Self>, duration: Reader) {
         let secs = duration.get_secs();
         let nanos = duration.get_nanos();
         let duration = Duration::new(secs, nanos);
@@ -1198,7 +1198,7 @@ impl instant::Server for InstantImpl {
             .set_instant(AmbientAuthorityImpl::new_instant(&self.ambient, _instant));
         Ok(())
     }
-    async fn checked_sub(&self, duration: Reader) {
+    async fn checked_sub(self: Rc<Self>, duration: Reader) {
         let secs = duration.get_secs();
         let nanos = duration.get_nanos();
         let duration = Duration::new(secs, nanos);
@@ -1220,14 +1220,14 @@ pub struct MonotonicClockImpl {
 }
 #[capnproto_rpc(monotonic_clock)]
 impl monotonic_clock::Server for MonotonicClockImpl {
-    async fn now(&self) {
+    async fn now(self: Rc<Self>) {
         let _instant = self.monotonic_clock.now();
         results
             .get()
             .set_instant(AmbientAuthorityImpl::new_instant(&self.ambient, _instant));
         Ok(())
     }
-    async fn elapsed(&self, instant: Capability) {
+    async fn elapsed(self: Rc<Self>, instant: Capability) {
         let Some(instant_impl) = self
             .ambient
             .as_ref()
@@ -1253,7 +1253,7 @@ pub struct SystemClockImpl {
 }
 #[capnproto_rpc(system_clock)]
 impl system_clock::Server for SystemClockImpl {
-    async fn now(&self) {
+    async fn now(self: Rc<Self>) {
         let _system_time = self.system_clock.now();
         results
             .get()
@@ -1262,7 +1262,7 @@ impl system_clock::Server for SystemClockImpl {
             }));
         Ok(())
     }
-    async fn elapsed(&self, duration_since_unix_epoch: Reader) {
+    async fn elapsed(self: Rc<Self>, duration_since_unix_epoch: Reader) {
         capnp_let!({secs, nanos} = duration_since_unix_epoch);
         //Add duration since unix epoch to unix epoch to reconstruct a system time
         let earlier =
@@ -1283,7 +1283,7 @@ pub struct ProjectDirsImpl {
 }
 #[capnproto_rpc(project_dirs)]
 impl project_dirs::Server for ProjectDirsImpl {
-    async fn cache_dir(&self) {
+    async fn cache_dir(self: Rc<Self>) {
         let Ok(_dir) = self.project_dirs.cache_dir() else {
             return Err(Error::failed("Failed to retrieve cache directory".into()));
         };
@@ -1292,7 +1292,7 @@ impl project_dirs::Server for ProjectDirsImpl {
             .set_dir(AmbientAuthorityImpl::new_dir(&self.ambient, _dir));
         Ok(())
     }
-    async fn config_dir(&self) {
+    async fn config_dir(self: Rc<Self>) {
         let Ok(_dir) = self.project_dirs.config_dir() else {
             return Err(Error::failed("Failed to retrieve config directory".into()));
         };
@@ -1301,7 +1301,7 @@ impl project_dirs::Server for ProjectDirsImpl {
             .set_dir(AmbientAuthorityImpl::new_dir(&self.ambient, _dir));
         Ok(())
     }
-    async fn data_dir(&self) {
+    async fn data_dir(self: Rc<Self>) {
         let Ok(_dir) = self.project_dirs.data_dir() else {
             return Err(Error::failed("Failed to retrieve data directory".into()));
         };
@@ -1310,7 +1310,7 @@ impl project_dirs::Server for ProjectDirsImpl {
             .set_dir(AmbientAuthorityImpl::new_dir(&self.ambient, _dir));
         Ok(())
     }
-    async fn data_local_dir(&self) {
+    async fn data_local_dir(self: Rc<Self>) {
         let Ok(_dir) = self.project_dirs.data_local_dir() else {
             return Err(Error::failed(
                 "Failed to retrieve local data directory".into(),
@@ -1321,7 +1321,7 @@ impl project_dirs::Server for ProjectDirsImpl {
             .set_dir(AmbientAuthorityImpl::new_dir(&self.ambient, _dir));
         Ok(())
     }
-    async fn runtime_dir(&self) {
+    async fn runtime_dir(self: Rc<Self>) {
         let Ok(_dir) = self.project_dirs.runtime_dir() else {
             return Err(Error::failed("Failed to retrieve runtime directory".into()));
         };
@@ -1344,7 +1344,7 @@ pub mod tests {
     #[tokio::test]
     async fn create_dir_all_canonicalize_test() -> eyre::Result<()> {
         let ambient_authority: ambient_authority::Client =
-            capnp_rpc::new_client(Rc::new(RefCell::new(AmbientAuthorityImpl::new())));
+            capnp_rpc::new_client(RefCell::new(AmbientAuthorityImpl::new()));
 
         let mut open_ambient_request = ambient_authority.dir_open_ambient_request();
         let path = std::env::temp_dir();
@@ -1378,7 +1378,7 @@ pub mod tests {
     async fn test_create_write_getmetadata() -> eyre::Result<()> {
         //use ambient authority to open a dir, create a file(Or open it in write mode if it already exists), open a bytestream, use the bytestream to write some bytes, get file metadata
         let ambient_authority: ambient_authority::Client =
-            capnp_rpc::new_client(Rc::new(RefCell::new(AmbientAuthorityImpl::new())));
+            capnp_rpc::new_client(RefCell::new(AmbientAuthorityImpl::new()));
 
         let mut open_ambient_request = ambient_authority.dir_open_ambient_request();
         let path = std::env::temp_dir();
@@ -1437,7 +1437,7 @@ pub mod tests {
     #[tokio::test]
     async fn test_home_dir() -> eyre::Result<()> {
         let ambient_authority: ambient_authority::Client =
-            capnp_rpc::new_client(Rc::new(RefCell::new(AmbientAuthorityImpl::new())));
+            capnp_rpc::new_client(RefCell::new(AmbientAuthorityImpl::new()));
 
         let home_dir_request = ambient_authority.user_dirs_home_dir_request();
         let _home_dir = home_dir_request.send().promise.await?.get()?.get_dir()?;
@@ -1447,7 +1447,7 @@ pub mod tests {
     #[tokio::test]
     async fn test_user_dirs() -> eyre::Result<()> {
         let ambient_authority: ambient_authority::Client =
-            capnp_rpc::new_client(Rc::new(RefCell::new(AmbientAuthorityImpl::new())));
+            capnp_rpc::new_client(RefCell::new(AmbientAuthorityImpl::new()));
 
         let audio_dir_request = ambient_authority.user_dirs_audio_dir_request();
         let _audio_dir = audio_dir_request.send().promise.await?.get()?.get_dir()?;
@@ -1500,7 +1500,7 @@ pub mod tests {
     async fn test_project_dirs() -> eyre::Result<()> {
         //TODO maybe create some form of generic "dir" test
         let ambient_authority: ambient_authority::Client =
-            capnp_rpc::new_client(Rc::new(RefCell::new(AmbientAuthorityImpl::new())));
+            capnp_rpc::new_client(RefCell::new(AmbientAuthorityImpl::new()));
 
         let mut project_dirs_from_request = ambient_authority.project_dirs_from_request();
         let mut project_dirs_builder = project_dirs_from_request.get();
@@ -1543,7 +1543,7 @@ pub mod tests {
     #[tokio::test]
     async fn test_system_clock() -> eyre::Result<()> {
         let ambient_authority: ambient_authority::Client =
-            capnp_rpc::new_client(Rc::new(RefCell::new(AmbientAuthorityImpl::new())));
+            capnp_rpc::new_client(RefCell::new(AmbientAuthorityImpl::new()));
 
         let system_clock_request = ambient_authority.system_clock_new_request();
         let system_clock = system_clock_request
@@ -1594,7 +1594,7 @@ pub mod tests {
         std::fs::create_dir_all(path)?;
 
         let ambient_authority: ambient_authority::Client =
-            capnp_rpc::new_client(Rc::new(RefCell::new(AmbientAuthorityImpl::new())));
+            capnp_rpc::new_client(RefCell::new(AmbientAuthorityImpl::new()));
 
         let mut open_ambient_request = ambient_authority.dir_open_ambient_request();
         let mut path = std::env::temp_dir();
@@ -1760,7 +1760,7 @@ pub mod tests {
         writer.flush()?;
 
         let ambient_authority: ambient_authority::Client =
-            capnp_rpc::new_client(Rc::new(RefCell::new(AmbientAuthorityImpl::new())));
+            capnp_rpc::new_client(RefCell::new(AmbientAuthorityImpl::new()));
 
         let mut open_ambient_request = ambient_authority.dir_open_ambient_request();
         let path = std::env::temp_dir();

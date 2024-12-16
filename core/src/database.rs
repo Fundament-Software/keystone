@@ -22,7 +22,7 @@ pub type Microseconds = i64; // Microseconds since 1970 (won't overflow for 2000
 /// Internal trait that extends our internal database object with keystone-specific actions
 #[allow(dead_code)]
 pub trait DatabaseExt {
-    fn init(&self) -> Result<()>;
+    fn init(self: &Rc<Self>) -> Result<()>;
 
     fn get_generic<const TABLE: usize>(
         &self,
@@ -37,26 +37,26 @@ pub trait DatabaseExt {
     ) -> Result<()>;
 
     async fn set_state<R: SetPointerBuilder + Clone>(
-        &self,
+        self: &Rc<Self>,
         string_index: i64,
         data: R,
     ) -> Result<()>;
 
-    fn init_state(&self, string_index: i64) -> Result<()>;
+    fn init_state(self: &Rc<Self>, string_index: i64) -> Result<()>;
 
     fn get_sturdyref(
         &self,
         sturdy_id: i64,
     ) -> Result<capnp::capability::RemotePromise<restore_results::Owned<any_pointer, any_pointer>>>;
     async fn add_sturdyref<R: SetPointerBuilder + Clone>(
-        &self,
+        self: &Rc<Self>,
         module_id: u64,
         data: R,
         expires: Option<Microseconds>,
     ) -> Result<i64>;
     fn drop_sturdyref(&self, id: i64) -> Result<()>;
     fn clean_sturdyrefs(&self, ids: &[i64]) -> Result<()>;
-    async fn add_object<R: SetPointerBuilder + Clone>(&self, data: R) -> Result<i64>;
+    async fn add_object<R: SetPointerBuilder + Clone>(self: &Rc<Self>, data: R) -> Result<i64>;
     fn get_object(&self, id: i64, builder: capnp::dynamic_value::Builder<'_>) -> Result<()>;
     fn drop_object(&self, id: i64) -> Result<()>;
     fn get_string_index(&self, s: &str) -> Result<i64>;
@@ -90,7 +90,7 @@ impl AllocatorExt for BufferAllocator {
 impl AllocatorExt for capnp::message::HeapAllocator {}
 
 async fn get_single_segment<'a, R: SetPointerBuilder + Clone>(
-    db: &SqliteDatabase,
+    db: &Rc<SqliteDatabase>,
     alloc: &'a mut impl AllocatorExt,
     data: R,
 ) -> capnp::Result<capnp::message::Builder<&'a mut impl AllocatorExt>> {
@@ -112,10 +112,7 @@ async fn get_single_segment<'a, R: SetPointerBuilder + Clone>(
         builder.set_as(data)?;
     }
 
-    let db_ref = db
-        .this
-        .upgrade()
-        .ok_or(capnp::Error::failed("database doesn't exist".into()))?;
+    let db_ref = db.clone();
     let mut closure = move |hook: Box<dyn ClientHook>| {
         let db_ref_ref = db_ref.clone();
         async move {
@@ -180,7 +177,7 @@ fn cur_time() -> Microseconds {
 }
 
 impl DatabaseExt for SqliteDatabase {
-    fn init(&self) -> Result<()> {
+    fn init(self: &Rc<Self>) -> Result<()> {
         // These three tables look the same but we interact with them slightly differently
         for t in [ROOT_STATES, ROOT_OBJECTS] {
             self.connection.execute(
@@ -275,7 +272,7 @@ impl DatabaseExt for SqliteDatabase {
     }
 
     async fn set_state<R: SetPointerBuilder + Clone>(
-        &self,
+        self: &Rc<Self>,
         string_index: i64,
         data: R,
     ) -> Result<()> {
@@ -305,7 +302,7 @@ impl DatabaseExt for SqliteDatabase {
         Ok(())
     }
 
-    fn init_state(&self, string_index: i64) -> Result<()> {
+    fn init_state(self: &Rc<Self>, string_index: i64) -> Result<()> {
         let slice: &[u8] = &[0; 8];
 
         let call = self
@@ -388,7 +385,7 @@ impl DatabaseExt for SqliteDatabase {
     }
 
     async fn add_sturdyref<R: SetPointerBuilder + Clone>(
-        &self,
+        self: &Rc<Self>,
         module_id: u64,
         data: R,
         expires: Option<Microseconds>,
@@ -466,7 +463,7 @@ impl DatabaseExt for SqliteDatabase {
         )
     }
 
-    async fn add_object<R: SetPointerBuilder + Clone>(&self, data: R) -> Result<i64> {
+    async fn add_object<R: SetPointerBuilder + Clone>(self: &Rc<Self>, data: R) -> Result<i64> {
         fn inner(conn: &rusqlite::Connection, slice: &[u8]) -> Result<i64> {
             Ok(conn
                 .prepare_cached(
@@ -529,9 +526,9 @@ fn create(path: impl AsRef<Path>) -> Result<Connection, rusqlite::Error> {
 
 pub fn open_database<DB: DatabaseExt>(
     path: impl AsRef<Path>,
-    f: impl Fn(Connection) -> capnp::Result<Rc<crate::sqlite_capnp::root::ServerDispatch<DB>>>,
+    f: impl Fn(Connection) -> capnp::Result<Rc<DB>>,
     options: OpenOptions,
-) -> Result<Rc<crate::sqlite_capnp::root::ServerDispatch<DB>>> {
+) -> Result<Rc<DB>> {
     let span = tracing::span!(tracing::Level::DEBUG, "database::open_database", path = ?path.as_ref(), options = ?options);
     let _enter = span.enter();
     match options {
@@ -549,7 +546,7 @@ pub fn open_database<DB: DatabaseExt>(
 
             let r = f(Connection::open_with_flags(path, flags)?)?;
             if create {
-                r.server.init()?;
+                r.init()?;
             }
             Ok(r)
         }
@@ -559,7 +556,7 @@ pub fn open_database<DB: DatabaseExt>(
                 file.set_len(0)?;
             }
             let r = f(create(path)?)?;
-            r.server.init()?;
+            r.init()?;
             Ok(r)
         }
         OpenOptions::ReadWrite => Ok(f(Connection::open_with_flags(

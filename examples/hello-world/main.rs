@@ -3,6 +3,7 @@ include!(concat!(env!("OUT_DIR"), "/capnproto.rs"));
 use crate::hello_world_capnp::root;
 use capnp::any_pointer::Owned as any_pointer;
 use capnp_macros::capnproto_rpc;
+use std::rc::Rc;
 
 pub struct HelloWorldImpl {
     pub greeting: String,
@@ -10,7 +11,7 @@ pub struct HelloWorldImpl {
 
 #[capnproto_rpc(root)]
 impl root::Server for HelloWorldImpl {
-    async fn say_hello(&self, request: Reader) -> capnp::Result<Self> {
+    async fn say_hello(self: Rc<Self>, request: Reader) -> capnp::Result<Self> {
         tracing::debug!("say_hello was called!");
         let name = request.get_name()?.to_str()?;
         let greet = self.greeting.as_str();

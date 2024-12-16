@@ -50,7 +50,7 @@ where
     C: FnMut(&[u8]) -> F,
     F: Future<Output = Result<(), capnp::Error>>,
 {
-    async fn write(&self, bytes: &[u8]) {
+    async fn write(self: Rc<Self>, bytes: &[u8]) {
         let fut = {
             let mut cell = self.consumer.borrow_mut();
             if let Some(f) = &mut *cell {
@@ -64,12 +64,12 @@ where
         fut.await
     }
 
-    async fn end(&self) {
+    async fn end(self: Rc<Self>) {
         *self.consumer.borrow_mut() = None;
         Ok(())
     }
 
-    async fn get_substream(&self) {
+    async fn get_substream(self: Rc<Self>) {
         Err(capnp::Error::unimplemented("Not implemented".into()))
     }
 }
@@ -101,6 +101,10 @@ impl ByteStreamBufferImpl {
     pub fn new() -> Self {
         Self(Rc::new(RefCell::new(Default::default())))
     }
+
+    pub fn new_client(&self) -> Client {
+        capnp_rpc::new_client_from_rc(self.0.clone())
+    }
 }
 
 impl Default for ByteStreamBufferImpl {
@@ -127,14 +131,14 @@ impl std::future::Future for ByteStreamBufferImpl {
 }
 
 #[capnproto_rpc(byte_stream_capnp::byte_stream)]
-impl Server for ByteStreamBufferImpl {
-    async fn write(&self, bytes: &[u8]) {
+impl Server for RefCell<ByteStreamBufferInternal> {
+    async fn write(self: Rc<Self>, bytes: &[u8]) {
         let copy = self.clone();
-        let closed = self.0.borrow().closed;
+        let closed = self.borrow().closed;
 
         if !closed {
-            copy.await;
-            let mut this = self.0.borrow_mut();
+            ByteStreamBufferImpl(copy).await;
+            let mut this = self.borrow_mut();
             this.buf = bytes.to_owned();
             this.pending
                 .store(this.buf.len(), std::sync::atomic::Ordering::Release);
@@ -149,12 +153,12 @@ impl Server for ByteStreamBufferImpl {
         }
     }
 
-    async fn end(&self) {
-        self.0.borrow_mut().closed = true;
+    async fn end(self: Rc<Self>) {
+        self.borrow_mut().closed = true;
         Ok(())
     }
 
-    async fn get_substream(&self) {
+    async fn get_substream(self: Rc<Self>) {
         Err(capnp::Error::unimplemented("Not implemented".into()))
     }
 }

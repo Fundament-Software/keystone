@@ -8,6 +8,7 @@ use capnp::traits::Imbue;
 use capnp::traits::ImbueMut;
 use capnp::traits::Owned;
 use capnp_macros::capnproto_rpc;
+use std::rc::Rc;
 
 pub struct ComplexConfigImpl {
     pub msg: capnp::message::Builder<capnp::message::HeapAllocator>,
@@ -16,7 +17,7 @@ pub struct ComplexConfigImpl {
 
 #[capnproto_rpc(root)]
 impl root::Server for ComplexConfigImpl {
-    async fn get_config(&self) -> Result<(), ::capnp::Error> {
+    async fn get_config(self: Rc<Self>) -> Result<(), ::capnp::Error> {
         tracing::debug!("get_config was called! {:?}", self.caps);
 
         let mut reader: config::Reader = self.msg.get_root_as_reader()?;

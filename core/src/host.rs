@@ -11,7 +11,7 @@ use std::{marker::PhantomData, rc::Rc};
 #[derive(Clone)]
 pub struct HostImpl<State> {
     module_id: u64,
-    db: Rc<crate::sqlite_capnp::root::ServerDispatch<SqliteDatabase>>,
+    db: Rc<SqliteDatabase>,
     phantom: PhantomData<State>,
 }
 
@@ -19,10 +19,7 @@ impl<State> HostImpl<State>
 where
     State: ::capnp::traits::Owned,
 {
-    pub fn new(
-        module_id: u64,
-        db: Rc<crate::sqlite_capnp::root::ServerDispatch<SqliteDatabase>>,
-    ) -> Self {
+    pub fn new(module_id: u64, db: Rc<SqliteDatabase>) -> Self {
         Self {
             module_id,
             db,
@@ -67,7 +64,7 @@ where
     for<'a> capnp::dynamic_value::Builder<'a>: From<<State as capnp::traits::Owned>::Builder<'a>>,
 {
     async fn save(
-        &self,
+        self: Rc<Self>,
         params: save::SaveParams<capnp::any_pointer::Owned>,
         mut results: save::SaveResults<capnp::any_pointer::Owned>,
     ) -> Result<(), ::capnp::Error> {
@@ -95,7 +92,7 @@ where
     for<'a> capnp::dynamic_value::Builder<'a>: From<<State as capnp::traits::Owned>::Builder<'a>>,
 {
     async fn get_state(
-        &self,
+        self: Rc<Self>,
         _: host::GetStateParams<State>,
         mut results: host::GetStateResults<State>,
     ) -> Result<(), ::capnp::Error> {
@@ -103,7 +100,6 @@ where
         let _enter = span.enter();
         tracing::debug!("get_state()");
         self.db
-            .server
             .get_state(self.module_id as i64, results.get().init_state().into())
             .to_capnp()?;
 
@@ -111,7 +107,7 @@ where
     }
 
     async fn set_state(
-        &self,
+        self: Rc<Self>,
         params: host::SetStateParams<State>,
         _: host::SetStateResults<State>,
     ) -> Result<(), ::capnp::Error> {
@@ -119,7 +115,6 @@ where
         let _enter = span.enter();
         tracing::debug!("set_state()");
         self.db
-            .server
             .set_state(self.module_id as i64, params.get()?.get_state()?)
             .await
             .to_capnp()?;

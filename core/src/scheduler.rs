@@ -89,7 +89,7 @@ impl TimeSource for () {
 }
 
 pub struct Scheduler {
-    db: Rc<ServerDispatch<SqliteDatabase>>,
+    db: Rc<SqliteDatabase>,
     signal: tokio::sync::mpsc::Sender<Queue>,
 }
 
@@ -149,7 +149,7 @@ fn to_datetime(tz: &Tz, timestamp: i64) -> Result<DateTime<Tz>> {
 impl Scheduler {
     #[allow(clippy::too_many_arguments)]
     pub async fn repeat(
-        db: &Rc<ServerDispatch<SqliteDatabase>>,
+        db: &SqliteDatabase,
         timestamp: i64,
         every_months: u32,
         every_days: u32,
@@ -193,7 +193,7 @@ impl Scheduler {
     }
 
     pub async fn run(
-        db: Rc<ServerDispatch<SqliteDatabase>>,
+        db: Rc<SqliteDatabase>,
         action: i64,
     ) -> Result<crate::scheduler_capnp::action::Client> {
         let sturdyref = db.get_sturdyref(action)?;
@@ -208,7 +208,7 @@ impl Scheduler {
     }
 
     async fn run_and_save(
-        db: &Rc<ServerDispatch<SqliteDatabase>>,
+        db: &Rc<SqliteDatabase>,
         id: i64,
         action: i64,
         update: &mut CachedStatement<'_>,
@@ -226,16 +226,9 @@ impl Scheduler {
         Err(r)
     }
 
-    async fn catchup(
-        db: Rc<ServerDispatch<SqliteDatabase>>,
-        miss: MissBehavior,
-        id: i64,
-        count: i64,
-        action: i64,
-    ) {
+    async fn catchup(db: Rc<SqliteDatabase>, miss: MissBehavior, id: i64, count: i64, action: i64) {
         if miss != MissBehavior::None {
             let mut update = match db
-                .server
                 .connection
                 .prepare_cached("UPDATE scheduler SET action = ?2 WHERE id = ?1")
             {
@@ -271,11 +264,11 @@ impl Scheduler {
 
     #[allow(private_bounds)]
     pub fn new<TS: TimeSource + 'static>(
-        db: Rc<ServerDispatch<SqliteDatabase>>,
+        db: Rc<SqliteDatabase>,
         mut ts: TS,
     ) -> Result<(Self, impl Future<Output = Result<()>>)> {
         // Prep database
-        db.server.connection.execute(
+        db.connection.execute(
             "
 CREATE TABLE IF NOT EXISTS scheduler (
   id           INTEGER PRIMARY KEY,
@@ -298,19 +291,16 @@ CREATE TABLE IF NOT EXISTS scheduler (
 
         // This absolutely must be in a spawn() call of some kind because a multithreaded runtime must be able to give it as much wakeup granularity as possible.
         let fut = async move {
-            let mut get_range = db.server.connection.prepare_cached(
+            let mut get_range = db.connection.prepare_cached(
                 "SELECT id, timestamp, action, every_months, every_days, every_hours, every_millis, tz, repeat FROM scheduler WHERE timestamp <= ?1",
             )?;
             let mut remove = db
-                .server
                 .connection
                 .prepare_cached("DELETE FROM scheduler WHERE id = ?1")?;
             let mut set = db
-                .server
                 .connection
                 .prepare_cached("UPDATE scheduler SET timestamp = ?2 WHERE id = ?1")?;
             let mut get_time = db
-                .server
                 .connection
                 .prepare_cached("SELECT timestamp FROM scheduler ORDER BY timestamp ASC LIMIT 1")?;
 
@@ -340,7 +330,7 @@ CREATE TABLE IF NOT EXISTS scheduler (
                         while next <= now {
                             count += 1;
                             next = Self::repeat(
-                                &db,
+                                db.as_ref(),
                                 next,
                                 every_months as u32,
                                 every_days as u32,
@@ -515,15 +505,12 @@ use crate::scheduler_capnp::root;
 
 #[capnproto_rpc(registration)]
 impl registration::Server for Registration {
-    async fn cancel(&self) {
+    async fn cancel(self: Rc<Self>) {
         self.signal.send(Queue::Cancel(self.id)).await.to_capnp()
     }
 }
 
-async fn db_save_action(
-    db: Rc<ServerDispatch<SqliteDatabase>>,
-    hook: Box<dyn ClientHook>,
-) -> capnp::Result<i64> {
+async fn db_save_action(db: Rc<SqliteDatabase>, hook: Box<dyn ClientHook>) -> capnp::Result<i64> {
     let saveable: crate::storage_capnp::saveable::Client<any_pointer> =
         capnp::capability::FromClientHook::new(hook);
     let response = saveable.save_request().send().promise.await?;
@@ -533,7 +520,7 @@ async fn db_save_action(
 
 impl root::Server for Scheduler {
     async fn once_(
-        &self,
+        self: Rc<Self>,
         params: root::OnceParams,
         mut results: root::OnceResults,
     ) -> Result<(), ::capnp::Error> {
@@ -569,7 +556,7 @@ impl root::Server for Scheduler {
     }
 
     async fn every(
-        &self,
+        self: Rc<Self>,
         params: root::EveryParams,
         mut results: root::EveryResults,
     ) -> Result<(), ::capnp::Error> {
@@ -608,7 +595,7 @@ impl root::Server for Scheduler {
     }
 
     async fn complex(
-        &self,
+        self: Rc<Self>,
         params: root::ComplexParams,
         mut results: root::ComplexResults,
     ) -> Result<(), ::capnp::Error> {
@@ -675,12 +662,12 @@ mod tests {
         send: AtomicTake<oneshot::Sender<()>>,
         count: AtomicI32,
         key: String,
-        parent: Rc<restore::ServerDispatch<TestModule, any_pointer>>,
+        parent: Rc<TestModule>,
     }
 
     #[capnproto_rpc(action)]
     impl action::Server for TestActionImpl {
-        async fn run(&self) -> capnp::Result<()> {
+        async fn run(self: Rc<Self>) -> capnp::Result<()> {
             let prev = self
                 .count
                 .fetch_sub(1, std::sync::atomic::Ordering::Release);
@@ -710,7 +697,7 @@ mod tests {
 
     #[capnproto_rpc(saveable)]
     impl saveable::Server<action::Owned> for TestActionImpl {
-        async fn save(&self) -> capnp::Result<()> {
+        async fn save(self: Rc<Self>) -> capnp::Result<()> {
             tracing::info!("{}::save() {:?}", self.key, &self.send);
             let sturdyref =
                 crate::sturdyref::SturdyRefImpl::init(1, self.key.as_str(), self.parent.db.clone())
@@ -729,7 +716,7 @@ mod tests {
 
             // After our final expected call of run(), send will be empty, and us calling save() on it is not a bug, so we can't detect it here.
             if let Some(send) = self.send.take() {
-                self.parent.server.actions.borrow_mut().insert(
+                self.parent.actions.borrow_mut().insert(
                     self.key.clone(),
                     (self.count.load(std::sync::atomic::Ordering::Relaxed), send),
                 );
@@ -759,18 +746,17 @@ mod tests {
     }
 
     struct TestModule {
-        db: Rc<ServerDispatch<SqliteDatabase>>,
+        db: Rc<SqliteDatabase>,
         actions: RefCell<HashMap<String, (i32, oneshot::Sender<()>)>>,
-        this: std::rc::Weak<restore::ServerDispatch<TestModule, any_pointer>>, // TODO: Remove once we have access to Rc<Self>
     }
 
     struct TestRepeatCallback {
-        db: Rc<ServerDispatch<SqliteDatabase>>,
+        db: Rc<SqliteDatabase>,
     }
 
     #[capnproto_rpc(repeat_callback)]
     impl repeat_callback::Server for TestRepeatCallback {
-        async fn repeat(&self, time: Reader) -> capnp::Result<()> {
+        async fn repeat(self: Rc<Self>, time: Reader) -> capnp::Result<()> {
             let tz_index = time.get_tz()?;
             let datetime = super::from_ymd_hms_ms(time, tz_index, 0)?
                 .earliest()
@@ -793,7 +779,7 @@ mod tests {
 
     #[capnproto_rpc(saveable)]
     impl saveable::Server<repeat_callback::Owned> for TestRepeatCallback {
-        async fn save(&self) -> capnp::Result<()> {
+        async fn save(self: Rc<Self>) -> capnp::Result<()> {
             let sturdyref = crate::sturdyref::SturdyRefImpl::init(1, "__callback", self.db.clone())
                 .await
                 .to_capnp()?;
@@ -810,7 +796,7 @@ mod tests {
 
     impl restore::Server<any_pointer> for TestModule {
         async fn restore(
-            &self,
+            self: Rc<Self>,
             params: restore::RestoreParams<any_pointer>,
             mut results: restore::RestoreResults<any_pointer>,
         ) -> Result<(), ::capnp::Error> {
@@ -840,10 +826,7 @@ mod tests {
                     send: send.into(),
                     key,
                     count: count.into(),
-                    parent: self
-                        .this
-                        .upgrade()
-                        .ok_or(capnp::Error::failed("Failed to upgrade self ref".into()))?,
+                    parent: self.clone(),
                 });
 
                 results
@@ -862,25 +845,22 @@ mod tests {
         crate::scheduler_capnp::root::Client,
         mpsc::Sender<()>,
         mpsc::Sender<i64>,
-        Rc<restore::ServerDispatch<TestModule, any_pointer>>,
+        Rc<TestModule>,
     )> {
         let db = crate::database::open_database(
             db_path.to_path_buf(),
-            SqliteDatabase::new_connection,
+            |c| SqliteDatabase::new_connection(c).map(|s| Rc::new(s)),
             crate::database::OpenOptions::Create,
         )?;
 
-        let module: Rc<restore::ServerDispatch<TestModule, any_pointer>> = Rc::new_cyclic(|w| {
-            restore::Client::from_server(TestModule {
-                db: db.clone(),
-                actions: RefCell::new(HashMap::new()),
-                this: w.clone(),
-            })
+        let module: Rc<TestModule> = Rc::new(TestModule {
+            db: db.clone(),
+            actions: RefCell::new(HashMap::new()),
         });
 
         db.clients.borrow_mut().insert(
             1,
-            capnp_rpc::local::Client::from_rc(module.clone()).add_ref(),
+            capnp_rpc::local::Client::new(restore::Client::from_rc(module.clone())).add_ref(),
         );
         let (sleep, waker) = mpsc::channel(1);
         let (time, now) = mpsc::channel(1);
@@ -900,7 +880,7 @@ mod tests {
         datetime: chrono::DateTime<chrono::Utc>,
         delay: i64,
         scheduler: &crate::scheduler_capnp::root::Client,
-        module: Rc<restore::ServerDispatch<TestModule, any_pointer>>,
+        module: Rc<TestModule>,
     ) -> capnp::Result<(
         oneshot::Receiver<()>,
         crate::scheduler_capnp::registration::Client,
@@ -945,7 +925,7 @@ mod tests {
         millis: i64,
         miss: MissBehavior,
         scheduler: &crate::scheduler_capnp::root::Client,
-        module: Rc<restore::ServerDispatch<TestModule, any_pointer>>,
+        module: Rc<TestModule>,
     ) -> capnp::Result<(
         oneshot::Receiver<()>,
         crate::scheduler_capnp::registration::Client,
@@ -994,7 +974,7 @@ mod tests {
         callback: repeat_callback::Client,
         miss: MissBehavior,
         scheduler: &crate::scheduler_capnp::root::Client,
-        module: Rc<restore::ServerDispatch<TestModule, any_pointer>>,
+        module: Rc<TestModule>,
     ) -> capnp::Result<(
         oneshot::Receiver<()>,
         crate::scheduler_capnp::registration::Client,

@@ -28,6 +28,7 @@ impl<'a> FromPointerReader<'a> for GetPointerReader<'a> {
     }
 }
 
+#[derive(Clone)]
 pub struct ProxyServer {
     pub target: Client,
     pub set: Rc<RefCell<CapSet>>,
@@ -53,7 +54,7 @@ impl ProxyServer {
 
 impl Server for ProxyServer {
     async fn dispatch_call(
-        &self,
+        self,
         interface_id: u64,
         method_id: u16,
         params: Params<capnp::any_pointer::Owned>,
@@ -135,5 +136,9 @@ impl Server for ProxyServer {
         let response = request.send().promise.await?;
         results.hook.get()?.set_as(response.hook.get()?)?;
         Ok(())
+    }
+
+    fn get_ptr(&self) -> usize {
+        self.target.hook.get_ptr()
     }
 }

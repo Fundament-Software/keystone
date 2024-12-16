@@ -4,6 +4,7 @@ use capnp_macros::capnproto_rpc;
 use hyper_tls::HttpsConnector;
 use hyper_util::client::legacy::{connect::HttpConnector, Client as HttpClient};
 use hyper_util::rt::TokioExecutor;
+use std::rc::Rc;
 
 pub struct HttpsImpl {
     https_client: HttpClient<HttpsConnector<HttpConnector>, String>,
@@ -18,7 +19,7 @@ impl HttpsImpl {
 }
 #[capnproto_rpc(Https)]
 impl Https::Server for HttpsImpl {
-    async fn domain(&self, name: capnp::text::Reader) {
+    async fn domain(self: Rc<Self>, name: capnp::text::Reader) {
         let domain_impl = DomainImpl::new(name.to_str()?, self.https_client.clone())?;
         let domain: Domain::Client = capnp_rpc::new_client(domain_impl);
         results.get().set_result(domain);

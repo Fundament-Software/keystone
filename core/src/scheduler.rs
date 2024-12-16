@@ -149,7 +149,7 @@ fn to_datetime(tz: &Tz, timestamp: i64) -> Result<DateTime<Tz>> {
 impl Scheduler {
     #[allow(clippy::too_many_arguments)]
     pub async fn repeat(
-        db: &Rc<SqliteDatabase>,
+        db: &SqliteDatabase,
         timestamp: i64,
         every_months: u32,
         every_days: u32,
@@ -330,7 +330,7 @@ CREATE TABLE IF NOT EXISTS scheduler (
                         while next <= now {
                             count += 1;
                             next = Self::repeat(
-                                &db,
+                                db.as_ref(),
                                 next,
                                 every_months as u32,
                                 every_days as u32,

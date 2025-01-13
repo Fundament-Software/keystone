@@ -197,17 +197,18 @@ fn keystone_startup(
 
     let fut = pool.run_until(async move {
         // TODO: Eventually the terminal interface should be factored out into a module using a monitoring capability.
+        let (log_tx, log_rx) = mpsc::unbounded_channel::<(u64, String)>();
+        let log_tx_copy = log_tx.clone();
+        instance.init_custom(
+            dir,
+            message.reborrow(),
+            &rpc_systems,
+            move |id| {
+                let tx = log_tx_copy.clone();
+                log_capture(id, tx)
+            },
+        ).await?;
         if interactive {
-            let (log_tx, log_rx) = mpsc::unbounded_channel::<(u64, String)>();
-            let log_tx_copy = log_tx.clone();
-
-            instance
-                .init_custom(dir, message.reborrow(), &rpc_systems, move |id| {
-                    let tx = log_tx_copy.clone();
-                    log_capture(id, tx)
-                })
-                .await?;
-
             if let Err(e) = run_interface(
                 &mut instance,
                 &mut rpc_systems,
@@ -1128,11 +1129,6 @@ async fn event_loop<B: ratatui::prelude::Backend>(
                     })
                     .collect::<Vec<_>>();
 
-                if let Ok((id, line)) = log_rx.try_recv() {
-                    if let Some(m) = app.modules.get_mut(&id) {
-                        m.log.push_front(line);
-                    }
-                }
                 for id in remove {
                     app.modules.remove(&id);
                 }
@@ -1164,6 +1160,11 @@ async fn event_loop<B: ratatui::prelude::Backend>(
                                 log: CircularBuffer::new(),
                             },
                         );
+                    }
+                }
+                if let Ok((id, line)) = log_rx.try_recv() {
+                    if let Some(m) = app.modules.get_mut(&id) {
+                        m.log.push_front(line);
                     }
                 }
 

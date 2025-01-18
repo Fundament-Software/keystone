@@ -197,15 +197,15 @@ fn keystone_startup(
 
     let fut = pool.run_until(async move {
         // TODO: Eventually the terminal interface should be factored out into a module using a monitoring capability.
-        let (log_tx, log_rx) = mpsc::unbounded_channel::<(u64, String)>();
-        let log_tx_copy = log_tx.clone();
-        instance
-            .init_custom(dir, message.reborrow(), &rpc_systems, move |id| {
-                let tx = log_tx_copy.clone();
-                log_capture(id, tx)
-            })
-            .await?;
         if interactive {
+            let (log_tx, log_rx) = mpsc::unbounded_channel::<(u64, String)>();
+            let log_tx_copy = log_tx.clone();
+            instance
+                .init_custom(dir, message.reborrow(), &rpc_systems, move |id| {
+                    let tx = log_tx_copy.clone();
+                    log_capture(id, tx)
+                })
+                .await?;
             if let Err(e) = run_interface(
                 &mut instance,
                 &mut rpc_systems,

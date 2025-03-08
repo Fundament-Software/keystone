@@ -99,9 +99,7 @@ impl root::Server for SqliteUsageImpl {
                     .clone()
                     .cast_to::<r_a_table_ref::Client>()
                     .clone(),
-                _source: source::Source::_Values(vec![vec![d_b_any::DBAny::_Text(
-                    current,
-                )]]),
+                _source: source::Source::_Values(vec![vec![d_b_any::DBAny::_Text(current)]]),
                 _cols: vec!["last"],
                 _returning: Vec::new(),
             }))

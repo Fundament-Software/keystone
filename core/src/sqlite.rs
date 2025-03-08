@@ -1923,7 +1923,7 @@ pub enum DBAnyBindings<'a> {
     _Blob(&'a [u8]),
     _Pointer(Box<dyn ::capnp::private::capability::ClientHook>),
 }
-impl <'a>From<DBAnyBindings<'a>> for d_b_any::DBAny<'a> {
+impl<'a> From<DBAnyBindings<'a>> for d_b_any::DBAny<'a> {
     fn from(value: DBAnyBindings<'a>) -> Self {
         match value {
             DBAnyBindings::UNINITIALIZED => Self::UNINITIALIZED,
@@ -2099,9 +2099,7 @@ fn parse_insert_statement<'a>(
                         _ => return Err(ParseError::UnsupportedBindingType.into()),
                     }
                 } else {
-                    returning.push(expr::Expr::_Literal(d_b_any::DBAny::_Text(
-                        token,
-                    )));
+                    returning.push(expr::Expr::_Literal(d_b_any::DBAny::_Text(token)));
                 }
             }
         }
@@ -2222,9 +2220,7 @@ fn parse_update_statement<'a>(
                     _ => return Err(ParseError::UnsupportedBindingType.into()),
                 }
             } else {
-                where_clause.push(expr::Expr::_Literal(d_b_any::DBAny::_Text(
-                    next,
-                )));
+                where_clause.push(expr::Expr::_Literal(d_b_any::DBAny::_Text(next)));
             }
             if let Some(op) = iter.next() {
                 match op {
@@ -2275,9 +2271,7 @@ fn parse_update_statement<'a>(
                         }
                     }
                 } else {
-                    returning.push(expr::Expr::_Literal(d_b_any::DBAny::_Text(
-                        token,
-                    )));
+                    returning.push(expr::Expr::_Literal(d_b_any::DBAny::_Text(token)));
                 }
             }
         }
@@ -2343,9 +2337,7 @@ fn parse_delete_statement<'a>(
                     _ => return Err(ParseError::UnsupportedBindingType.into()),
                 }
             } else {
-                where_clause.push(expr::Expr::_Literal(d_b_any::DBAny::_Text(
-                    next,
-                )));
+                where_clause.push(expr::Expr::_Literal(d_b_any::DBAny::_Text(next)));
             }
             if let Some(op) = iter.next() {
                 match op {
@@ -2396,9 +2388,7 @@ fn parse_delete_statement<'a>(
                         }
                     }
                 } else {
-                    returning.push(expr::Expr::_Literal(d_b_any::DBAny::_Text(
-                        token,
-                    )));
+                    returning.push(expr::Expr::_Literal(d_b_any::DBAny::_Text(token)));
                 }
             }
         }
@@ -2428,9 +2418,7 @@ fn parse_select_statement<'a>(
     while let Some(next) = iter.next() {
         selectcore
             ._results
-            .push(expr::Expr::_Literal(d_b_any::DBAny::_Text(
-                next,
-            )));
+            .push(expr::Expr::_Literal(d_b_any::DBAny::_Text(next)));
         if let Some(n) = iter.next() {
             if n != "," {
                 token = n;
@@ -2495,9 +2483,7 @@ fn parse_select_statement<'a>(
             } else {
                 selectcore
                     ._sql_where
-                    .push(expr::Expr::_Literal(d_b_any::DBAny::_Text(
-                        next,
-                    )));
+                    .push(expr::Expr::_Literal(d_b_any::DBAny::_Text(next)));
             }
             if let Some(op) = iter.next() {
                 match op {
@@ -2628,9 +2614,7 @@ fn parse_select_statement<'a>(
                 }
             } else {
                 orderby.push(ordering_term::OrderingTerm {
-                    _expr: Some(expr::Expr::_Literal(d_b_any::DBAny::_Text(
-                        next,
-                    ))),
+                    _expr: Some(expr::Expr::_Literal(d_b_any::DBAny::_Text(next))),
                     _direction: direction,
                 });
             }
@@ -2672,9 +2656,7 @@ fn parse_select_statement<'a>(
             }
         } else {
             limit_operation::LimitOperation {
-                _limit: Some(expr::Expr::_Literal(d_b_any::DBAny::_Text(
-                    expr,
-                ))),
+                _limit: Some(expr::Expr::_Literal(d_b_any::DBAny::_Text(expr))),
                 _offset: None,
             }
         };
@@ -2697,9 +2679,7 @@ fn parse_select_statement<'a>(
                     _ => return Err(ParseError::UnsupportedBindingType.into()),
                 }
             } else {
-                l._offset = Some(expr::Expr::_Literal(d_b_any::DBAny::_Text(
-                    offset,
-                )))
+                l._offset = Some(expr::Expr::_Literal(d_b_any::DBAny::_Text(offset)))
             };
         }
         limit = Some(l);

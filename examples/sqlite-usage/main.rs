@@ -46,13 +46,13 @@ impl root::Server for SqliteUsageImpl {
                         )),
                         _joinoperations: vec![],
                     }),
-                    _results: vec![Expr::_Literal(d_b_any::DBAny::_Text("last".to_string()))],
+                    _results: vec![Expr::_Literal(d_b_any::DBAny::_Text("last"))],
                     _sql_where: Vec::new(),
                 })),
                 _mergeoperations: vec![],
                 _orderby: vec![OrderingTerm {
                     _expr: Some(Expr::_Column(TableColumn {
-                        _col_name: "last".to_string(),
+                        _col_name: "last",
                         _reference: 0,
                     })),
                     _direction: select::ordering_term::AscDesc::Asc,
@@ -100,9 +100,9 @@ impl root::Server for SqliteUsageImpl {
                     .cast_to::<r_a_table_ref::Client>()
                     .clone(),
                 _source: source::Source::_Values(vec![vec![d_b_any::DBAny::_Text(
-                    current.to_string(),
+                    current,
                 )]]),
-                _cols: vec!["last".to_string()],
+                _cols: vec!["last"],
                 _returning: Vec::new(),
             }))
             .send()
@@ -130,7 +130,7 @@ impl keystone::Module<sqlite_usage_capnp::config::Owned> for SqliteUsageImpl {
                 .client
                 .cast_to::<add_d_b::Client>()
                 .build_create_table_request(vec![table_field::TableField {
-                    _name: "last".to_string(),
+                    _name: "last",
                     _base_type: table_field::Type::Text,
                     _nullable: false,
                 }]);

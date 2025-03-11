@@ -1787,7 +1787,7 @@ impl add_d_b::Client {
     pub fn send_request_from_sql(
         &self,
         sql: &str,
-        bindings: Vec<Bindings>,
+        bindings: &[Bindings],
     ) -> eyre::Result<RemotePromise<statement_results::Owned>> {
         match create_sqlite_params_struct_from_str(sql, bindings)? {
             Statement::Insert(ins) => Ok(self
@@ -1816,7 +1816,7 @@ impl add_d_b::Client {
     pub fn send_prepare_insert_request(
         &self,
         sql: &str,
-        bindings: Vec<Bindings>,
+        bindings: &[Bindings],
     ) -> eyre::Result<RemotePromise<prepare_insert_results::Owned>> {
         let Statement::Insert(ins) = create_sqlite_params_struct_from_str(sql, bindings)? else {
             return Err(eyre!("Statement is not insert"));
@@ -1827,8 +1827,8 @@ impl add_d_b::Client {
             .prepare_insert_request();
         let mut builder = request.get().init_ins();
         let mut cols = builder.reborrow().init_cols(ins._cols.len() as u32);
-        for (i, c) in ins._cols.iter().enumerate() {
-            cols.set(i as u32, c.as_str().into());
+        for (i, c) in ins._cols.into_iter().enumerate() {
+            cols.set(i as u32, c.into());
         }
         builder.set_fallback(ins._fallback);
         let source = builder.reborrow().get_source();
@@ -1847,7 +1847,7 @@ impl database::Client {
     pub fn send_request_from_sql(
         &self,
         sql: &str,
-        bindings: Vec<Bindings>,
+        bindings: &Vec<Bindings>,
     ) -> eyre::Result<RemotePromise<statement_results::Owned>> {
         match create_sqlite_params_struct_from_str(sql, bindings)? {
             Statement::Insert(ins) => Ok(self.build_insert_request(Some(ins)).send()),
@@ -1863,7 +1863,7 @@ impl database::Client {
     pub fn send_prepare_insert_request(
         &self,
         sql: &str,
-        bindings: Vec<Bindings>,
+        bindings: &Vec<Bindings>,
     ) -> eyre::Result<RemotePromise<prepare_insert_results::Owned>> {
         let Statement::Insert(ins) = create_sqlite_params_struct_from_str(sql, bindings)? else {
             return Err(eyre!("Statement is not insert"));
@@ -1871,8 +1871,8 @@ impl database::Client {
         let mut request = self.prepare_insert_request();
         let mut builder = request.get().init_ins();
         let mut cols = builder.reborrow().init_cols(ins._cols.len() as u32);
-        for (i, c) in ins._cols.iter().enumerate() {
-            cols.set(i as u32, c.as_str().into());
+        for (i, c) in ins._cols.into_iter().enumerate() {
+            cols.set(i as u32, c.into());
         }
         builder.set_fallback(ins._fallback);
         let source = builder.reborrow().get_source();
@@ -1891,7 +1891,7 @@ impl r_o_database::Client {
     pub fn send_request_from_sql(
         &self,
         sql: &str,
-        bindings: Vec<Bindings>,
+        bindings: &Vec<Bindings>,
     ) -> eyre::Result<RemotePromise<statement_results::Owned>> {
         match create_sqlite_params_struct_from_str(sql, bindings)? {
             Statement::Select(sel) => Ok(self.clone().build_select_request(Some(sel)).send()),
@@ -1900,31 +1900,31 @@ impl r_o_database::Client {
     }
 }
 #[derive(Clone)]
-pub enum Bindings {
+pub enum Bindings<'a> {
     Bindparam,
-    DBAny(DBAnyBindings),
-    Column(Col),
+    DBAny(DBAnyBindings<'a>),
+    Column(Col<'a>),
     Tableref(table_ref::Client),
     RATableref(r_a_table_ref::Client),
     ROTableref(r_o_table_ref::Client),
 }
 #[derive(Clone)]
-pub struct Col {
-    debruinin_level: u16,
-    name: String,
+pub struct Col<'a> {
+    debruijn_level: u16,
+    name: &'a str,
 }
 #[derive(Clone)]
-pub enum DBAnyBindings {
+pub enum DBAnyBindings<'a> {
     UNINITIALIZED,
     _Null(()),
     _Integer(i64),
     _Real(f64),
-    _Text(String),
-    _Blob(Vec<u8>),
+    _Text(&'a str),
+    _Blob(&'a [u8]),
     _Pointer(Box<dyn ::capnp::private::capability::ClientHook>),
 }
-impl From<DBAnyBindings> for d_b_any::DBAny {
-    fn from(value: DBAnyBindings) -> Self {
+impl<'a> From<DBAnyBindings<'a>> for d_b_any::DBAny<'a> {
+    fn from(value: DBAnyBindings<'a>) -> Self {
         match value {
             DBAnyBindings::UNINITIALIZED => Self::UNINITIALIZED,
             DBAnyBindings::_Null(_) => Self::_Null(()),
@@ -1954,23 +1954,23 @@ fn split_sql(sql: &str) -> Vec<&str> {
     }
     result
 }
-fn create_sqlite_params_struct_from_str(
-    sql: &str,
-    bindings: Vec<Bindings>,
-) -> eyre::Result<Statement> {
+fn create_sqlite_params_struct_from_str<'a>(
+    sql: &'a str,
+    bindings: &[Bindings<'a>],
+) -> eyre::Result<Statement<'a>> {
     let mut iter = split_sql(sql).into_iter();
     match iter.next().ok_or(ParseError::IncompleteStatement)? {
         "INSERT" => Ok(Statement::Insert(parse_insert_statement(
-            &mut iter, &bindings,
+            &mut iter, bindings,
         )?)),
         "UPDATE" => Ok(Statement::Update(parse_update_statement(
-            &mut iter, &bindings,
+            &mut iter, bindings,
         )?)),
         "DELETE" => Ok(Statement::Delete(parse_delete_statement(
-            &mut iter, &bindings,
+            &mut iter, bindings,
         )?)),
         "SELECT" => Ok(Statement::Select(parse_select_statement(
-            &mut iter, &bindings,
+            &mut iter, bindings,
         )?)),
         _ => Err(eyre!(
             "Only Insert, Update, Delete, Select statements allowed here"
@@ -1978,10 +1978,10 @@ fn create_sqlite_params_struct_from_str(
     }
 }
 
-fn parse_insert_statement(
-    iter: &mut std::vec::IntoIter<&str>,
-    bindings: &Vec<Bindings>,
-) -> eyre::Result<insert::Insert> {
+fn parse_insert_statement<'a>(
+    iter: &mut std::vec::IntoIter<&'a str>,
+    bindings: &[Bindings<'a>],
+) -> eyre::Result<insert::Insert<'a>> {
     let mut conflict_strat = insert::ConflictStrategy::Fail;
 
     let mut cols = Vec::new();
@@ -2024,7 +2024,7 @@ fn parse_insert_statement(
             if next == ")" {
                 break;
             } else if next != "," {
-                cols.push(next.to_string());
+                cols.push(next);
             }
         }
         token = iter.next().ok_or(ParseError::IncompleteStatement)?;
@@ -2059,7 +2059,7 @@ fn parse_insert_statement(
                     };
                     inner.push(bind.into());
                 } else {
-                    inner.push(d_b_any::DBAny::_Text(next.to_string()));
+                    inner.push(d_b_any::DBAny::_Text(next));
                 }
             }
         }
@@ -2092,16 +2092,14 @@ fn parse_insert_statement(
                         Bindings::DBAny(a) => returning.push(expr::Expr::_Literal(a.into())),
                         Bindings::Column(c) => {
                             returning.push(expr::Expr::_Column(expr::table_column::TableColumn {
-                                _col_name: c.name.clone(),
-                                _reference: c.debruinin_level,
+                                _col_name: c.name,
+                                _reference: c.debruijn_level,
                             }));
                         }
                         _ => return Err(ParseError::UnsupportedBindingType.into()),
                     }
                 } else {
-                    returning.push(expr::Expr::_Literal(d_b_any::DBAny::_Text(
-                        token.to_string(),
-                    )));
+                    returning.push(expr::Expr::_Literal(d_b_any::DBAny::_Text(token)));
                 }
             }
         }
@@ -2115,10 +2113,10 @@ fn parse_insert_statement(
         _returning: returning,
     })
 }
-fn parse_update_statement(
-    iter: &mut std::vec::IntoIter<&str>,
-    bindings: &[Bindings],
-) -> eyre::Result<update::Update> {
+fn parse_update_statement<'a>(
+    iter: &mut std::vec::IntoIter<&'a str>,
+    bindings: &[Bindings<'a>],
+) -> eyre::Result<update::Update<'a>> {
     let mut conflict_strat = update::ConflictStrategy::Fail;
     let mut assign: Vec<assignment::Assignment> = Vec::new();
     let mut join = join_clause::JoinClause {
@@ -2167,8 +2165,8 @@ fn parse_update_statement(
         }
         let ex = iter.next().ok_or(ParseError::IncompleteStatement)?;
         assign.push(assignment::Assignment {
-            _name: next.to_string(),
-            _expr: Some(expr::Expr::_Literal(d_b_any::DBAny::_Text(ex.to_string()))),
+            _name: next,
+            _expr: Some(expr::Expr::_Literal(d_b_any::DBAny::_Text(ex))),
         });
         if let Some(n) = iter.next() {
             if n != "," {
@@ -2215,16 +2213,14 @@ fn parse_update_statement(
                     Bindings::DBAny(dba) => where_clause.push(expr::Expr::_Literal(dba.into())),
                     Bindings::Column(c) => {
                         where_clause.push(expr::Expr::_Column(expr::table_column::TableColumn {
-                            _col_name: c.name.clone(),
-                            _reference: c.debruinin_level,
+                            _col_name: c.name,
+                            _reference: c.debruijn_level,
                         }));
                     }
                     _ => return Err(ParseError::UnsupportedBindingType.into()),
                 }
             } else {
-                where_clause.push(expr::Expr::_Literal(d_b_any::DBAny::_Text(
-                    next.to_string(),
-                )));
+                where_clause.push(expr::Expr::_Literal(d_b_any::DBAny::_Text(next)));
             }
             if let Some(op) = iter.next() {
                 match op {
@@ -2264,8 +2260,8 @@ fn parse_update_statement(
                         Bindings::DBAny(a) => returning.push(expr::Expr::_Literal(a.into())),
                         Bindings::Column(c) => {
                             returning.push(expr::Expr::_Column(expr::table_column::TableColumn {
-                                _col_name: c.name.clone(),
-                                _reference: c.debruinin_level,
+                                _col_name: c.name,
+                                _reference: c.debruijn_level,
                             }));
                         }
                         _ => {
@@ -2275,9 +2271,7 @@ fn parse_update_statement(
                         }
                     }
                 } else {
-                    returning.push(expr::Expr::_Literal(d_b_any::DBAny::_Text(
-                        token.to_string(),
-                    )));
+                    returning.push(expr::Expr::_Literal(d_b_any::DBAny::_Text(token)));
                 }
             }
         }
@@ -2291,10 +2285,10 @@ fn parse_update_statement(
         _returning: returning,
     })
 }
-fn parse_delete_statement(
-    iter: &mut std::vec::IntoIter<&str>,
-    bindings: &[Bindings],
-) -> eyre::Result<delete::Delete> {
+fn parse_delete_statement<'a>(
+    iter: &mut std::vec::IntoIter<&'a str>,
+    bindings: &[Bindings<'a>],
+) -> eyre::Result<delete::Delete<'a>> {
     let mut where_clause = Vec::new();
     let mut returning = Vec::new();
     let mut token = "";
@@ -2336,16 +2330,14 @@ fn parse_delete_statement(
                     Bindings::DBAny(dba) => where_clause.push(expr::Expr::_Literal(dba.into())),
                     Bindings::Column(c) => {
                         where_clause.push(expr::Expr::_Column(expr::table_column::TableColumn {
-                            _col_name: c.name.clone(),
-                            _reference: c.debruinin_level,
+                            _col_name: c.name,
+                            _reference: c.debruijn_level,
                         }));
                     }
                     _ => return Err(ParseError::UnsupportedBindingType.into()),
                 }
             } else {
-                where_clause.push(expr::Expr::_Literal(d_b_any::DBAny::_Text(
-                    next.to_string(),
-                )));
+                where_clause.push(expr::Expr::_Literal(d_b_any::DBAny::_Text(next)));
             }
             if let Some(op) = iter.next() {
                 match op {
@@ -2385,8 +2377,8 @@ fn parse_delete_statement(
                         Bindings::DBAny(a) => returning.push(expr::Expr::_Literal(a.into())),
                         Bindings::Column(c) => {
                             returning.push(expr::Expr::_Column(expr::table_column::TableColumn {
-                                _col_name: c.name.clone(),
-                                _reference: c.debruinin_level,
+                                _col_name: c.name,
+                                _reference: c.debruijn_level,
                             }));
                         }
                         _ => {
@@ -2396,9 +2388,7 @@ fn parse_delete_statement(
                         }
                     }
                 } else {
-                    returning.push(expr::Expr::_Literal(d_b_any::DBAny::_Text(
-                        token.to_string(),
-                    )));
+                    returning.push(expr::Expr::_Literal(d_b_any::DBAny::_Text(token)));
                 }
             }
         }
@@ -2410,10 +2400,10 @@ fn parse_delete_statement(
         _returning: returning,
     })
 }
-fn parse_select_statement(
-    iter: &mut std::vec::IntoIter<&str>,
-    bindings: &Vec<Bindings>,
-) -> eyre::Result<select::Select> {
+fn parse_select_statement<'a>(
+    iter: &mut std::vec::IntoIter<&'a str>,
+    bindings: &[Bindings<'a>],
+) -> eyre::Result<select::Select<'a>> {
     let mut selectcore = Box::new(select_core::SelectCore {
         _from: None,
         _results: Vec::new(),
@@ -2428,9 +2418,7 @@ fn parse_select_statement(
     while let Some(next) = iter.next() {
         selectcore
             ._results
-            .push(expr::Expr::_Literal(d_b_any::DBAny::_Text(
-                next.to_string(),
-            )));
+            .push(expr::Expr::_Literal(d_b_any::DBAny::_Text(next)));
         if let Some(n) = iter.next() {
             if n != "," {
                 token = n;
@@ -2485,8 +2473,8 @@ fn parse_select_statement(
                     Bindings::Column(c) => {
                         selectcore._sql_where.push(expr::Expr::_Column(
                             expr::table_column::TableColumn {
-                                _col_name: c.name.clone(),
-                                _reference: c.debruinin_level,
+                                _col_name: c.name,
+                                _reference: c.debruijn_level,
                             },
                         ));
                     }
@@ -2495,9 +2483,7 @@ fn parse_select_statement(
             } else {
                 selectcore
                     ._sql_where
-                    .push(expr::Expr::_Literal(d_b_any::DBAny::_Text(
-                        next.to_string(),
-                    )));
+                    .push(expr::Expr::_Literal(d_b_any::DBAny::_Text(next)));
             }
             if let Some(op) = iter.next() {
                 match op {
@@ -2618,8 +2604,8 @@ fn parse_select_statement(
                     Bindings::Column(c) => {
                         orderby.push(ordering_term::OrderingTerm {
                             _expr: Some(expr::Expr::_Column(expr::table_column::TableColumn {
-                                _col_name: c.name.clone(),
-                                _reference: c.debruinin_level,
+                                _col_name: c.name,
+                                _reference: c.debruijn_level,
                             })),
                             _direction: direction,
                         });
@@ -2628,9 +2614,7 @@ fn parse_select_statement(
                 }
             } else {
                 orderby.push(ordering_term::OrderingTerm {
-                    _expr: Some(expr::Expr::_Literal(d_b_any::DBAny::_Text(
-                        next.to_string(),
-                    ))),
+                    _expr: Some(expr::Expr::_Literal(d_b_any::DBAny::_Text(next))),
                     _direction: direction,
                 });
             }
@@ -2663,8 +2647,8 @@ fn parse_select_statement(
                 },
                 Bindings::Column(c) => limit_operation::LimitOperation {
                     _limit: Some(expr::Expr::_Column(expr::table_column::TableColumn {
-                        _col_name: c.name.clone(),
-                        _reference: c.debruinin_level,
+                        _col_name: c.name,
+                        _reference: c.debruijn_level,
                     })),
                     _offset: None,
                 },
@@ -2672,9 +2656,7 @@ fn parse_select_statement(
             }
         } else {
             limit_operation::LimitOperation {
-                _limit: Some(expr::Expr::_Literal(d_b_any::DBAny::_Text(
-                    expr.to_string(),
-                ))),
+                _limit: Some(expr::Expr::_Literal(d_b_any::DBAny::_Text(expr))),
                 _offset: None,
             }
         };
@@ -2690,16 +2672,14 @@ fn parse_select_statement(
                     Bindings::DBAny(dba) => l._offset = Some(expr::Expr::_Literal(dba.into())),
                     Bindings::Column(c) => {
                         l._offset = Some(expr::Expr::_Column(expr::table_column::TableColumn {
-                            _col_name: c.name.clone(),
-                            _reference: c.debruinin_level,
+                            _col_name: c.name,
+                            _reference: c.debruijn_level,
                         }));
                     }
                     _ => return Err(ParseError::UnsupportedBindingType.into()),
                 }
             } else {
-                l._offset = Some(expr::Expr::_Literal(d_b_any::DBAny::_Text(
-                    offset.to_string(),
-                )))
+                l._offset = Some(expr::Expr::_Literal(d_b_any::DBAny::_Text(offset)))
             };
         }
         limit = Some(l);
@@ -2713,11 +2693,11 @@ fn parse_select_statement(
         _names: names,
     })
 }
-enum Statement {
-    Insert(insert::Insert),
-    Update(update::Update),
-    Delete(delete::Delete),
-    Select(select::Select),
+enum Statement<'a> {
+    Insert(insert::Insert<'a>),
+    Update(update::Update<'a>),
+    Delete(delete::Delete<'a>),
+    Select(select::Select<'a>),
 }
 #[derive(thiserror::Error, Debug)]
 pub enum ParseError {
@@ -2751,12 +2731,12 @@ mod tests {
 
         let create_table_request = client.build_create_table_request(vec![
             table_field::TableField {
-                _name: "name".to_string(),
+                _name: "name",
                 _base_type: table_field::Type::Text,
                 _nullable: false,
             },
             table_field::TableField {
-                _name: "data".to_string(),
+                _name: "data",
                 _base_type: table_field::Type::Blob,
                 _nullable: true,
             },
@@ -2798,10 +2778,10 @@ mod tests {
                 _fallback: insert::ConflictStrategy::Fail,
                 _target: ra_table_ref_cap.clone(),
                 _source: source::Source::_Values(vec![vec![
-                    DBAny::_Text("Steven".to_string()),
+                    DBAny::_Text("Steven"),
                     DBAny::_Null(()),
                 ]]),
-                _cols: vec!["name".to_string(), "data".to_string()],
+                _cols: vec!["name", "data"],
                 _returning: Vec::new(),
             }));
         insert_request.send().promise.await?;
@@ -2813,10 +2793,10 @@ mod tests {
                 _fallback: insert::ConflictStrategy::Abort,
                 _target: ra_table_ref_cap.clone(),
                 _source: source::Source::_Values(vec![vec![
-                    DBAny::_Text("ToUpdate".to_string()),
-                    DBAny::_Blob(vec![4, 5, 6]),
+                    DBAny::_Text("ToUpdate"),
+                    DBAny::_Blob(&[4, 5, 6]),
                 ]]),
-                _cols: vec!["name".to_string(), "data".to_string()],
+                _cols: vec!["name", "data"],
                 _returning: Vec::new(),
             }));
         insert_request.send().promise.await?;
@@ -2828,11 +2808,11 @@ mod tests {
                 _fallback: update::ConflictStrategy::Fail,
                 _assignments: vec![
                     update::assignment::Assignment {
-                        _name: "name".to_string(),
-                        _expr: Some(expr::Expr::_Literal(DBAny::_Text("Updated".to_string()))),
+                        _name: "name",
+                        _expr: Some(expr::Expr::_Literal(DBAny::_Text("Updated"))),
                     },
                     update::assignment::Assignment {
-                        _name: "data".to_string(),
+                        _name: "data",
                         _expr: Some(expr::Expr::_Literal(DBAny::_Null(()))),
                     },
                 ],
@@ -2844,11 +2824,11 @@ mod tests {
                 }),
                 _sql_where: vec![
                     expr::Expr::_Column(expr::table_column::TableColumn {
-                        _col_name: "name".to_string(),
+                        _col_name: "name",
                         _reference: 0,
                     }),
                     expr::Expr::_Op(expr::Operator::Is),
-                    expr::Expr::_Literal(DBAny::_Text("ToUpdate".to_string())),
+                    expr::Expr::_Literal(DBAny::_Text("ToUpdate")),
                 ],
                 _returning: Vec::new(),
             }));
@@ -2860,10 +2840,10 @@ mod tests {
             .build_prepare_insert_request(Some(insert::Insert {
                 _fallback: insert::ConflictStrategy::Ignore,
                 _target: ra_table_ref_cap.clone(),
-                _cols: vec!["name".to_string(), "data".to_string()],
+                _cols: vec!["name", "data"],
                 _source: insert::source::Source::_Values(vec![vec![
-                    DBAny::_Text("Mike".to_string()),
-                    DBAny::_Blob(vec![1, 2, 3]),
+                    DBAny::_Text("Mike"),
+                    DBAny::_Blob(&[1, 2, 3]),
                 ]]),
                 _returning: vec![expr::Expr::_Bindparam(())],
             }));
@@ -2897,9 +2877,9 @@ mod tests {
                         _joinoperations: Vec::new(),
                     }),
                     _results: vec![
-                        expr::Expr::_Literal(DBAny::_Text("id".to_string())),
-                        expr::Expr::_Literal(DBAny::_Text("name".to_string())),
-                        expr::Expr::_Literal(DBAny::_Text("data".to_string())),
+                        expr::Expr::_Literal(DBAny::_Text("id")),
+                        expr::Expr::_Literal(DBAny::_Text("name")),
+                        expr::Expr::_Literal(DBAny::_Text("data")),
                     ],
                     _sql_where: Vec::new(),
                 })),
@@ -2961,12 +2941,12 @@ mod tests {
 
         let create_table_request = client.build_create_table_request(vec![
             table_field::TableField {
-                _name: "name".to_string(),
+                _name: "name",
                 _base_type: table_field::Type::Text,
                 _nullable: false,
             },
             table_field::TableField {
-                _name: "data".to_string(),
+                _name: "data",
                 _base_type: table_field::Type::Blob,
                 _nullable: true,
             },
@@ -3003,7 +2983,7 @@ mod tests {
         let _ = client
             .send_request_from_sql(
                 "INSERT OR ABORT INTO ?0 (name, data) VALUES (Steven, NULL)",
-                vec![Bindings::RATableref(ra_table_ref_cap.clone())],
+                &[Bindings::RATableref(ra_table_ref_cap.clone())],
             )?
             .promise
             .await?;
@@ -3011,9 +2991,9 @@ mod tests {
         client
             .send_request_from_sql(
                 "INSERT OR ABORT INTO ?0 (name, data) VALUES (ToUpdate, ?1)",
-                vec![
+                &[
                     Bindings::RATableref(ra_table_ref_cap.clone()),
-                    Bindings::DBAny(DBAnyBindings::_Blob(vec![4, 5, 6])),
+                    Bindings::DBAny(DBAnyBindings::_Blob(&[4, 5, 6])),
                 ],
             )?
             .promise
@@ -3021,11 +3001,11 @@ mod tests {
         client
             .send_request_from_sql(
                 "UPDATE OR FAIL ?0 SET name = Updated, data = NULL WHERE ?1 IS ToUpdate",
-                vec![
+                &[
                     Bindings::ROTableref(ro_tableref_cap.clone()),
                     Bindings::Column(Col {
-                        debruinin_level: 0,
-                        name: "name".to_string(),
+                        debruijn_level: 0,
+                        name: "name",
                     }),
                 ],
             )?
@@ -3035,9 +3015,9 @@ mod tests {
         let prepared = client
             .send_prepare_insert_request(
                 "INSERT OR ABORT INTO ?0 (name, data) VALUES (Mike, ?1) RETURNING ?2",
-                vec![
+                &[
                     Bindings::RATableref(ra_table_ref_cap.clone()),
-                    Bindings::DBAny(DBAnyBindings::_Blob(vec![1, 2, 3])),
+                    Bindings::DBAny(DBAnyBindings::_Blob(&[1, 2, 3])),
                     Bindings::Bindparam,
                 ],
             )?
@@ -3060,7 +3040,7 @@ mod tests {
         let _ = client //TODO this is doing nothing currently just checking if intersect implodes
             .send_request_from_sql(
                 "SELECT name FROM ?0 INTERSECT SELECT name FROM ?0",
-                vec![Bindings::ROTableref(ro_tableref_cap.clone())],
+                &[Bindings::ROTableref(ro_tableref_cap.clone())],
             )?
             .promise
             .await?
@@ -3069,11 +3049,11 @@ mod tests {
         let _ = client //TODO this is doing nothing currently just checking if BETWEEN implodes
             .send_request_from_sql(
                 "SELECT * FROM ?0 WHERE ?1 BETWEEN ?2 AND ?3",
-                vec![
+                &[
                     Bindings::ROTableref(ro_tableref_cap.clone()),
                     Bindings::Column(Col {
-                        debruinin_level: 0,
-                        name: "id".to_string(),
+                        debruijn_level: 0,
+                        name: "id",
                     }),
                     Bindings::DBAny(DBAnyBindings::_Integer(0)),
                     Bindings::DBAny(DBAnyBindings::_Integer(2)),
@@ -3087,7 +3067,7 @@ mod tests {
         let res_stream = client
             .send_request_from_sql(
                 "SELECT id, name, data FROM ?0",
-                vec![Bindings::ROTableref(ro_tableref_cap)],
+                &[Bindings::ROTableref(ro_tableref_cap)],
             )?
             .promise
             .await?
@@ -3119,7 +3099,7 @@ mod tests {
             .get()?
             .get_res()?;
         let _ = client
-            .send_request_from_sql("DELETE FROM ?0", vec![Bindings::Tableref(table_ref)])?
+            .send_request_from_sql("DELETE FROM ?0", &[Bindings::Tableref(table_ref)])?
             .promise
             .await?;
 

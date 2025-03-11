@@ -49,7 +49,7 @@ impl action::Server for OurActionImpl {
     async fn run(self: Rc<Self>) -> capnp::Result<()> {
         tracing::info!("run called");
         self.callback
-            .build_run_request(self.msg.clone())
+            .build_run_request(self.msg.as_str())
             .send()
             .promise
             .await?;

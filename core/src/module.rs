@@ -39,6 +39,37 @@ impl std::fmt::Display for ModuleState {
     }
 }
 
+pub enum ModuleOrCap {
+    ModuleId(u64),
+    Cap(Box<dyn capnp::private::capability::ClientHook>)
+}
+
+pub struct FunctionDescription {
+    pub module_or_cap: ModuleOrCap,
+    pub function_name: String,
+    pub type_id: u64,
+    pub method_id: u16,
+    pub params: std::collections::HashMap<String, capnp::introspect::TypeVariant>,
+    pub params_schema: Option<capnp::schema::StructSchema>,
+    pub results: std::collections::HashMap<String, capnp::introspect::TypeVariant>,
+    pub results_schema: Option<capnp::schema::StructSchema>,
+    pub client: Box<dyn capnp::private::capability::ClientHook>
+}
+//TODO potentially doesn't work for multiple of the same module
+impl std::hash::Hash for FunctionDescription {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.function_name.hash(state);
+        self.type_id.hash(state);
+    }
+}
+impl PartialEq for FunctionDescription {
+    fn eq(&self, other: &Self) -> bool {
+        self.function_name == other.function_name && self.type_id == other.type_id
+    }
+}
+impl Eq for FunctionDescription {}
+
+
 // This can't be a rust generic because we do not know the type parameters at compile time.
 pub struct ModuleInstance {
     pub module_id: u64,

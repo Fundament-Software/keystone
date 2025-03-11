@@ -26,6 +26,8 @@ use circular_buffer::CircularBuffer;
 use clap::{Parser, Subcommand, ValueEnum};
 use crossterm::event::KeyCode::Char;
 use crossterm::event::{Event, KeyEvent};
+use capnp::{dynamic_struct, dynamic_value};
+use capnp::introspect::Introspect;
 use eyre::Result;
 use futures_util::{FutureExt, StreamExt};
 pub use keystone::*;
@@ -303,7 +305,7 @@ struct TuiModule {
     state: ModuleState,
     selected: Option<usize>,
     trace: tracing::Level,
-    log: CircularBuffer<512, String>,
+    log: CircularBuffer<512, String>
 }
 
 impl TuiModule {
@@ -329,6 +331,7 @@ struct Tui<'a> {
     module: Option<u64>,
     network: Vec<TuiNetworkNode>,
     modules: BTreeMap<u64, TuiModule>,
+    //cap_functions: ,
     instance: &'a mut Keystone,
     dir: &'a Path,
     config: keystone_config::Reader<'a>,
@@ -388,7 +391,7 @@ impl ratatui::widgets::Widget for &mut Tui<'_> {
         for tab in TABPAGES.iter() {
             let style = if self.tab == *tab {
                 tab_select
-            } else if (*tab == TabPage::Module || *tab == TabPage::Interface)
+            } else if (*tab == TabPage::Module)
                 && self.module.is_none()
             {
                 tab_disable
@@ -751,6 +754,115 @@ impl ratatui::widgets::Widget for &mut Tui<'_> {
 
                 StatefulWidget::render(list, main[1], buf, &mut self.list_state);
             }
+            TabPage::Interface => {
+                let main = Layout::default()
+                    .direction(Direction::Vertical)
+                    .margin(1)
+                    .constraints([
+                        Constraint::Length(10),
+                    ])
+                    .split(tabarea[1]);
+                //let mut 
+                let rows: Vec<Row> = Vec::new();
+                let mut functions = Vec::new();
+                    for (k, v) in &self.instance.cap_functions {
+                        let mut inner = Vec::new();
+                        inner.push(Span::raw(k));
+                        inner.push(Span::raw(" ("));
+                        //TODO names
+                        for (name, param) in &v.params {
+                            match param {
+                                capnp::introspect::TypeVariant::Void => inner.push(Span::raw(format!("{name}: Void,"))),
+                                capnp::introspect::TypeVariant::Bool => inner.push(Span::raw(format!("{name}: Bool,"))),
+                                capnp::introspect::TypeVariant::Int8 => inner.push(Span::raw(format!("{name}: Int8,"))),
+                                capnp::introspect::TypeVariant::Int16 => inner.push(Span::raw(format!("{name}: Int16,"))),
+                                capnp::introspect::TypeVariant::Int32 => inner.push(Span::raw(format!("{name}: Int32,"))),
+                                capnp::introspect::TypeVariant::Int64 => inner.push(Span::raw(format!("{name}: Int64,"))),
+                                capnp::introspect::TypeVariant::UInt8 => inner.push(Span::raw(format!("{name}: UInt8,"))),
+                                capnp::introspect::TypeVariant::UInt16 => inner.push(Span::raw(format!("{name}: UInt16,"))),
+                                capnp::introspect::TypeVariant::UInt32 => inner.push(Span::raw(format!("{name}: UInt32,"))),
+                                capnp::introspect::TypeVariant::UInt64 => inner.push(Span::raw(format!("{name}: UInt64,"))),
+                                capnp::introspect::TypeVariant::Float32 => inner.push(Span::raw(format!("{name}: Float32,"))),
+                                capnp::introspect::TypeVariant::Float64 => inner.push(Span::raw(format!("{name}: Float64,"))),
+                                capnp::introspect::TypeVariant::Text => inner.push(Span::raw(format!("{name}: Text,"))),
+                                capnp::introspect::TypeVariant::Data => inner.push(Span::raw(format!("{name}: Data,"))),
+                                capnp::introspect::TypeVariant::Struct(raw_branded_struct_schema) => (),
+                                capnp::introspect::TypeVariant::AnyPointer => (), //TODO
+                                capnp::introspect::TypeVariant::Capability(raw_capability_schema) => (),
+                                capnp::introspect::TypeVariant::Enum(raw_enum_schema) => (),
+                                capnp::introspect::TypeVariant::List(_) => (),
+                            }
+                        }
+                        inner.push(Span::raw(") -> ("));
+                        for (name, result) in &v.results {
+                            match result {
+                                capnp::introspect::TypeVariant::Void => inner.push(Span::raw(format!("{name}: Void,"))),
+                                capnp::introspect::TypeVariant::Bool => inner.push(Span::raw(format!("{name}: Bool,"))),
+                                capnp::introspect::TypeVariant::Int8 => inner.push(Span::raw(format!("{name}: Int8,"))),
+                                capnp::introspect::TypeVariant::Int16 => inner.push(Span::raw(format!("{name}: Int16,"))),
+                                capnp::introspect::TypeVariant::Int32 => inner.push(Span::raw(format!("{name}: Int32,"))),
+                                capnp::introspect::TypeVariant::Int64 => inner.push(Span::raw(format!("{name}: Int64,"))),
+                                capnp::introspect::TypeVariant::UInt8 => inner.push(Span::raw(format!("{name}: UInt8,"))),
+                                capnp::introspect::TypeVariant::UInt16 => inner.push(Span::raw(format!("{name}: UInt16,"))),
+                                capnp::introspect::TypeVariant::UInt32 => inner.push(Span::raw(format!("{name}: UInt32,"))),
+                                capnp::introspect::TypeVariant::UInt64 => inner.push(Span::raw(format!("{name}: UInt64,"))),
+                                capnp::introspect::TypeVariant::Float32 => inner.push(Span::raw(format!("{name}: Float32,"))),
+                                capnp::introspect::TypeVariant::Float64 => inner.push(Span::raw(format!("{name}: Float64,"))),
+                                capnp::introspect::TypeVariant::Text => inner.push(Span::raw(format!("{name}: Text,"))),
+                                capnp::introspect::TypeVariant::Data => inner.push(Span::raw(format!("{name}: Data,"))),
+                                capnp::introspect::TypeVariant::Struct(raw_branded_struct_schema) => (),
+                                capnp::introspect::TypeVariant::AnyPointer => (), //TODO
+                                capnp::introspect::TypeVariant::Capability(raw_capability_schema) => (),
+                                capnp::introspect::TypeVariant::Enum(raw_enum_schema) => (),
+                                capnp::introspect::TypeVariant::List(_) => (),
+                            }
+                        }
+                        inner.push(Span::raw(")"));
+                        functions.push(Line::from(inner))
+                    }
+                
+                let title = Line::from(" API ".bold());
+                let instructions = Line::from(vec![
+                    " Quit ".into(),
+                    "<Q>".green().bold(),
+                    " — Scroll ".into(),
+                    "<⭡⭣>".green().bold(),
+                    " — Select ".into(),
+                    "<Enter>".green().bold(),
+                    " — Back ".into(),
+                    "<Esc>".green().bold(),
+                    " — Next Page ".into(),
+                    "<Tab> ".green().bold(),
+                ]);
+
+                let block = Block::bordered()
+                    .title(title.centered())
+                    .title_bottom(instructions.centered())
+                    .border_set(border::THICK);
+                block.render(tabarea[1], buf);
+
+                let list = List::new(functions).highlight_style(Style::new().black().on_white().bold()).direction(ratatui::widgets::ListDirection::TopToBottom);
+                
+                /* 
+                [
+                    Row::new([
+                        Cell::from(Text::from(id.to_string())),
+                        Cell::from(Text::from(m.name.as_str())),
+                    ])
+                ];*/
+                let table = StatefulWidget::render(
+                    Table::new(rows, HEADER.map(|_| Constraint::Min(1)))
+                        .column_spacing(0)
+                        // It has an optional header, which is simply a Row always visible at the top.
+                        .header(Row::new(HEADER).style(Style::new().bold()))
+                        .row_highlight_style(Style::new().reversed()),
+                    main[2],
+                    buf,
+                    &mut self.keystone.table_state,
+                );
+
+                StatefulWidget::render(list, main[0], buf, &mut self.list_state);
+            }
             _ => (),
         }
     }
@@ -969,7 +1081,125 @@ impl Tui<'_> {
                         self.tab = TabPage::Keystone;
                     }
                 }
-                _ => (),
+                TabPage::Interface => {
+                    //TODO multiple modules
+                    if let Some(n) = self.list_state.selected() {
+                        let name = &self.modules.iter().next().unwrap().1.root_functions[n];
+                        //panic!("{}", name);
+                        let desc = self.instance.modules.get(&self.module.unwrap()).unwrap().root_functions.get(name).unwrap();
+                        //panic!("{}", desc.method_id);
+                        //TODO Params Results
+                        //let client = self.instance.modules.get(&self.module.unwrap()).as_ref().unwrap().api.as_ref().unwrap().pipeline.get_api().as_cap();
+                        let mut call = desc.client.new_call(desc.type_id, desc.method_id, None);
+                        //TODO make an actual input ui, probably doesn't belong here
+                        if let Some(params_schema) = desc.params_schema.clone() {
+                        let capnp::introspect::TypeVariant::Capability(t) = crate::hello_world_capnp::root::Client::introspect().which() else {todo!()};
+                        let t: capnp::schema::CapabilitySchema = t.into();
+                        let params_schema = t.get_params_struct_schema(1 as u16);
+                        //panic!("{:?}", params_schema);
+                        let mut dyn_param_builder = call.get().init_dynamic(params_schema).unwrap();
+                        //panic!("121");
+                        for param in &desc.params {
+                            //TODO take actual inputs
+                            match param.1 {
+                                capnp::introspect::TypeVariant::Void => dyn_param_builder.set_named(param.0.as_str(), dynamic_value::Reader::Void).unwrap(),
+                                capnp::introspect::TypeVariant::Bool => dyn_param_builder.set_named(param.0.as_str(), dynamic_value::Reader::Bool(true.into())).unwrap(),
+                                capnp::introspect::TypeVariant::Int8 => dyn_param_builder.set_named(param.0.as_str(), dynamic_value::Reader::Int8(10)).unwrap(),
+                                capnp::introspect::TypeVariant::Int16 => dyn_param_builder.set_named(param.0.as_str(), dynamic_value::Reader::Int16(1)).unwrap(),
+                                capnp::introspect::TypeVariant::Int32 => dyn_param_builder.set_named(param.0.as_str(), dynamic_value::Reader::Int32(2)).unwrap(),
+                                capnp::introspect::TypeVariant::Int64 => dyn_param_builder.set_named(param.0.as_str(), dynamic_value::Reader::Int64(3)).unwrap(),
+                                capnp::introspect::TypeVariant::UInt8 => dyn_param_builder.set_named(param.0.as_str(), dynamic_value::Reader::UInt8(4)).unwrap(),
+                                capnp::introspect::TypeVariant::UInt16 => dyn_param_builder.set_named(param.0.as_str(), dynamic_value::Reader::UInt16(5)).unwrap(),
+                                capnp::introspect::TypeVariant::UInt32 => dyn_param_builder.set_named(param.0.as_str(), dynamic_value::Reader::UInt32(6)).unwrap(),
+                                capnp::introspect::TypeVariant::UInt64 => dyn_param_builder.set_named(param.0.as_str(), dynamic_value::Reader::UInt64(7)).unwrap(),
+                                capnp::introspect::TypeVariant::Float32 => dyn_param_builder.set_named(param.0.as_str(), dynamic_value::Reader::Float32(8.0)).unwrap(),
+                                capnp::introspect::TypeVariant::Float64 => dyn_param_builder.set_named(param.0.as_str(), dynamic_value::Reader::Float64(9.0)).unwrap(),
+                                capnp::introspect::TypeVariant::Text => dyn_param_builder.set_named(param.0.as_str(), dynamic_value::Reader::Text("".into())).unwrap(),
+                                capnp::introspect::TypeVariant::Data => dyn_param_builder.set_named(param.0.as_str(), dynamic_value::Reader::Data(&[1,2,3])).unwrap(),
+                                _ => ()
+                            }
+                        }
+                        let response = call.send().promise.await.unwrap();
+                        let res_schema = t.get_results_struct_schema(1 as u16);
+                        let get: crate::proxy::GetPointerReader = response.get().unwrap().get_as().unwrap();
+                        let res_struct = get.reader.get_struct(None).unwrap();
+                        let dyn_reader = dynamic_struct::Reader::new(res_struct, res_schema.into());
+                        let mut results_map = std::collections::HashMap::new();
+                        let fields = dyn_reader.get_schema().get_fields().unwrap();
+                        for field in fields {
+                            let field_name = field.get_proto().get_name().unwrap().to_str()?;
+                            match dyn_reader.get(field).unwrap() {
+                                dynamic_value::Reader::Void => {
+                                    results_map.insert(field_name, CapnpType::Void);
+                                }
+                                dynamic_value::Reader::Bool(b) => {
+                                    results_map.insert(field_name, CapnpType::Bool(b));
+                                }
+                                dynamic_value::Reader::Int8(i) => {
+                                    results_map.insert(field_name, CapnpType::Int8(i));
+                                }
+                                dynamic_value::Reader::Int16(i) => {
+                                    results_map.insert(field_name, CapnpType::Int16(i));
+                                }
+                                dynamic_value::Reader::Int32(i) => {
+                                    results_map.insert(field_name, CapnpType::Int32(i));
+                                }
+                                dynamic_value::Reader::Int64(i) => {
+                                    results_map.insert(field_name, CapnpType::Int64(i));
+                                }
+                                dynamic_value::Reader::UInt8(u) => {
+                                    results_map.insert(field_name, CapnpType::UInt8(u));
+                                }
+                                dynamic_value::Reader::UInt16(u) => {
+                                    results_map.insert(field_name, CapnpType::UInt16(u));
+                                }
+                                dynamic_value::Reader::UInt32(u) => {
+                                    results_map.insert(field_name, CapnpType::UInt32(u));
+                                }
+                                dynamic_value::Reader::UInt64(u) => {
+                                    results_map.insert(field_name, CapnpType::UInt64(u));
+                                }
+                                dynamic_value::Reader::Float32(f) => {
+                                    results_map.insert(field_name, CapnpType::Float32(f));
+                                }
+                                dynamic_value::Reader::Float64(f) => {
+                                    results_map.insert(field_name, CapnpType::Float64(f));
+                                }
+                                /*dynamic_value::Reader::Enum(_) => todo!(),
+                                dynamic_value::Reader::Text(r) => {
+                                    results_map.insert(field_name, r.to_str()?)?;
+                                }
+                                dynamic_value::Reader::Data(d) => {
+                                    results_map.insert(field_name, d)?;
+                                }
+                                dynamic_value::Reader::Struct(r) => {
+                                    let inner_struct_table = lua.create_table()?;
+                                    read_dyn_struct(lua, r, &inner_struct_table)?;
+                                    results_map.insert(field_name, inner_struct_table)?;
+                                }
+                                dynamic_value::Reader::List(_) => todo!(),
+                                dynamic_value::Reader::AnyPointer(_) => todo!(),
+                                dynamic_value::Reader::Capability(cap) => {
+                                    let inner_cap_table = lua.create_table()?;
+                                    let hook = dyn_reader.get_clienthook(field).unwrap();
+                                    inner_cap_table.set("client", lua.create_any_userdata(hook.add_ref())?)?;
+                                    read_cap_schema(lua, cap.get_schema(), &inner_cap_table, hook)?;
+                                    results_map.set(field_name, inner_cap_table)?;
+                                }*/
+                                _ => ()
+                            }
+                        }
+                        for (k, v) in results_map {
+                            if let CapnpType::UInt16(u) = v {
+                                println!("{u}");
+                            }
+                        }
+                    }
+                    //let result = call.send().promise.await.unwrap();
+                    }
+
+                },
+                _ => ()
             },
             KeyCode::Esc if key.kind != KeyEventKind::Release => {
                 self.tab = match self.tab {
@@ -1024,6 +1254,9 @@ impl Tui<'_> {
                 TabPage::Network => {
                     self.list_state.select_previous();
                 }
+                TabPage::Interface => {
+                    self.list_state.select_previous();
+                }
                 _ => (),
             },
             KeyCode::Down if key.kind != KeyEventKind::Release => match self.tab {
@@ -1033,15 +1266,15 @@ impl Tui<'_> {
                 TabPage::Network => {
                     self.list_state.select_next();
                 }
+                TabPage::Interface => {
+                    self.list_state.select_next();
+                }
                 _ => (),
             },
             KeyCode::Tab if key.kind != KeyEventKind::Release => {
                 let increment = |tab| TABPAGES[((tab as usize) + 1) % TABPAGES.len()];
                 self.tab = increment(self.tab);
                 if self.tab == TabPage::Module && self.module.is_none() {
-                    self.tab = increment(self.tab);
-                }
-                if self.tab == TabPage::Interface && self.module.is_none() {
                     self.tab = increment(self.tab);
                 }
             }
@@ -1144,6 +1377,10 @@ async fn event_loop<B: ratatui::prelude::Backend>(
                         module.name = m.name.clone();
                         module.state = m.state;
                     } else {
+                        for (k, v) in instance.cap_functions {
+                            //root_functions.push(k.to_string());
+                            //app.
+                        }
                         app.modules.insert(
                             *id,
                             TuiModule {
@@ -1171,7 +1408,7 @@ async fn event_loop<B: ratatui::prelude::Backend>(
             }
         }
     }
-
+    //instance.modules.iter().next().as_ref().unwrap().1.api.as_ref().unwrap().pipeline.get_api().as_cap().new_call(0xbe95_f484_53a4_3d37, 0, None).send().promise.await.unwrap();
     Ok(())
 }
 

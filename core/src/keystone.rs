@@ -142,6 +142,28 @@ where
 
 pub type ModuleJoinSet = Rc<RefCell<tokio::task::JoinSet<Result<()>>>>;
 pub type RpcSystemSet = FuturesUnordered<Pin<Box<dyn Future<Output = Result<()>>>>>;
+
+pub enum CapnpType {
+    Void,
+    Bool(bool),
+    Int8(i8),
+    Int16(i16),
+    Int32(i32),
+    Int64(i64),
+    UInt8(u8),
+    UInt16(u16),
+    UInt32(u32),
+    UInt64(u64),
+    Float32(f32),
+    Float64(f64),
+    //Enum(_),
+    Text(String),
+    Data(Vec<u8>),
+    Struct(HashMap<String, CapnpType>),
+    List(Vec<CapnpType>),
+    //AnyPointer(_),
+    /*Capability(cap)*/
+}
 pub struct Keystone {
     db: Rc<SqliteDatabase>,
     scheduler: Rc<Scheduler>,
@@ -149,6 +171,7 @@ pub struct Keystone {
     pub log: Rc<RefCell<CapLog<MAX_BUFFER_SIZE>>>, // TODO: Remove RefCell once CapLog is made thread-safe.
     file_server: Rc<RefCell<AmbientAuthorityImpl>>,
     pub modules: HashMap<u64, ModuleInstance>,
+    pub cap_functions: HashMap<FunctionDescription, Option<HashMap<String, CapnpType>>>,
     pub namemap: HashMap<String, u64>,
     pub cells: Rc<RefCell<CellCapSet>>,
     pub timeout: Duration,
@@ -396,6 +419,7 @@ impl Keystone {
                 process_set: Rc::new(RefCell::new(crate::posix_process::ProcessCapSet::new())),
                 namemap,
                 snowflake: Rc::new(SnowflakeSource::new()),
+                cap_functions: HashMap::new(),
             },
             Default::default(),
         ))
@@ -623,7 +647,6 @@ impl Keystone {
             .get_mut(&id)
             .ok_or(Error::ModuleNotFound(id))?
             .state = ModuleState::Initialized;
-
         let span = tracing::debug_span!("Initializing", name = self.modules.get(&id).unwrap().name);
         let _enter = span.enter();
         tracing::debug!("Set Initialized flag");
@@ -716,7 +739,63 @@ impl Keystone {
             &module.queue.inner,
             Ok(p.pipeline.get_api().as_cap()),
         );
-
+        //TODO better way to get schemas
+        let file_contents = std::fs::read(
+            env!("CARGO_MANIFEST_DIR").to_owned() + "\\" + config.get_path().unwrap().to_str().unwrap()
+        )
+        .unwrap();
+        let binary = crate::binary_embed::load_deps_from_binary(&file_contents)?;
+        let bufread = std::io::BufReader::new(binary);
+        let dyn_schema = capnp::schema::DynamicSchema::new(capnp::serialize::read_message(
+            bufread,
+            capnp::message::ReaderOptions {
+                traversal_limit_in_words: None,
+                nesting_limit: 128,
+            },
+        )?)?;
+        //TODO other types
+        //TODO extends
+        let schema: capnp::schema::CapabilitySchema =
+            match dyn_schema.get_type_by_scope(&["Root"], None).unwrap() {
+                capnp::introspect::TypeVariant::Capability(s) => s.to_owned().into(),
+                _ => todo!(),
+            };
+        let root_id = schema.get_proto().get_id();
+        match schema.get_proto().which().unwrap() {
+            capnp::schema_capnp::node::Which::Interface(interface) => {
+                let methods = interface.get_methods().unwrap();
+                
+                for (ordinal, method) in methods.into_iter().enumerate() {
+                    let mut params = HashMap::new();
+                    let mut params_schema: Option<capnp::schema::StructSchema> = None; //TODO invert the whole thing with let else so this isn't needed
+                    let mut results_schema: Option<capnp::schema::StructSchema> = None;
+                    match dyn_schema.get_type_by_id(method.get_param_struct_type()).unwrap() {
+                        capnp::introspect::TypeVariant::Struct(st) => {
+                            let sc: capnp::schema::StructSchema = st.clone().into();
+                            params_schema = Some(sc.clone());
+                            //let mut call = p.pipeline.get_api().as_cap().new_call(root_id, ordinal as u16, None);
+                            //let mut dyn_param_builder = call.get().init_dynamic(st.clone().into()).unwrap();
+                            params = sc.get_fields().unwrap().into_iter().map(|f| (f.get_proto().get_name().unwrap().to_string().unwrap(), f.get_type().which())).collect();
+                        }
+                        _ => ()
+                    };
+                    let mut results = HashMap::new();
+                    match dyn_schema.get_type_by_id(method.get_result_struct_type()).unwrap() {
+                        capnp::introspect::TypeVariant::Struct(st) => {
+                            let sc: capnp::schema::StructSchema = st.clone().into();
+                            results_schema = Some(sc.clone());
+                            results = sc.get_fields().unwrap().into_iter().map(|f| (f.get_proto().get_name().unwrap().to_string().unwrap(), f.get_type().which())).collect();
+                        }
+                        _ => ()
+                    };
+                    self.cap_functions.insert(
+                        FunctionDescription{module_or_cap: ModuleOrCap::ModuleId(id), function_name: method.get_name().unwrap().to_str()?.to_string(), type_id: root_id, method_id: ordinal as u16, params: params, params_schema: params_schema, results: results, results_schema: results_schema, client: p.pipeline.get_api().as_cap() },
+                        None
+                    );
+                }
+            }
+            _ => todo!(),
+        }
         inner.borrow_mut().debug_name = Some(module.name.clone());
 
         module.process = Some(process);

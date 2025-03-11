@@ -38,14 +38,14 @@ fn expr_recurse(val: &Value, exprs: &mut HashMap<*const Value, u32>) {
 
 type SchemaVec = append_only_vec::AppendOnlyVec<(Vec<String>, DynamicSchema)>;
 
-struct SchemaPool(SchemaVec);
+pub struct SchemaPool(SchemaVec);
 
 impl SchemaPool {
     pub fn new() -> Self {
         Default::default()
     }
 
-    fn get<'a>(&'a self, name: &str) -> Option<&'a DynamicSchema> {
+    pub fn get<'a>(&'a self, name: &str) -> Option<&'a DynamicSchema> {
         self.0
             .iter()
             .find(|(v, _)| v.iter().any(|file| name.eq_ignore_ascii_case(file)))
@@ -865,7 +865,7 @@ const SELF_SCHEMA: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/self.schema
 
 /// Returns a pool containing all built-in schemas that keystone has been built with.
 /// Currently this is simply everything in `schema/`, but could be modified at runtime.
-fn builtin_schemas() -> capnp::Result<SchemaPool> {
+pub fn builtin_schemas() -> capnp::Result<SchemaPool> {
     let schemas = SchemaPool::new();
     let bufread = BufReader::new(SELF_SCHEMA);
 

@@ -3,7 +3,7 @@ include!(concat!(env!("OUT_DIR"), "/capnproto.rs"));
 use crate::hello_world_capnp::root;
 use capnp::any_pointer::Owned as any_pointer;
 use capnp_macros::capnproto_rpc;
-use std::rc::Rc;
+use std::{fmt::format, rc::Rc};
 
 pub struct HelloWorldImpl {
     pub greeting: String,
@@ -16,9 +16,13 @@ impl root::Server for HelloWorldImpl {
         let name = request.get_name()?.to_str()?;
         let greet = self.greeting.as_str();
         let message = format!("{greet}, {name}!");
-
         results.get().init_reply().set_message(message[..].into());
         Ok(())
+    }
+    async fn augh(self: Rc<Self>, i: i8) -> capnp::Result<Self> {
+        //return Err(capnp::Error::disconnected(format!("Augh {i}")));
+        results.get().set_u(i as u16);
+        return Ok(())
     }
 }
 

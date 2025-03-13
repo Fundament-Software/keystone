@@ -762,10 +762,10 @@ impl ratatui::widgets::Widget for &mut Tui<'_> {
                         Constraint::Length(10),
                     ])
                     .split(tabarea[1]);
-                //let mut 
+                //let mut  
                 let rows: Vec<Row> = Vec::new();
                 let mut functions = Vec::new();
-                    for (k, v) in &self.instance.cap_functions {
+                    for (desc, res) in &self.instance.cap_functions {
                         let mut inner = Vec::new();
                         inner.push(Span::raw(k));
                         inner.push(Span::raw(" ("));
@@ -843,8 +843,8 @@ impl ratatui::widgets::Widget for &mut Tui<'_> {
 
                 let list = List::new(functions).highlight_style(Style::new().black().on_white().bold()).direction(ratatui::widgets::ListDirection::TopToBottom);
                 
-                /* 
-                [
+                /*  
+                [ 
                     Row::new([
                         Cell::from(Text::from(id.to_string())),
                         Cell::from(Text::from(m.name.as_str())),
@@ -1093,7 +1093,7 @@ impl Tui<'_> {
                         let mut call = desc.client.new_call(desc.type_id, desc.method_id, None);
                         //TODO make an actual input ui, probably doesn't belong here
                         if let Some(params_schema) = desc.params_schema.clone() {
-                        let capnp::introspect::TypeVariant::Capability(t) = crate::hello_world_capnp::root::Client::introspect().which() else {todo!()};
+                        let capnp::introspect::TypeVariant::Capability(t) = crate::hello_worldd_capnp::roott::Client::introspect().which() else {todo!()};
                         let t: capnp::schema::CapabilitySchema = t.into();
                         let params_schema = t.get_params_struct_schema(1 as u16);
                         //panic!("{:?}", params_schema);

@@ -767,10 +767,10 @@ impl ratatui::widgets::Widget for &mut Tui<'_> {
                 let mut functions = Vec::new();
                     for (desc, res) in &self.instance.cap_functions {
                         let mut inner = Vec::new();
-                        inner.push(Span::raw(k));
+                        inner.push(Span::raw(desc.function_name));
                         inner.push(Span::raw(" ("));
                         //TODO names
-                        for (name, param) in &v.params {
+                        for (name, param) in &desc.params {
                             match param {
                                 capnp::introspect::TypeVariant::Void => inner.push(Span::raw(format!("{name}: Void,"))),
                                 capnp::introspect::TypeVariant::Bool => inner.push(Span::raw(format!("{name}: Bool,"))),
@@ -794,7 +794,7 @@ impl ratatui::widgets::Widget for &mut Tui<'_> {
                             }
                         }
                         inner.push(Span::raw(") -> ("));
-                        for (name, result) in &v.results {
+                        for (name, result) in &desc.results {
                             match result {
                                 capnp::introspect::TypeVariant::Void => inner.push(Span::raw(format!("{name}: Void,"))),
                                 capnp::introspect::TypeVariant::Bool => inner.push(Span::raw(format!("{name}: Bool,"))),

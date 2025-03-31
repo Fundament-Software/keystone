@@ -19,9 +19,12 @@ impl root::Server for HelloWorldImpl {
         results.get().init_reply().set_message(message[..].into());
         Ok(())
     }
-    async fn augh(self: Rc<Self>, i: i8) -> capnp::Result<Self> {
-        //return Err(capnp::Error::disconnected(format!("Augh {i}")));
-        results.get().set_u(i as u16);
+    async fn get_an_int(self: Rc<Self>) -> capnp::Result<Self> {
+        results.get().set(8);
+        return Ok(())
+    }
+    async fn echo(self: Rc<Self>, i: i8) -> capnp::Result<Self> {
+        results.get().set(i as u16);
         return Ok(())
     }
 }

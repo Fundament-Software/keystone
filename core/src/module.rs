@@ -41,19 +41,185 @@ impl std::fmt::Display for ModuleState {
 
 pub enum ModuleOrCap {
     ModuleId(u64),
-    Cap(Box<dyn capnp::private::capability::ClientHook>)
+    Cap(Box<dyn capnp::private::capability::ClientHook>),
 }
-
+#[derive(Clone)]
+pub struct ParamResultType {
+    pub name: String,
+    pub capnp_type: CapnpType,
+}
+#[derive(Clone)]
+pub enum CapnpType {
+    Void,
+    Bool(Option<bool>),
+    Int8(Option<i8>),
+    Int16(Option<i16>),
+    Int32(Option<i32>),
+    Int64(Option<i64>),
+    UInt8(Option<u8>),
+    UInt16(Option<u16>),
+    UInt32(Option<u32>),
+    UInt64(Option<u64>),
+    Float32(Option<f32>),
+    Float64(Option<f64>),
+    //Enum(Option<_>),
+    Text(Option<String>),
+    //Data(Option<Vec<u8>>),
+    Struct(Option<std::collections::HashMap<String, CapnpType>>),
+    //List(Option<Vec<CapnpType>>),
+    //AnyPointer(Option<_>),
+    /*Capability(Option<cap>)*/
+}
+impl Into<CapnpType> for capnp::introspect::TypeVariant {
+    fn into(self) -> CapnpType {
+        match self {
+            capnp::introspect::TypeVariant::Void => CapnpType::Void,
+            capnp::introspect::TypeVariant::Bool => CapnpType::Bool(None),
+            capnp::introspect::TypeVariant::Int8 => CapnpType::Int8(None),
+            capnp::introspect::TypeVariant::Int16 => CapnpType::Int16(None),
+            capnp::introspect::TypeVariant::Int32 => CapnpType::Int32(None),
+            capnp::introspect::TypeVariant::Int64 => CapnpType::Int64(None),
+            capnp::introspect::TypeVariant::UInt8 => CapnpType::UInt8(None),
+            capnp::introspect::TypeVariant::UInt16 => CapnpType::UInt16(None),
+            capnp::introspect::TypeVariant::UInt32 => CapnpType::UInt32(None),
+            capnp::introspect::TypeVariant::UInt64 => CapnpType::UInt64(None),
+            capnp::introspect::TypeVariant::Float32 => CapnpType::Float32(None),
+            capnp::introspect::TypeVariant::Float64 => CapnpType::Float64(None),
+            capnp::introspect::TypeVariant::Text => CapnpType::Text(None),
+            capnp::introspect::TypeVariant::Data => todo!(),
+            capnp::introspect::TypeVariant::Struct(raw_branded_struct_schema) => {
+                CapnpType::Struct(None)
+            }
+            capnp::introspect::TypeVariant::AnyPointer => todo!(),
+            capnp::introspect::TypeVariant::Capability(raw_capability_schema) => todo!(),
+            capnp::introspect::TypeVariant::Enum(raw_enum_schema) => todo!(),
+            capnp::introspect::TypeVariant::List(_) => todo!(),
+        }
+    }
+}
+impl ParamResultType {
+    pub fn to_string(self) -> String {
+        match self.capnp_type {
+            CapnpType::Void => format!("{} :Void,", self.name),
+            CapnpType::Bool(b) => {
+                if let Some(b) = b {
+                    format!("{} - {b} :Bool", self.name)
+                } else {
+                    format!("{} :Bool", self.name)
+                }
+            }
+            CapnpType::Int8(i) => {
+                if let Some(i) = i {
+                    format!("{} - {i} :Int8", self.name)
+                } else {
+                    format!("{} :Int8", self.name)
+                }
+            }
+            CapnpType::Int16(i) => {
+                if let Some(i) = i {
+                    format!("{} - {i} :Int16", self.name)
+                } else {
+                    format!("{} :Int16", self.name)
+                }
+            }
+            CapnpType::Int32(i) => {
+                if let Some(i) = i {
+                    format!("{} - {i} :Int32", self.name)
+                } else {
+                    format!("{} :Int32", self.name)
+                }
+            }
+            CapnpType::Int64(i) => {
+                if let Some(i) = i {
+                    format!("{} - {i} :Int32", self.name)
+                } else {
+                    format!("{} :Int32", self.name)
+                }
+            }
+            CapnpType::UInt8(u) => {
+                if let Some(u) = u {
+                    format!("{} - {u} :UInt8", self.name)
+                } else {
+                    format!("{} :UInt8", self.name)
+                }
+            }
+            CapnpType::UInt16(u) => {
+                if let Some(u) = u {
+                    format!("{} - {u} :UInt16", self.name)
+                } else {
+                    format!("{} :UInt16", self.name)
+                }
+            }
+            CapnpType::UInt32(u) => {
+                if let Some(u) = u {
+                    format!("{} - {u} :UInt32", self.name)
+                } else {
+                    format!("{} :UInt32", self.name)
+                }
+            }
+            CapnpType::UInt64(u) => {
+                if let Some(u) = u {
+                    format!("{} - {u} :UInt64", self.name)
+                } else {
+                    format!("{} :UInt64", self.name)
+                }
+            }
+            CapnpType::Float32(f) => {
+                if let Some(f) = f {
+                    format!("{} - {f} :Float32", self.name)
+                } else {
+                    format!("{} :Float32", self.name)
+                }
+            }
+            CapnpType::Float64(f) => {
+                if let Some(f) = f {
+                    format!("{} - {f} :Float64", self.name)
+                } else {
+                    format!("{} :Float64", self.name)
+                }
+            }
+            CapnpType::Text(t) => {
+                if let Some(t) = t {
+                    format!("{} - {t} :Text", self.name)
+                } else {
+                    format!("{} :Text", self.name)
+                }
+            } /*CapnpType::Data(items) => {
+            if let Some(b) = b {
+            format!("{} - {b} :Bool", self.name)
+            } else {
+            format!("{} :Bool", self.name)
+            }
+            },*/
+            CapnpType::Struct(hash_map) => {
+                //TODO struct
+                let b = Some("");
+                if let Some(b) = b {
+                    format!("{} - {b} :Struct", self.name)
+                } else {
+                    format!("{} :Struct", self.name)
+                }
+            } /*
+              CapnpType::List(capnp_types) => {
+                  if let Some(b) = b {
+                      format!("{} - {b} :Bool", self.name)
+                  } else {
+                      format!("{} :Bool", self.name)
+                  }
+              },*/
+        }
+    }
+}
 pub struct FunctionDescription {
     pub module_or_cap: ModuleOrCap,
     pub function_name: String,
     pub type_id: u64,
     pub method_id: u16,
-    pub params: std::collections::HashMap<String, capnp::introspect::TypeVariant>,
+    pub params: Vec<ParamResultType>,
     pub params_schema: Option<capnp::schema::StructSchema>,
-    pub results: std::collections::HashMap<String, capnp::introspect::TypeVariant>,
+    pub results: Vec<ParamResultType>,
     pub results_schema: Option<capnp::schema::StructSchema>,
-    pub client: Box<dyn capnp::private::capability::ClientHook>
+    pub client: Box<dyn capnp::private::capability::ClientHook>,
 }
 //TODO potentially doesn't work for multiple of the same module
 impl std::hash::Hash for FunctionDescription {
@@ -68,7 +234,6 @@ impl PartialEq for FunctionDescription {
     }
 }
 impl Eq for FunctionDescription {}
-
 
 // This can't be a rust generic because we do not know the type parameters at compile time.
 pub struct ModuleInstance {
@@ -88,6 +253,7 @@ pub struct ModuleInstance {
     >,
     pub state: ModuleState,
     pub queue: capnp_rpc::queued::Client,
+    pub dyn_schema: Option<capnp::schema::DynamicSchema>,
 }
 
 impl ModuleInstance {

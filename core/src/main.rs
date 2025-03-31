@@ -22,12 +22,12 @@ mod util;
 use crate::byte_stream::ByteStreamBufferImpl;
 use crate::keystone_capnp::keystone_config;
 use capnp::any_pointer::Owned as any_pointer;
+use capnp::introspect::Introspect;
+use capnp::{dynamic_struct, dynamic_value};
 use circular_buffer::CircularBuffer;
 use clap::{Parser, Subcommand, ValueEnum};
 use crossterm::event::KeyCode::Char;
 use crossterm::event::{Event, KeyEvent};
-use capnp::{dynamic_struct, dynamic_value};
-use capnp::introspect::Introspect;
 use eyre::Result;
 use futures_util::{FutureExt, StreamExt};
 pub use keystone::*;
@@ -305,7 +305,7 @@ struct TuiModule {
     state: ModuleState,
     selected: Option<usize>,
     trace: tracing::Level,
-    log: CircularBuffer<512, String>
+    log: CircularBuffer<512, String>,
 }
 
 impl TuiModule {
@@ -331,12 +331,12 @@ struct Tui<'a> {
     module: Option<u64>,
     network: Vec<TuiNetworkNode>,
     modules: BTreeMap<u64, TuiModule>,
-    //cap_functions: ,
     instance: &'a mut Keystone,
     dir: &'a Path,
     config: keystone_config::Reader<'a>,
     list_state: ListState,
     log_tx: UnboundedSender<(u64, String)>,
+    holding: Vec<ParamResultType>,
 }
 
 fn invert_style(selected: bool, style: ratatui::prelude::Style) -> ratatui::prelude::Style {
@@ -391,9 +391,7 @@ impl ratatui::widgets::Widget for &mut Tui<'_> {
         for tab in TABPAGES.iter() {
             let style = if self.tab == *tab {
                 tab_select
-            } else if (*tab == TabPage::Module)
-                && self.module.is_none()
-            {
+            } else if (*tab == TabPage::Module) && self.module.is_none() {
                 tab_disable
             } else {
                 tab_unselect
@@ -758,70 +756,48 @@ impl ratatui::widgets::Widget for &mut Tui<'_> {
                 let main = Layout::default()
                     .direction(Direction::Vertical)
                     .margin(1)
-                    .constraints([
-                        Constraint::Length(10),
-                    ])
+                    .constraints([Constraint::Length(10)])
                     .split(tabarea[1]);
-                //let mut  
-                let rows: Vec<Row> = Vec::new();
-                let mut functions = Vec::new();
-                    for (desc, res) in &self.instance.cap_functions {
-                        let mut inner = Vec::new();
-                        inner.push(Span::raw(desc.function_name));
-                        inner.push(Span::raw(" ("));
-                        //TODO names
-                        for (name, param) in &desc.params {
-                            match param {
-                                capnp::introspect::TypeVariant::Void => inner.push(Span::raw(format!("{name}: Void,"))),
-                                capnp::introspect::TypeVariant::Bool => inner.push(Span::raw(format!("{name}: Bool,"))),
-                                capnp::introspect::TypeVariant::Int8 => inner.push(Span::raw(format!("{name}: Int8,"))),
-                                capnp::introspect::TypeVariant::Int16 => inner.push(Span::raw(format!("{name}: Int16,"))),
-                                capnp::introspect::TypeVariant::Int32 => inner.push(Span::raw(format!("{name}: Int32,"))),
-                                capnp::introspect::TypeVariant::Int64 => inner.push(Span::raw(format!("{name}: Int64,"))),
-                                capnp::introspect::TypeVariant::UInt8 => inner.push(Span::raw(format!("{name}: UInt8,"))),
-                                capnp::introspect::TypeVariant::UInt16 => inner.push(Span::raw(format!("{name}: UInt16,"))),
-                                capnp::introspect::TypeVariant::UInt32 => inner.push(Span::raw(format!("{name}: UInt32,"))),
-                                capnp::introspect::TypeVariant::UInt64 => inner.push(Span::raw(format!("{name}: UInt64,"))),
-                                capnp::introspect::TypeVariant::Float32 => inner.push(Span::raw(format!("{name}: Float32,"))),
-                                capnp::introspect::TypeVariant::Float64 => inner.push(Span::raw(format!("{name}: Float64,"))),
-                                capnp::introspect::TypeVariant::Text => inner.push(Span::raw(format!("{name}: Text,"))),
-                                capnp::introspect::TypeVariant::Data => inner.push(Span::raw(format!("{name}: Data,"))),
-                                capnp::introspect::TypeVariant::Struct(raw_branded_struct_schema) => (),
-                                capnp::introspect::TypeVariant::AnyPointer => (), //TODO
-                                capnp::introspect::TypeVariant::Capability(raw_capability_schema) => (),
-                                capnp::introspect::TypeVariant::Enum(raw_enum_schema) => (),
-                                capnp::introspect::TypeVariant::List(_) => (),
-                            }
-                        }
-                        inner.push(Span::raw(") -> ("));
-                        for (name, result) in &desc.results {
-                            match result {
-                                capnp::introspect::TypeVariant::Void => inner.push(Span::raw(format!("{name}: Void,"))),
-                                capnp::introspect::TypeVariant::Bool => inner.push(Span::raw(format!("{name}: Bool,"))),
-                                capnp::introspect::TypeVariant::Int8 => inner.push(Span::raw(format!("{name}: Int8,"))),
-                                capnp::introspect::TypeVariant::Int16 => inner.push(Span::raw(format!("{name}: Int16,"))),
-                                capnp::introspect::TypeVariant::Int32 => inner.push(Span::raw(format!("{name}: Int32,"))),
-                                capnp::introspect::TypeVariant::Int64 => inner.push(Span::raw(format!("{name}: Int64,"))),
-                                capnp::introspect::TypeVariant::UInt8 => inner.push(Span::raw(format!("{name}: UInt8,"))),
-                                capnp::introspect::TypeVariant::UInt16 => inner.push(Span::raw(format!("{name}: UInt16,"))),
-                                capnp::introspect::TypeVariant::UInt32 => inner.push(Span::raw(format!("{name}: UInt32,"))),
-                                capnp::introspect::TypeVariant::UInt64 => inner.push(Span::raw(format!("{name}: UInt64,"))),
-                                capnp::introspect::TypeVariant::Float32 => inner.push(Span::raw(format!("{name}: Float32,"))),
-                                capnp::introspect::TypeVariant::Float64 => inner.push(Span::raw(format!("{name}: Float64,"))),
-                                capnp::introspect::TypeVariant::Text => inner.push(Span::raw(format!("{name}: Text,"))),
-                                capnp::introspect::TypeVariant::Data => inner.push(Span::raw(format!("{name}: Data,"))),
-                                capnp::introspect::TypeVariant::Struct(raw_branded_struct_schema) => (),
-                                capnp::introspect::TypeVariant::AnyPointer => (), //TODO
-                                capnp::introspect::TypeVariant::Capability(raw_capability_schema) => (),
-                                capnp::introspect::TypeVariant::Enum(raw_enum_schema) => (),
-                                capnp::introspect::TypeVariant::List(_) => (),
-                            }
-                        }
-                        inner.push(Span::raw(")"));
-                        functions.push(Line::from(inner))
+                //let mut
+                let mut rows: Vec<Row> = Vec::new();
+                //let mut functions = Vec::new();
+                //TODO idk how to do this
+                let mut longest = 0;
+                for func in self.instance.cap_functions.iter() {
+                    if func.params.len() + func.results.len() > longest {
+                        longest = func.params.len() + func.results.len();
                     }
-                
+                }
+                for desc in self.instance.cap_functions.iter() {
+                    let mut inner = Vec::new();
+                    inner.push(Cell::from(format!("{} (", desc.function_name.clone())));
+                    //let mut params = String::new();
+                    //params.push_str(" (");
+                    //inner.push(Cell::from(" ("));
+                    for param in desc.params.iter() {
+                        //params.push_str(param.clone().to_string().as_str());
+                        inner.push(Cell::from(param.clone().to_string()));
+                    }
+                    //params.push_str(") -> (");
+                    //inner.push(Cell::from(params));
+                    inner.push(Cell::from(") -> ("));
+                    let mut results = String::new();
+                    for result in desc.results.iter() {
+                        //results.push_str(result.clone().to_string().as_str());
+                        inner.push(Cell::from(result.clone().to_string()));
+                    }
+                    inner.push(Cell::from(")"));
+                    //results.push(')');
+                    //inner.push(Cell::from(results));
+                    rows.push(Row::new(inner));
+                }
+
                 let title = Line::from(" API ".bold());
+                let holding = if let Some(t) = self.holding.last() {
+                    format!("[{}]", t.clone().to_string().as_str())
+                } else {
+                    "[]".to_string()
+                };
                 let instructions = Line::from(vec![
                     " Quit ".into(),
                     "<Q>".green().bold(),
@@ -833,6 +809,12 @@ impl ratatui::widgets::Widget for &mut Tui<'_> {
                     "<Esc>".green().bold(),
                     " — Next Page ".into(),
                     "<Tab> ".green().bold(),
+                    "<->".green().bold(),
+                    " — Clone ".into(),
+                    "<=>".green().bold(),
+                    " — Set ".into(),
+                    holding.as_str().green().bold(),
+                    " — Currently Holding ".into(),
                 ]);
 
                 let block = Block::bordered()
@@ -841,27 +823,20 @@ impl ratatui::widgets::Widget for &mut Tui<'_> {
                     .border_set(border::THICK);
                 block.render(tabarea[1], buf);
 
-                let list = List::new(functions).highlight_style(Style::new().black().on_white().bold()).direction(ratatui::widgets::ListDirection::TopToBottom);
-                
-                /*  
-                [ 
-                    Row::new([
-                        Cell::from(Text::from(id.to_string())),
-                        Cell::from(Text::from(m.name.as_str())),
-                    ])
-                ];*/
+                let mut widths = Vec::new();
+                for _ in 0..=longest + 2 {
+                    widths.push(Constraint::Fill(1));
+                }
                 let table = StatefulWidget::render(
-                    Table::new(rows, HEADER.map(|_| Constraint::Min(1)))
-                        .column_spacing(0)
-                        // It has an optional header, which is simply a Row always visible at the top.
-                        .header(Row::new(HEADER).style(Style::new().bold()))
-                        .row_highlight_style(Style::new().reversed()),
-                    main[2],
+                    Table::new(rows, widths)
+                        .column_spacing(1)
+                        .cell_highlight_style(Style::new().reversed()),
+                    main[0],
                     buf,
                     &mut self.keystone.table_state,
                 );
 
-                StatefulWidget::render(list, main[0], buf, &mut self.list_state);
+                //StatefulWidget::render(table, main[0], buf, &mut self.keystone.table_state);
             }
             _ => (),
         }
@@ -1082,124 +1057,255 @@ impl Tui<'_> {
                     }
                 }
                 TabPage::Interface => {
-                    //TODO multiple modules
-                    if let Some(n) = self.list_state.selected() {
-                        let name = &self.modules.iter().next().unwrap().1.root_functions[n];
-                        //panic!("{}", name);
-                        let desc = self.instance.modules.get(&self.module.unwrap()).unwrap().root_functions.get(name).unwrap();
-                        //panic!("{}", desc.method_id);
-                        //TODO Params Results
-                        //let client = self.instance.modules.get(&self.module.unwrap()).as_ref().unwrap().api.as_ref().unwrap().pipeline.get_api().as_cap();
-                        let mut call = desc.client.new_call(desc.type_id, desc.method_id, None);
-                        //TODO make an actual input ui, probably doesn't belong here
-                        if let Some(params_schema) = desc.params_schema.clone() {
-                        let capnp::introspect::TypeVariant::Capability(t) = crate::hello_worldd_capnp::roott::Client::introspect().which() else {todo!()};
-                        let t: capnp::schema::CapabilitySchema = t.into();
-                        let params_schema = t.get_params_struct_schema(1 as u16);
-                        //panic!("{:?}", params_schema);
-                        let mut dyn_param_builder = call.get().init_dynamic(params_schema).unwrap();
-                        //panic!("121");
-                        for param in &desc.params {
-                            //TODO take actual inputs
-                            match param.1 {
-                                capnp::introspect::TypeVariant::Void => dyn_param_builder.set_named(param.0.as_str(), dynamic_value::Reader::Void).unwrap(),
-                                capnp::introspect::TypeVariant::Bool => dyn_param_builder.set_named(param.0.as_str(), dynamic_value::Reader::Bool(true.into())).unwrap(),
-                                capnp::introspect::TypeVariant::Int8 => dyn_param_builder.set_named(param.0.as_str(), dynamic_value::Reader::Int8(10)).unwrap(),
-                                capnp::introspect::TypeVariant::Int16 => dyn_param_builder.set_named(param.0.as_str(), dynamic_value::Reader::Int16(1)).unwrap(),
-                                capnp::introspect::TypeVariant::Int32 => dyn_param_builder.set_named(param.0.as_str(), dynamic_value::Reader::Int32(2)).unwrap(),
-                                capnp::introspect::TypeVariant::Int64 => dyn_param_builder.set_named(param.0.as_str(), dynamic_value::Reader::Int64(3)).unwrap(),
-                                capnp::introspect::TypeVariant::UInt8 => dyn_param_builder.set_named(param.0.as_str(), dynamic_value::Reader::UInt8(4)).unwrap(),
-                                capnp::introspect::TypeVariant::UInt16 => dyn_param_builder.set_named(param.0.as_str(), dynamic_value::Reader::UInt16(5)).unwrap(),
-                                capnp::introspect::TypeVariant::UInt32 => dyn_param_builder.set_named(param.0.as_str(), dynamic_value::Reader::UInt32(6)).unwrap(),
-                                capnp::introspect::TypeVariant::UInt64 => dyn_param_builder.set_named(param.0.as_str(), dynamic_value::Reader::UInt64(7)).unwrap(),
-                                capnp::introspect::TypeVariant::Float32 => dyn_param_builder.set_named(param.0.as_str(), dynamic_value::Reader::Float32(8.0)).unwrap(),
-                                capnp::introspect::TypeVariant::Float64 => dyn_param_builder.set_named(param.0.as_str(), dynamic_value::Reader::Float64(9.0)).unwrap(),
-                                capnp::introspect::TypeVariant::Text => dyn_param_builder.set_named(param.0.as_str(), dynamic_value::Reader::Text("".into())).unwrap(),
-                                capnp::introspect::TypeVariant::Data => dyn_param_builder.set_named(param.0.as_str(), dynamic_value::Reader::Data(&[1,2,3])).unwrap(),
-                                _ => ()
-                            }
-                        }
-                        let response = call.send().promise.await.unwrap();
-                        let res_schema = t.get_results_struct_schema(1 as u16);
-                        let get: crate::proxy::GetPointerReader = response.get().unwrap().get_as().unwrap();
-                        let res_struct = get.reader.get_struct(None).unwrap();
-                        let dyn_reader = dynamic_struct::Reader::new(res_struct, res_schema.into());
-                        let mut results_map = std::collections::HashMap::new();
-                        let fields = dyn_reader.get_schema().get_fields().unwrap();
-                        for field in fields {
-                            let field_name = field.get_proto().get_name().unwrap().to_str()?;
-                            match dyn_reader.get(field).unwrap() {
-                                dynamic_value::Reader::Void => {
-                                    results_map.insert(field_name, CapnpType::Void);
-                                }
-                                dynamic_value::Reader::Bool(b) => {
-                                    results_map.insert(field_name, CapnpType::Bool(b));
-                                }
-                                dynamic_value::Reader::Int8(i) => {
-                                    results_map.insert(field_name, CapnpType::Int8(i));
-                                }
-                                dynamic_value::Reader::Int16(i) => {
-                                    results_map.insert(field_name, CapnpType::Int16(i));
-                                }
-                                dynamic_value::Reader::Int32(i) => {
-                                    results_map.insert(field_name, CapnpType::Int32(i));
-                                }
-                                dynamic_value::Reader::Int64(i) => {
-                                    results_map.insert(field_name, CapnpType::Int64(i));
-                                }
-                                dynamic_value::Reader::UInt8(u) => {
-                                    results_map.insert(field_name, CapnpType::UInt8(u));
-                                }
-                                dynamic_value::Reader::UInt16(u) => {
-                                    results_map.insert(field_name, CapnpType::UInt16(u));
-                                }
-                                dynamic_value::Reader::UInt32(u) => {
-                                    results_map.insert(field_name, CapnpType::UInt32(u));
-                                }
-                                dynamic_value::Reader::UInt64(u) => {
-                                    results_map.insert(field_name, CapnpType::UInt64(u));
-                                }
-                                dynamic_value::Reader::Float32(f) => {
-                                    results_map.insert(field_name, CapnpType::Float32(f));
-                                }
-                                dynamic_value::Reader::Float64(f) => {
-                                    results_map.insert(field_name, CapnpType::Float64(f));
-                                }
-                                /*dynamic_value::Reader::Enum(_) => todo!(),
-                                dynamic_value::Reader::Text(r) => {
-                                    results_map.insert(field_name, r.to_str()?)?;
-                                }
-                                dynamic_value::Reader::Data(d) => {
-                                    results_map.insert(field_name, d)?;
-                                }
-                                dynamic_value::Reader::Struct(r) => {
-                                    let inner_struct_table = lua.create_table()?;
-                                    read_dyn_struct(lua, r, &inner_struct_table)?;
-                                    results_map.insert(field_name, inner_struct_table)?;
-                                }
-                                dynamic_value::Reader::List(_) => todo!(),
-                                dynamic_value::Reader::AnyPointer(_) => todo!(),
-                                dynamic_value::Reader::Capability(cap) => {
-                                    let inner_cap_table = lua.create_table()?;
-                                    let hook = dyn_reader.get_clienthook(field).unwrap();
-                                    inner_cap_table.set("client", lua.create_any_userdata(hook.add_ref())?)?;
-                                    read_cap_schema(lua, cap.get_schema(), &inner_cap_table, hook)?;
-                                    results_map.set(field_name, inner_cap_table)?;
-                                }*/
-                                _ => ()
-                            }
-                        }
-                        for (k, v) in results_map {
-                            if let CapnpType::UInt16(u) = v {
-                                println!("{u}");
-                            }
-                        }
-                    }
-                    //let result = call.send().promise.await.unwrap();
-                    }
+                    if let Some(row) = self.keystone.table_state.selected() {
+                        let mut desc = &mut self.instance.cap_functions[row];
+                        if let Some(col) = self.keystone.table_state.selected_column() {
+                            if col == 0 {
+                                let client = match &desc.module_or_cap {
+                                    ModuleOrCap::ModuleId(id) => self
+                                        .instance
+                                        .modules
+                                        .get(&id)
+                                        .as_ref()
+                                        .unwrap()
+                                        .api
+                                        .as_ref()
+                                        .unwrap()
+                                        .pipeline
+                                        .get_api()
+                                        .as_cap(),
+                                    ModuleOrCap::Cap(c) => c.clone(),
+                                };
+                                let mut call =
+                                    desc.client.new_call(desc.type_id, desc.method_id, None);
+                                if let Some(params_schema) = desc.params_schema.clone() {
+                                    let mut dyn_param_builder =
+                                        call.get().init_dynamic(params_schema.into()).unwrap();
+                                    for param in &desc.params {
+                                        match param.capnp_type.clone() {
+                                            CapnpType::Void => dyn_param_builder
+                                                .set_named(
+                                                    param.name.as_str(),
+                                                    dynamic_value::Reader::Void,
+                                                )
+                                                .unwrap(),
+                                            CapnpType::Bool(b) => {
+                                                if let Some(b) = b {
+                                                    dyn_param_builder
+                                                        .set_named(
+                                                            param.name.as_str(),
+                                                            dynamic_value::Reader::Bool(b),
+                                                        )
+                                                        .unwrap()
+                                                }
+                                            }
+                                            CapnpType::Int8(i) => {
+                                                if let Some(i) = i {
+                                                    dyn_param_builder
+                                                        .set_named(
+                                                            param.name.as_str(),
+                                                            dynamic_value::Reader::Int8(i),
+                                                        )
+                                                        .unwrap()
+                                                }
+                                            }
+                                            CapnpType::Int16(i) => {
+                                                if let Some(i) = i {
+                                                    dyn_param_builder
+                                                        .set_named(
+                                                            param.name.as_str(),
+                                                            dynamic_value::Reader::Int16(i),
+                                                        )
+                                                        .unwrap()
+                                                }
+                                            }
+                                            CapnpType::Int32(i) => {
+                                                if let Some(i) = i {
+                                                    dyn_param_builder
+                                                        .set_named(
+                                                            param.name.as_str(),
+                                                            dynamic_value::Reader::Int32(i),
+                                                        )
+                                                        .unwrap()
+                                                }
+                                            }
+                                            CapnpType::Int64(i) => {
+                                                if let Some(i) = i {
+                                                    dyn_param_builder
+                                                        .set_named(
+                                                            param.name.as_str(),
+                                                            dynamic_value::Reader::Int64(i),
+                                                        )
+                                                        .unwrap()
+                                                }
+                                            }
+                                            CapnpType::UInt8(u) => {
+                                                if let Some(u) = u {
+                                                    dyn_param_builder
+                                                        .set_named(
+                                                            param.name.as_str(),
+                                                            dynamic_value::Reader::UInt8(u),
+                                                        )
+                                                        .unwrap()
+                                                }
+                                            }
+                                            CapnpType::UInt16(u) => {
+                                                if let Some(u) = u {
+                                                    dyn_param_builder
+                                                        .set_named(
+                                                            param.name.as_str(),
+                                                            dynamic_value::Reader::UInt16(u),
+                                                        )
+                                                        .unwrap()
+                                                }
+                                            }
+                                            CapnpType::UInt32(u) => {
+                                                if let Some(u) = u {
+                                                    dyn_param_builder
+                                                        .set_named(
+                                                            param.name.as_str(),
+                                                            dynamic_value::Reader::UInt32(u),
+                                                        )
+                                                        .unwrap()
+                                                }
+                                            }
+                                            CapnpType::UInt64(u) => {
+                                                if let Some(u) = u {
+                                                    dyn_param_builder
+                                                        .set_named(
+                                                            param.name.as_str(),
+                                                            dynamic_value::Reader::UInt64(u),
+                                                        )
+                                                        .unwrap()
+                                                }
+                                            }
+                                            CapnpType::Float32(f) => {
+                                                if let Some(f) = f {
+                                                    dyn_param_builder
+                                                        .set_named(
+                                                            param.name.as_str(),
+                                                            dynamic_value::Reader::Float32(f),
+                                                        )
+                                                        .unwrap()
+                                                }
+                                            }
+                                            CapnpType::Float64(f) => {
+                                                if let Some(f) = f {
+                                                    dyn_param_builder
+                                                        .set_named(
+                                                            param.name.as_str(),
+                                                            dynamic_value::Reader::Float64(f),
+                                                        )
+                                                        .unwrap()
+                                                }
+                                            }
+                                            CapnpType::Text(t) => {
+                                                if let Some(t) = t {
+                                                    dyn_param_builder
+                                                        .set_named(
+                                                            param.name.as_str(),
+                                                            dynamic_value::Reader::Text(
+                                                                t.as_str().into(),
+                                                            ),
+                                                        )
+                                                        .unwrap()
+                                                }
+                                            }
+                                            /*CapnpType::Data => dyn_param_builder
+                                            .set_named(
+                                                param.name.as_str(),
+                                                dynamic_value::Reader::Data(&[1, 2, 3]),
+                                            )
+                                            .unwrap(),*/
+                                            _ => todo!(),
+                                        }
+                                    }
+                                    let response = call.send().promise.await.unwrap();
+                                    let Some(res_schema) = desc.results_schema.clone() else {
+                                        todo!()
+                                    };
+                                    let get: crate::proxy::GetPointerReader =
+                                        response.get().unwrap().get_as().unwrap();
+                                    let res_struct = get.reader.get_struct(None).unwrap();
+                                    let dyn_reader =
+                                        dynamic_struct::Reader::new(res_struct, res_schema.into());
+                                    let fields = dyn_reader.get_schema().get_fields().unwrap();
+                                    for (index, field) in fields.iter().enumerate() {
+                                        match dyn_reader.get(field).unwrap() {
+                                            dynamic_value::Reader::Void => {
+                                                desc.results[index].capnp_type = CapnpType::Void;
+                                            }
+                                            dynamic_value::Reader::Bool(b) => {
+                                                desc.results[index].capnp_type =
+                                                    CapnpType::Bool(Some(b));
+                                            }
+                                            dynamic_value::Reader::Int8(i) => {
+                                                desc.results[index].capnp_type =
+                                                    CapnpType::Int8(Some(i));
+                                            }
+                                            dynamic_value::Reader::Int16(i) => {
+                                                desc.results[index].capnp_type =
+                                                    CapnpType::Int16(Some(i));
+                                            }
+                                            dynamic_value::Reader::Int32(i) => {
+                                                desc.results[index].capnp_type =
+                                                    CapnpType::Int32(Some(i));
+                                            }
+                                            dynamic_value::Reader::Int64(i) => {
+                                                desc.results[index].capnp_type =
+                                                    CapnpType::Int64(Some(i));
+                                            }
+                                            dynamic_value::Reader::UInt8(u) => {
+                                                desc.results[index].capnp_type =
+                                                    CapnpType::UInt8(Some(u));
+                                            }
+                                            dynamic_value::Reader::UInt16(u) => {
+                                                desc.results[index].capnp_type =
+                                                    CapnpType::UInt16(Some(u));
+                                            }
+                                            dynamic_value::Reader::UInt32(u) => {
+                                                desc.results[index].capnp_type =
+                                                    CapnpType::UInt32(Some(u));
+                                            }
+                                            dynamic_value::Reader::UInt64(u) => {
+                                                desc.results[index].capnp_type =
+                                                    CapnpType::UInt64(Some(u));
+                                            }
+                                            dynamic_value::Reader::Float32(f) => {
+                                                desc.results[index].capnp_type =
+                                                    CapnpType::Float32(Some(f));
+                                            }
+                                            dynamic_value::Reader::Float64(f) => {
+                                                desc.results[index].capnp_type =
+                                                    CapnpType::Float64(Some(f));
+                                            }
+                                            //dynamic_value::Reader::Enum(_) => todo!(),
+                                            dynamic_value::Reader::Text(r) => {
+                                                desc.results[index].capnp_type =
+                                                    CapnpType::Text(Some(r.to_string().unwrap()));
+                                            } /*
+                                            dynamic_value::Reader::Data(d) => {
+                                            }
+                                            dynamic_value::Reader::Struct(r) => {
+                                            }
+                                            dynamic_value::Reader::List(_) => todo!(),
+                                            dynamic_value::Reader::AnyPointer(_) => todo!(),
+                                            dynamic_value::Reader::Capability(cap) => {
 
-                },
-                _ => ()
+                                            }*/
+                                            _ => (),
+                                        }
+                                    }
+                                } else {
+                                    if col == 10 {
+                                        //TODO user input probably here
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => (),
             },
             KeyCode::Esc if key.kind != KeyEventKind::Release => {
                 self.tab = match self.tab {
@@ -1220,6 +1326,9 @@ impl Tui<'_> {
                             };
                         }
                     }
+                }
+                TabPage::Interface => {
+                    self.keystone.table_state.select_previous_column();
                 }
                 _ => (),
             },
@@ -1245,6 +1354,9 @@ impl Tui<'_> {
                         }
                     }
                 }
+                TabPage::Interface => {
+                    self.keystone.table_state.select_next_column();
+                }
                 _ => (),
             },
             KeyCode::Up if key.kind != KeyEventKind::Release => match self.tab {
@@ -1255,7 +1367,7 @@ impl Tui<'_> {
                     self.list_state.select_previous();
                 }
                 TabPage::Interface => {
-                    self.list_state.select_previous();
+                    self.keystone.table_state.select_previous();
                 }
                 _ => (),
             },
@@ -1267,7 +1379,7 @@ impl Tui<'_> {
                     self.list_state.select_next();
                 }
                 TabPage::Interface => {
-                    self.list_state.select_next();
+                    self.keystone.table_state.select_next();
                 }
                 _ => (),
             },
@@ -1278,6 +1390,38 @@ impl Tui<'_> {
                     self.tab = increment(self.tab);
                 }
             }
+            //TODO idk which keys make sense for this
+            KeyCode::Char('-') if key.kind != KeyEventKind::Release => match self.tab {
+                TabPage::Interface => {
+                    if let Some(row) = self.keystone.table_state.selected() {
+                        let desc = &mut self.instance.cap_functions[row];
+                        if let Some(col) = self.keystone.table_state.selected_column() {
+                            if col != 0 && col <= desc.params.len() {
+                                self.holding.push(desc.params[col - 1].clone());
+                            } else if col < (desc.params.len() + desc.results.len() + 2) {
+                                self.holding
+                                    .push(desc.results[col - desc.params.len() - 2].clone());
+                            }
+                        }
+                    }
+                }
+                _ => (),
+            },
+            KeyCode::Char('=') if key.kind != KeyEventKind::Release => match self.tab {
+                TabPage::Interface => {
+                    if let Some(row) = self.keystone.table_state.selected() {
+                        let mut desc = &mut self.instance.cap_functions[row];
+                        if let Some(col) = self.keystone.table_state.selected_column() {
+                            if col != 0 && col <= desc.params.len() {
+                                if let Some(p) = self.holding.pop() {
+                                    desc.params[col - 1] = p;
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => (),
+            },
             _ => (),
         }
         Ok(())
@@ -1318,6 +1462,7 @@ async fn event_loop<B: ratatui::prelude::Backend>(
         config,
         list_state: ListState::default(),
         log_tx,
+        holding: Vec::new(),
     };
 
     let mut sys =
@@ -1377,10 +1522,10 @@ async fn event_loop<B: ratatui::prelude::Backend>(
                         module.name = m.name.clone();
                         module.state = m.state;
                     } else {
-                        for (k, v) in instance.cap_functions {
-                            //root_functions.push(k.to_string());
-                            //app.
-                        }
+                        //for (k, v) in instance.cap_functions {
+                        //root_functions.push(k.to_string());
+                        //app.
+                        //}
                         app.modules.insert(
                             *id,
                             TuiModule {

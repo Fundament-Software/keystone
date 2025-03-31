@@ -11,7 +11,8 @@ interface Root {
     }
 
     sayHello @0 (request: HelloRequest) -> (reply: HelloReply);
-    augh @1 (i :Int8) -> (u :UInt16);
+    getAnInt @1 () -> (i :Int8);
+    echo @2 (i :Int8) -> (u :UInt16);
 }
 
 # All modules must have a struct named "Config" that keystone can look up when compiling

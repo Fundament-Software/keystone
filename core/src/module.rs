@@ -62,13 +62,12 @@ pub enum CapnpType {
     UInt64(Option<u64>),
     Float32(Option<f32>),
     Float64(Option<f64>),
-    //Enum(Option<_>),
     Text(Option<String>),
-    //Data(Option<Vec<u8>>),
+    Data(Option<Vec<u8>>),
     Struct(Option<std::collections::HashMap<String, CapnpType>>),
-    //List(Option<Vec<CapnpType>>),
+    List(Option<Vec<CapnpType>>),
     //AnyPointer(Option<_>),
-    /*Capability(Option<cap>)*/
+    Capability(Option<Box<dyn capnp::private::capability::ClientHook>>), //Enum(Option<_>),
 }
 impl Into<CapnpType> for capnp::introspect::TypeVariant {
     fn into(self) -> CapnpType {
@@ -86,14 +85,16 @@ impl Into<CapnpType> for capnp::introspect::TypeVariant {
             capnp::introspect::TypeVariant::Float32 => CapnpType::Float32(None),
             capnp::introspect::TypeVariant::Float64 => CapnpType::Float64(None),
             capnp::introspect::TypeVariant::Text => CapnpType::Text(None),
-            capnp::introspect::TypeVariant::Data => todo!(),
+            capnp::introspect::TypeVariant::Data => CapnpType::Data(None),
             capnp::introspect::TypeVariant::Struct(raw_branded_struct_schema) => {
                 CapnpType::Struct(None)
             }
             capnp::introspect::TypeVariant::AnyPointer => todo!(),
-            capnp::introspect::TypeVariant::Capability(raw_capability_schema) => todo!(),
+            capnp::introspect::TypeVariant::Capability(raw_capability_schema) => {
+                CapnpType::Capability(None)
+            }
             capnp::introspect::TypeVariant::Enum(raw_enum_schema) => todo!(),
-            capnp::introspect::TypeVariant::List(_) => todo!(),
+            capnp::introspect::TypeVariant::List(_) => CapnpType::List(None),
         }
     }
 }
@@ -184,13 +185,14 @@ impl ParamResultType {
                 } else {
                     format!("{} :Text", self.name)
                 }
-            } /*CapnpType::Data(items) => {
-            if let Some(b) = b {
-            format!("{} - {b} :Bool", self.name)
-            } else {
-            format!("{} :Bool", self.name)
             }
-            },*/
+            CapnpType::Data(items) => {
+                if let Some(i) = items {
+                    format!("{} - {:?} :Data", self.name, i)
+                } else {
+                    format!("{} :Data", self.name)
+                }
+            }
             CapnpType::Struct(hash_map) => {
                 //TODO struct
                 let b = Some("");
@@ -199,14 +201,24 @@ impl ParamResultType {
                 } else {
                     format!("{} :Struct", self.name)
                 }
-            } /*
-              CapnpType::List(capnp_types) => {
-                  if let Some(b) = b {
-                      format!("{} - {b} :Bool", self.name)
-                  } else {
-                      format!("{} :Bool", self.name)
-                  }
-              },*/
+            }
+            CapnpType::List(l) => {
+                //TODO
+                /*if let Some(l) = l {
+                    format!("{} - {:?} :List<>", self.name, l)
+                } else {
+                    format!("{} :List<>", self.name)
+                }*/
+                todo!()
+            }
+            CapnpType::Capability(c) => {
+                //TODO specify cap
+                if let Some(c) = c {
+                    format!("{} - Some :Client", self.name)
+                } else {
+                    format!("{} :Client", self.name)
+                }
+            }
         }
     }
 }
@@ -219,7 +231,6 @@ pub struct FunctionDescription {
     pub params_schema: Option<capnp::schema::StructSchema>,
     pub results: Vec<ParamResultType>,
     pub results_schema: Option<capnp::schema::StructSchema>,
-    pub client: Box<dyn capnp::private::capability::ClientHook>,
 }
 //TODO potentially doesn't work for multiple of the same module
 impl std::hash::Hash for FunctionDescription {

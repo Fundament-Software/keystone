@@ -758,8 +758,6 @@ impl Keystone {
                         capnp::introspect::TypeVariant::Struct(st) => {
                             let sc: capnp::schema::StructSchema = st.clone().into();
                             params_schema = Some(sc.clone());
-                            //let mut call = p.pipeline.get_api().as_cap().new_call(root_id, ordinal as u16, None);
-                            //let mut dyn_param_builder = call.get().init_dynamic(st.clone().into()).unwrap();
                             for field in sc.get_fields().unwrap() {
                                 params.push(ParamResultType {
                                     name: field
@@ -805,7 +803,6 @@ impl Keystone {
                         params_schema: params_schema,
                         results: results,
                         results_schema: results_schema,
-                        client: p.pipeline.get_api().as_cap(),
                     });
                 }
             }

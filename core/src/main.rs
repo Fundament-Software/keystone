@@ -337,6 +337,8 @@ struct Tui<'a> {
     list_state: ListState,
     log_tx: UnboundedSender<(u64, String)>,
     holding: Vec<ParamResultType>,
+    input: bool,
+    buffer: String, //TODO optimize input stuff
 }
 
 fn invert_style(selected: bool, style: ratatui::prelude::Style) -> ratatui::prelude::Style {
@@ -762,33 +764,32 @@ impl ratatui::widgets::Widget for &mut Tui<'_> {
                 let mut rows: Vec<Row> = Vec::new();
                 //let mut functions = Vec::new();
                 //TODO idk how to do this
-                let mut longest = 0;
+                /*let mut longest = 0;
                 for func in self.instance.cap_functions.iter() {
                     if func.params.len() + func.results.len() > longest {
                         longest = func.params.len() + func.results.len();
                     }
-                }
+                }*/
+                let mut widths = Vec::new();
                 for desc in self.instance.cap_functions.iter() {
+                    widths.push(Constraint::Max(2 + desc.function_name.len() as u16));
                     let mut inner = Vec::new();
                     inner.push(Cell::from(format!("{} (", desc.function_name.clone())));
-                    //let mut params = String::new();
-                    //params.push_str(" (");
-                    //inner.push(Cell::from(" ("));
                     for param in desc.params.iter() {
-                        //params.push_str(param.clone().to_string().as_str());
-                        inner.push(Cell::from(param.clone().to_string()));
+                        let p = param.clone().to_string();
+                        widths.push(Constraint::Max(p.len().try_into().unwrap()));
+                        inner.push(Cell::from(p));
                     }
-                    //params.push_str(") -> (");
-                    //inner.push(Cell::from(params));
                     inner.push(Cell::from(") -> ("));
+                    widths.push(Constraint::Max(6));
                     let mut results = String::new();
                     for result in desc.results.iter() {
-                        //results.push_str(result.clone().to_string().as_str());
-                        inner.push(Cell::from(result.clone().to_string()));
+                        let r = result.clone().to_string();
+                        widths.push(Constraint::Max(r.len().try_into().unwrap()));
+                        inner.push(Cell::from(r));
                     }
                     inner.push(Cell::from(")"));
-                    //results.push(')');
-                    //inner.push(Cell::from(results));
+                    widths.push(Constraint::Max(1));
                     rows.push(Row::new(inner));
                 }
 
@@ -823,10 +824,10 @@ impl ratatui::widgets::Widget for &mut Tui<'_> {
                     .border_set(border::THICK);
                 block.render(tabarea[1], buf);
 
-                let mut widths = Vec::new();
+                /*let mut widths = Vec::new();
                 for _ in 0..=longest + 2 {
-                    widths.push(Constraint::Fill(1));
-                }
+                    widths.push(Constraint::Max(10));
+                }*/
                 let table = StatefulWidget::render(
                     Table::new(rows, widths)
                         .column_spacing(1)
@@ -867,7 +868,6 @@ impl Tui<'_> {
     ) -> Result<()> {
         use crossterm::event::KeyCode;
         use crossterm::event::KeyEventKind;
-
         match key.code {
             Char('q') => {
                 if key.kind == KeyEventKind::Press {
@@ -1076,8 +1076,7 @@ impl Tui<'_> {
                                         .as_cap(),
                                     ModuleOrCap::Cap(c) => c.clone(),
                                 };
-                                let mut call =
-                                    desc.client.new_call(desc.type_id, desc.method_id, None);
+                                let mut call = client.new_call(desc.type_id, desc.method_id, None);
                                 if let Some(params_schema) = desc.params_schema.clone() {
                                     let mut dyn_param_builder =
                                         call.get().init_dynamic(params_schema.into()).unwrap();
@@ -1211,12 +1210,18 @@ impl Tui<'_> {
                                                         .unwrap()
                                                 }
                                             }
-                                            /*CapnpType::Data => dyn_param_builder
-                                            .set_named(
-                                                param.name.as_str(),
-                                                dynamic_value::Reader::Data(&[1, 2, 3]),
-                                            )
-                                            .unwrap(),*/
+                                            CapnpType::Data(d) => {
+                                                if let Some(d) = d {
+                                                    dyn_param_builder
+                                                        .set_named(
+                                                            param.name.as_str(),
+                                                            dynamic_value::Reader::Data(
+                                                                d.as_slice(),
+                                                            ),
+                                                        )
+                                                        .unwrap()
+                                                }
+                                            }
                                             _ => todo!(),
                                         }
                                     }
@@ -1422,6 +1427,21 @@ impl Tui<'_> {
                 }
                 _ => (),
             },
+            KeyCode::Char(c) if key.kind != KeyEventKind::Release => match self.tab {
+                TabPage::Interface => {
+                    if let Some(row) = self.keystone.table_state.selected() {
+                        let mut desc = &mut self.instance.cap_functions[row];
+                        if let Some(col) = self.keystone.table_state.selected_column() {
+                            if col != 0 && col <= desc.params.len() {
+                                self.buffer.push(c);
+                                //TODO use actual type rather than just i8 and make it error instead of blowing up when provided wrong type
+                                desc.params[col - 1].capnp_type = CapnpType::Int8(Some(self.buffer.parse().unwrap()));
+                            }
+                        }
+                    }
+                }
+                _ => (),
+            },
             _ => (),
         }
         Ok(())
@@ -1463,6 +1483,8 @@ async fn event_loop<B: ratatui::prelude::Backend>(
         list_state: ListState::default(),
         log_tx,
         holding: Vec::new(),
+        input: false,
+        buffer: String::new(),
     };
 
     let mut sys =

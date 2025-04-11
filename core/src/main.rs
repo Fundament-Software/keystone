@@ -760,17 +760,9 @@ impl ratatui::widgets::Widget for &mut Tui<'_> {
                     .margin(1)
                     .constraints([Constraint::Length(10)])
                     .split(tabarea[1]);
-                //let mut
                 let mut rows: Vec<Row> = Vec::new();
-                //let mut functions = Vec::new();
-                //TODO idk how to do this
-                /*let mut longest = 0;
-                for func in self.instance.cap_functions.iter() {
-                    if func.params.len() + func.results.len() > longest {
-                        longest = func.params.len() + func.results.len();
-                    }
-                }*/
                 let mut widths = Vec::new();
+                //TODO either change widths to look better or swap off of table 
                 for desc in self.instance.cap_functions.iter() {
                     widths.push(Constraint::Max(2 + desc.function_name.len() as u16));
                     let mut inner = Vec::new();

@@ -721,7 +721,7 @@ impl Keystone {
         );
         //TODO better way to get schemas
         let file_contents = std::fs::read(
-            env!("CARGO_MANIFEST_DIR").to_owned()
+            env!("CARGO_MANIFEST_DIR").clone().to_owned()
                 + "\\"
                 + config.get_path().unwrap().to_str().unwrap(),
         )

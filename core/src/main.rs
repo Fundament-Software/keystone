@@ -762,7 +762,7 @@ impl ratatui::widgets::Widget for &mut Tui<'_> {
                     .split(tabarea[1]);
                 let mut rows: Vec<Row> = Vec::new();
                 let mut widths = Vec::new();
-                //TODO either change widths to look better or swap off of table 
+                //TODO either change widths to look better or swap off of table
                 for desc in self.instance.cap_functions.iter() {
                     widths.push(Constraint::Max(2 + desc.function_name.len() as u16));
                     let mut inner = Vec::new();
@@ -1431,113 +1431,134 @@ impl Tui<'_> {
                             if col != 0 && col <= desc.params.len() {
                                 self.buffer.push(c);
                                 //TODO maybe show an error somewhere
-                                match &desc.params[col-1].capnp_type { 
+                                match &desc.params[col - 1].capnp_type {
                                     CapnpType::Void => {
                                         todo!();
-                                    },
+                                    }
                                     CapnpType::Bool(_) => {
                                         if let Ok(t) = self.buffer.parse::<bool>() {
-                                            desc.params[col - 1].capnp_type = CapnpType::Bool(Some(t));
+                                            desc.params[col - 1].capnp_type =
+                                                CapnpType::Bool(Some(t));
                                         } else {
                                             self.buffer = String::new();
                                             desc.params[col - 1].capnp_type = CapnpType::Bool(None);
                                         }
-                                    },
+                                    }
                                     CapnpType::Int8(_) => {
                                         if let Ok(t) = self.buffer.parse::<i8>() {
-                                            desc.params[col - 1].capnp_type = CapnpType::Int8(Some(t));
+                                            desc.params[col - 1].capnp_type =
+                                                CapnpType::Int8(Some(t));
                                         } else {
                                             self.buffer = String::new();
                                             desc.params[col - 1].capnp_type = CapnpType::Int8(None);
                                         }
-                                    },
+                                    }
                                     CapnpType::Int16(_) => {
                                         if let Ok(t) = self.buffer.parse::<i16>() {
-                                            desc.params[col - 1].capnp_type = CapnpType::Int16(Some(t));
+                                            desc.params[col - 1].capnp_type =
+                                                CapnpType::Int16(Some(t));
                                         } else {
                                             self.buffer = String::new();
-                                            desc.params[col - 1].capnp_type = CapnpType::Int16(None);
+                                            desc.params[col - 1].capnp_type =
+                                                CapnpType::Int16(None);
                                         }
-                                    },
+                                    }
                                     CapnpType::Int32(_) => {
                                         if let Ok(t) = self.buffer.parse::<i32>() {
-                                            desc.params[col - 1].capnp_type = CapnpType::Int32(Some(t));
+                                            desc.params[col - 1].capnp_type =
+                                                CapnpType::Int32(Some(t));
                                         } else {
                                             self.buffer = String::new();
-                                            desc.params[col - 1].capnp_type = CapnpType::Int32(None);
+                                            desc.params[col - 1].capnp_type =
+                                                CapnpType::Int32(None);
                                         }
-                                    },
+                                    }
                                     CapnpType::Int64(_) => {
                                         if let Ok(t) = self.buffer.parse::<i64>() {
-                                            desc.params[col - 1].capnp_type = CapnpType::Int64(Some(t));
+                                            desc.params[col - 1].capnp_type =
+                                                CapnpType::Int64(Some(t));
                                         } else {
                                             self.buffer = String::new();
-                                            desc.params[col - 1].capnp_type = CapnpType::Int64(None);
+                                            desc.params[col - 1].capnp_type =
+                                                CapnpType::Int64(None);
                                         }
-                                    },
+                                    }
                                     CapnpType::UInt8(_) => {
                                         if let Ok(t) = self.buffer.parse::<u8>() {
-                                            desc.params[col - 1].capnp_type = CapnpType::UInt8(Some(t));
+                                            desc.params[col - 1].capnp_type =
+                                                CapnpType::UInt8(Some(t));
                                         } else {
                                             self.buffer = String::new();
-                                            desc.params[col - 1].capnp_type = CapnpType::UInt8(None);
+                                            desc.params[col - 1].capnp_type =
+                                                CapnpType::UInt8(None);
                                         }
-                                    },
+                                    }
                                     CapnpType::UInt16(_) => {
                                         if let Ok(t) = self.buffer.parse::<u16>() {
-                                            desc.params[col - 1].capnp_type = CapnpType::UInt16(Some(t));
+                                            desc.params[col - 1].capnp_type =
+                                                CapnpType::UInt16(Some(t));
                                         } else {
                                             self.buffer = String::new();
-                                            desc.params[col - 1].capnp_type = CapnpType::UInt16(None);
+                                            desc.params[col - 1].capnp_type =
+                                                CapnpType::UInt16(None);
                                         }
-                                    },
+                                    }
                                     CapnpType::UInt32(_) => {
                                         if let Ok(t) = self.buffer.parse::<u32>() {
-                                            desc.params[col - 1].capnp_type = CapnpType::UInt32(Some(t));
+                                            desc.params[col - 1].capnp_type =
+                                                CapnpType::UInt32(Some(t));
                                         } else {
                                             self.buffer = String::new();
-                                            desc.params[col - 1].capnp_type = CapnpType::UInt32(None);
+                                            desc.params[col - 1].capnp_type =
+                                                CapnpType::UInt32(None);
                                         }
-                                    },
+                                    }
                                     CapnpType::UInt64(_) => {
                                         if let Ok(t) = self.buffer.parse::<u64>() {
-                                            desc.params[col - 1].capnp_type = CapnpType::UInt64(Some(t));
+                                            desc.params[col - 1].capnp_type =
+                                                CapnpType::UInt64(Some(t));
                                         } else {
                                             self.buffer = String::new();
-                                            desc.params[col - 1].capnp_type = CapnpType::UInt64(None);
+                                            desc.params[col - 1].capnp_type =
+                                                CapnpType::UInt64(None);
                                         }
-                                    },
+                                    }
                                     CapnpType::Float32(_) => {
                                         if let Ok(t) = self.buffer.parse::<f32>() {
-                                            desc.params[col - 1].capnp_type = CapnpType::Float32(Some(t));
+                                            desc.params[col - 1].capnp_type =
+                                                CapnpType::Float32(Some(t));
                                         } else {
                                             self.buffer = String::new();
-                                            desc.params[col - 1].capnp_type = CapnpType::Float32(None);
+                                            desc.params[col - 1].capnp_type =
+                                                CapnpType::Float32(None);
                                         }
-                                    },
+                                    }
                                     CapnpType::Float64(_) => {
                                         if let Ok(t) = self.buffer.parse::<f64>() {
-                                            desc.params[col - 1].capnp_type = CapnpType::Float64(Some(t));
+                                            desc.params[col - 1].capnp_type =
+                                                CapnpType::Float64(Some(t));
                                         } else {
                                             self.buffer = String::new();
-                                            desc.params[col - 1].capnp_type = CapnpType::Float64(None);
+                                            desc.params[col - 1].capnp_type =
+                                                CapnpType::Float64(None);
                                         }
-                                    },
+                                    }
                                     CapnpType::Text(_) => {
-                                            desc.params[col - 1].capnp_type = CapnpType::Text(Some(self.buffer.clone()));
-                                    },
+                                        desc.params[col - 1].capnp_type =
+                                            CapnpType::Text(Some(self.buffer.clone()));
+                                    }
                                     CapnpType::Data(_) => {
                                         todo!();
-                                    },
+                                    }
                                     CapnpType::Struct(hash_map) => {
                                         todo!();
-                                    },
+                                    }
                                     CapnpType::List(capnp_types) => {
                                         todo!();
-                                    },
+                                    }
                                     CapnpType::Capability(client_hook) => {
                                         todo!();
-                                    },
+                                    }
                                 }
                             }
                         }

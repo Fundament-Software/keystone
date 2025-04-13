@@ -1,5 +1,6 @@
 use crate::util::SnowflakeSource;
 use caplog::{CapLog, MAX_BUFFER_SIZE};
+use capnp::MessageSize;
 use capnp::capability::Client;
 use capnp::capability::Params;
 use capnp::capability::Request;
@@ -8,7 +9,6 @@ use capnp::capability::Server;
 use capnp::private::capability::ClientHook;
 use capnp::private::layout::CapTable;
 use capnp::traits::FromPointerReader;
-use capnp::MessageSize;
 use capnp_rpc::CapabilityServerSet;
 use std::cell::RefCell;
 use std::rc::Rc;

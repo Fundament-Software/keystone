@@ -13,11 +13,11 @@ use capnp::capability::{FromClientHook, RemotePromise};
 use capnp::private::capability::ClientHook;
 use capnp::traits::SetPointerBuilder;
 use capnp_rpc::twoparty::VatNetwork;
-use capnp_rpc::{rpc_twoparty_capnp, CapabilityServerSet, RpcSystem};
+use capnp_rpc::{CapabilityServerSet, RpcSystem, rpc_twoparty_capnp};
 use eyre::Result;
 use eyre::WrapErr;
-use futures_util::stream::FuturesUnordered;
 use futures_util::FutureExt;
+use futures_util::stream::FuturesUnordered;
 use std::future::Future;
 use std::io::Write;
 use std::pin::Pin;
@@ -92,7 +92,9 @@ pub enum Error {
     MissingType(String, u64),
     #[error("Couldn't find {0} in {1}!")]
     MissingMethod(String, String),
-    #[error("Method {0} did not specify a parameter list! If a method takes no parameters, you must provide an empty parameter list.")]
+    #[error(
+        "Method {0} did not specify a parameter list! If a method takes no parameters, you must provide an empty parameter list."
+    )]
     MissingMethodParameters(String),
     #[error("TOML value {0} was not a {1}!")]
     InvalidTypeTOML(String, String),

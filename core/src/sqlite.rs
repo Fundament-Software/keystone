@@ -22,7 +22,7 @@ use capnp_rpc::CapabilityServerSet;
 use d_b_any::DBAny;
 use eyre::eyre;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
-use rusqlite::{params_from_iter, Connection, OpenFlags, Result};
+use rusqlite::{Connection, OpenFlags, Result, params_from_iter};
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -220,7 +220,7 @@ impl SqliteDatabase {
                 _ => {
                     return Err(capnp::Error::failed(
                         "Readonly ref was used, but needed append permissions.".into(),
-                    ))
+                    ));
                 }
             }
 
@@ -321,7 +321,7 @@ impl SqliteDatabase {
                     return Err(capnp::Error::failed(
                         "Readonly or AppendOnly ref was used, but needed delete permissions."
                             .into(),
-                    ))
+                    ));
                 }
             }
 
@@ -410,7 +410,7 @@ impl SqliteDatabase {
             _ => {
                 return Err(capnp::Error::failed(
                     "Tried to build invalid table ref!".into(),
-                ))
+                ));
             }
         }
 
@@ -1062,7 +1062,7 @@ impl restore::Server<crate::sqlite_capnp::storage::Owned> for SqliteDatabase {
                     return Err(capnp::Error::failed(format!(
                         "Unexpected access level {}",
                         access_level as u8
-                    )))
+                    )));
                 }
             }
         };
@@ -1656,7 +1656,7 @@ impl add_d_b::Server for SqliteDatabase {
                 _ => {
                     return Err(capnp::Error::failed(
                         "Readonly or AppendOnly ref was used, but needed write permissions.".into(),
-                    ))
+                    ));
                 }
             }
 
@@ -1895,7 +1895,9 @@ impl r_o_database::Client {
     ) -> eyre::Result<RemotePromise<statement_results::Owned>> {
         match create_sqlite_params_struct_from_str(sql, bindings)? {
             Statement::Select(sel) => Ok(self.clone().build_select_request(Some(sel)).send()),
-            _ => Err(eyre!("Cast r_o_database::Client to database::Client to use statements that require greater permissions"))
+            _ => Err(eyre!(
+                "Cast r_o_database::Client to database::Client to use statements that require greater permissions"
+            )),
         }
     }
 }
@@ -2267,7 +2269,7 @@ fn parse_update_statement<'a>(
                         _ => {
                             return Err(eyre!(
                                 "Only dbany and bindparams can be used here".to_string()
-                            ))
+                            ));
                         }
                     }
                 } else {
@@ -2384,7 +2386,7 @@ fn parse_delete_statement<'a>(
                         _ => {
                             return Err(eyre!(
                                 "Only dbany and bindparams can be used here".to_string()
-                            ))
+                            ));
                         }
                     }
                 } else {

@@ -12,7 +12,7 @@ use capnp::private::capability::ClientHook;
 use capnp::traits::ImbueMut;
 use capnp::traits::SetPointerBuilder;
 use eyre::Result;
-use rusqlite::{params, Connection, OpenFlags};
+use rusqlite::{Connection, OpenFlags, params};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::rc::Rc;

@@ -4,19 +4,19 @@ use std::{cell::RefCell, io::Write, rc::Rc};
 use crate::{
     byte_stream::ByteStreamImpl,
     cap_std_capnp::{
-        ambient_authority, dir, dir_entry, file, instant, metadata, monotonic_clock, permissions,
-        project_dirs, read_dir, system_clock, system_time, temp_dir, temp_file, FileType,
+        FileType, ambient_authority, dir, dir_entry, file, instant, metadata, monotonic_clock,
+        permissions, project_dirs, read_dir, system_clock, system_time, temp_dir, temp_file,
     },
 };
 use cap_directories::{self, ProjectDirs, UserDirs};
 use cap_std::{
+    AmbientAuthority,
     fs::{Dir, DirEntry, File, Metadata, OpenOptions, Permissions, ReadDir},
     io_lifetimes::raw::AsRawFilelike,
     time::{Duration, Instant, MonotonicClock, SystemClock, SystemTime},
-    AmbientAuthority,
 };
 use cap_tempfile::{TempDir, TempFile};
-use capnp::{capability::Promise, Error};
+use capnp::{Error, capability::Promise};
 use capnp_macros::{capnp_let, capnproto_rpc};
 use capnp_rpc::CapabilityServerSet;
 
@@ -658,19 +658,19 @@ impl dir::Server for DirImpl {
             }));
         Ok(())
     } /*
-      async fn temp_file_new(self: Rc<Self>,  params: dir::TempFileNewParams, mut results: dir::TempFileNewresultss) {
+    async fn temp_file_new(self: Rc<Self>,  params: dir::TempFileNewParams, mut results: dir::TempFileNewresultss) {
 
-          let dir_cap = pry!(params_reader.get_dir());
-          let Some(underlying_dir) = DIR_SET.borrow().get_local_server_of_resolved(&dir_cap)) else {
-              return Err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Dir not from the same machine")});
-          };
-          let dir = underlying_dir.borrow().dir.try_clone().unwrap();
-          let Ok(temp_file) = cap_tempfile::TempFile::new(&dir) else {
-              return Err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to create temp file")});
-          };
-          results.get().set_temp_file(capnp_rpc::new_client(TempFileImpl{temp_file: Some(temp_file)}));
-          Ok(())
-      }*/
+    let dir_cap = pry!(params_reader.get_dir());
+    let Some(underlying_dir) = DIR_SET.borrow().get_local_server_of_resolved(&dir_cap)) else {
+    return Err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Dir not from the same machine")});
+    };
+    let dir = underlying_dir.borrow().dir.try_clone().unwrap();
+    let Ok(temp_file) = cap_tempfile::TempFile::new(&dir) else {
+    return Err(Error{kind: capnp::ErrorKind::Failed, extra: String::from("Failed to create temp file")});
+    };
+    results.get().set_temp_file(capnp_rpc::new_client(TempFileImpl{temp_file: Some(temp_file)}));
+    Ok(())
+    }*/
     async fn temp_file_new_anonymous(self: Rc<Self>) {
         let Ok(file) = cap_tempfile::TempFile::new_anonymous(&self.dir) else {
             return Err(Error::failed("Failed to create anonymous temp file".into()));

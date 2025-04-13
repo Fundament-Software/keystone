@@ -722,12 +722,8 @@ impl Keystone {
             Ok(p.pipeline.get_api().as_cap()),
         );
         //TODO better way to get schemas
-        let file_contents = std::fs::read(
-            env!("CARGO_MANIFEST_DIR").clone().to_owned()
-                + "\\"
-                + config.get_path().unwrap().to_str().unwrap(),
-        )
-        .unwrap();
+        let file_contents =
+            std::fs::read(config_dir.join(Path::new(config.get_path()?.to_str()?)))?;
         let binary = crate::binary_embed::load_deps_from_binary(&file_contents)?;
         let bufread = std::io::BufReader::new(binary);
         let dyn_schema = capnp::schema::DynamicSchema::new(capnp::serialize::read_message(

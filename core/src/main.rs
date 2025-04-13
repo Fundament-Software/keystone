@@ -659,20 +659,38 @@ impl ratatui::widgets::Widget for &mut Tui<'_> {
                     .select(module.selected)
                     .render(actionbar[1], buf);
 
-                // TODO: not currently selectable
-                Paragraph::new(Span::styled(
-                    "[API Explorer]",
-                    Style::new().dark_gray().bold(),
-                ))
-                .render(actionbar[2], buf);
-
-                Paragraph::new("Trace Level: ").render(actionbar[3], buf);
-
-                let is_selected = if let Some(x) = module.selected.map(|s| s == (count + 0)) {
+                let mut is_selected = if let Some(x) = module.selected.map(|s| s == (count + 0)) {
                     x
                 } else {
                     false
                 };
+
+                Paragraph::new(Span::styled(
+                    "[API Explorer]",
+                    match module.state {
+                        ModuleState::NotStarted
+                        | ModuleState::Closed
+                        | ModuleState::Aborted
+                        | ModuleState::StartFailure
+                        | ModuleState::CloseFailure
+                        | ModuleState::Closing => Style::new().dark_gray().bold(),
+                        ModuleState::Initialized | ModuleState::Ready | ModuleState::Paused => {
+                            let sel = is_selected;
+
+                            is_selected = if let Some(x) = module.selected.map(|s| s == (count + 1))
+                            {
+                                x
+                            } else {
+                                false
+                            };
+
+                            invert_style(sel, Style::new().white().bold())
+                        }
+                    },
+                ))
+                .render(actionbar[2], buf);
+
+                Paragraph::new("Trace Level: ").render(actionbar[3], buf);
 
                 Paragraph::new(match module.trace {
                     tracing::Level::TRACE => Span::styled(
@@ -972,7 +990,8 @@ impl Tui<'_> {
                                             .expect("Failed to recover from failed module start");
                                         }
                                     }
-                                    3 => m.trace = m.rotate_trace(),
+                                    3 => self.tab = TabPage::Interface,
+                                    4 => m.trace = m.rotate_trace(),
                                     _ => (),
                                 }
                             }
@@ -1023,7 +1042,8 @@ impl Tui<'_> {
                                             .expect("Failed to recover from failed module start");
                                         }
                                     }
-                                    3 => m.trace = m.rotate_trace(),
+                                    3 => self.tab = TabPage::Interface,
+                                    4 => m.trace = m.rotate_trace(),
                                     _ => (),
                                 }
                             }
@@ -1346,7 +1366,7 @@ impl Tui<'_> {
                                     | ModuleState::Closing => 1,
                                     ModuleState::Initialized
                                     | ModuleState::Ready
-                                    | ModuleState::Paused => 3,
+                                    | ModuleState::Paused => 4,
                                 },
                             ))
                         }

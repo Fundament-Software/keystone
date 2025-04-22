@@ -22,7 +22,7 @@ use std::future::Future;
 use std::io::Write;
 use std::pin::Pin;
 use std::time::Duration;
-use std::{cell::RefCell, collections::HashMap, path::Path, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, collections::HashSet, path::Path, rc::Rc};
 use tokio::io::AsyncReadExt;
 use tokio::task::JoinHandle;
 
@@ -721,7 +721,7 @@ impl Keystone {
             &module.queue.inner,
             Ok(p.pipeline.get_api().as_cap()),
         );
-        //TODO better way to get schemas
+
         let file_contents =
             std::fs::read(config_dir.join(Path::new(config.get_path()?.to_str()?)))?;
         let binary = crate::binary_embed::load_deps_from_binary(&file_contents)?;
@@ -735,76 +735,87 @@ impl Keystone {
         )?)?;
         //TODO other types
         //TODO extends
-        let schema: capnp::schema::CapabilitySchema =
-            match dyn_schema.get_type_by_scope(&["Root"], None).unwrap() {
-                capnp::introspect::TypeVariant::Capability(s) => s.to_owned().into(),
-                _ => todo!(),
-            };
-        let root_id = schema.get_proto().get_id();
-        match schema.get_proto().which().unwrap() {
-            capnp::schema_capnp::node::Which::Interface(interface) => {
-                let methods = interface.get_methods().unwrap();
-
-                for (ordinal, method) in methods.into_iter().enumerate() {
-                    let mut params = Vec::new();
-                    let mut params_schema: Option<capnp::schema::StructSchema> = None; //TODO invert the whole thing with let else so this isn't needed
-                    let mut results_schema: Option<capnp::schema::StructSchema> = None;
-                    match dyn_schema
-                        .get_type_by_id(method.get_param_struct_type())
-                        .unwrap()
-                    {
-                        capnp::introspect::TypeVariant::Struct(st) => {
-                            let sc: capnp::schema::StructSchema = st.clone().into();
-                            params_schema = Some(sc.clone());
-                            for field in sc.get_fields().unwrap() {
-                                params.push(ParamResultType {
-                                    name: field
-                                        .get_proto()
-                                        .get_name()
-                                        .unwrap()
-                                        .to_string()
-                                        .unwrap(),
-                                    capnp_type: field.get_type().which().into(),
-                                });
-                            }
-                        }
-                        _ => (),
-                    };
-                    let mut results = Vec::new();
-                    match dyn_schema
-                        .get_type_by_id(method.get_result_struct_type())
-                        .unwrap()
-                    {
-                        capnp::introspect::TypeVariant::Struct(st) => {
-                            let sc: capnp::schema::StructSchema = st.clone().into();
-                            results_schema = Some(sc.clone());
-                            for field in sc.get_fields().unwrap() {
-                                results.push(ParamResultType {
-                                    name: field
-                                        .get_proto()
-                                        .get_name()
-                                        .unwrap()
-                                        .to_string()
-                                        .unwrap(),
-                                    capnp_type: field.get_type().which().into(),
-                                });
-                            }
-                        }
-                        _ => (),
-                    };
+        if self.cap_functions.is_empty() {
+            let schema: capnp::schema::CapabilitySchema =
+                match dyn_schema.get_type_by_scope(&["Root"], None).unwrap() {
+                    capnp::introspect::TypeVariant::Capability(s) => s.to_owned().into(),
+                    _ => todo!(),
+                };
+            let root_id = schema.get_proto().get_id();
+            match schema.get_proto().which().unwrap() {
+                capnp::schema_capnp::node::Which::Interface(interface) => {
+                    let methods = interface.get_methods().unwrap();
                     self.cap_functions.push(FunctionDescription {
                         module_or_cap: ModuleOrCap::ModuleId(id),
-                        function_name: method.get_name().unwrap().to_str()?.to_string(),
-                        type_id: root_id,
-                        method_id: ordinal as u16,
-                        params: params,
-                        params_schema: params_schema,
-                        results: results,
-                        results_schema: results_schema,
+                        function_name: module.name.clone(),
+                        type_id: 0,
+                        method_id: 0,
+                        params: Vec::new(),
+                        params_schema: None,
+                        results: Vec::new(),
+                        results_schema: None,
                     });
+                    for (ordinal, method) in methods.into_iter().enumerate() {
+                        let mut params = Vec::new();
+                        let mut params_schema: Option<capnp::schema::StructSchema> = None; //TODO invert the whole thing with let else so this isn't needed
+                        let mut results_schema: Option<capnp::schema::StructSchema> = None;
+                        match dyn_schema
+                            .get_type_by_id(method.get_param_struct_type())
+                            .unwrap()
+                        {
+                            capnp::introspect::TypeVariant::Struct(st) => {
+                                let sc: capnp::schema::StructSchema = st.clone().into();
+                                params_schema = Some(sc.clone());
+                                for field in sc.get_fields().unwrap() {
+                                    params.push(ParamResultType {
+                                        name: field
+                                            .get_proto()
+                                            .get_name()
+                                            .unwrap()
+                                            .to_string()
+                                            .unwrap(),
+                                        capnp_type: field.get_type().which().into(),
+                                    });
+                                }
+                            }
+                            _ => (),
+                        };
+                        let mut results = Vec::new();
+                        match dyn_schema
+                            .get_type_by_id(method.get_result_struct_type())
+                            .unwrap()
+                        {
+                            capnp::introspect::TypeVariant::Struct(st) => {
+                                let sc: capnp::schema::StructSchema = st.clone().into();
+                                results_schema = Some(sc.clone());
+                                for field in sc.get_fields().unwrap() {
+                                    results.push(ParamResultType {
+                                        name: field
+                                            .get_proto()
+                                            .get_name()
+                                            .unwrap()
+                                            .to_string()
+                                            .unwrap(),
+                                        capnp_type: field.get_type().which().into(),
+                                    });
+                                }
+                            }
+                            _ => (),
+                        };
+                        self.cap_functions.push(FunctionDescription {
+                            module_or_cap: ModuleOrCap::ModuleId(id),
+                            function_name: method.get_name().unwrap().to_str()?.to_string(),
+                            type_id: root_id,
+                            method_id: ordinal as u16,
+                            params: params,
+                            params_schema: params_schema,
+                            results: results,
+                            results_schema: results_schema,
+                        });
+                    }
                 }
+                _ => todo!(),
             }
-            _ => todo!(),
         }
         inner.borrow_mut().debug_name = Some(module.name.clone());
 

@@ -265,13 +265,15 @@ enum TabPage {
     Module = 1,
     Network = 2,
     Interface = 3,
+    Input = 4,
 }
 
-static TABPAGES: [TabPage; 4] = [
+static TABPAGES: [TabPage; 5] = [
     TabPage::Keystone,
     TabPage::Module,
     TabPage::Network,
     TabPage::Interface,
+    TabPage::Input,
 ];
 
 impl std::string::ToString for TabPage {
@@ -281,6 +283,7 @@ impl std::string::ToString for TabPage {
             TabPage::Module => "Module",
             TabPage::Interface => "API Explorer",
             TabPage::Network => "Network",
+            TabPage::Input => "Input",
         }
         .to_owned()
     }
@@ -337,8 +340,13 @@ struct Tui<'a> {
     list_state: ListState,
     log_tx: UnboundedSender<(u64, String)>,
     holding: Vec<ParamResultType>,
-    input: bool,
+    input: RowCol,
     buffer: String, //TODO optimize input stuff
+}
+
+struct RowCol {
+    row: usize,
+    col: usize,
 }
 
 fn invert_style(selected: bool, style: ratatui::prelude::Style) -> ratatui::prelude::Style {
@@ -781,11 +789,75 @@ impl ratatui::widgets::Widget for &mut Tui<'_> {
                 let mut rows: Vec<Row> = Vec::new();
                 let mut widths = Vec::new();
                 //TODO either change widths to look better or swap off of table
-                for desc in self.instance.cap_functions.iter() {
-                    widths.push(Constraint::Max(2 + desc.function_name.len() as u16));
+                for desc in self.instance.cap_functions.iter_mut() {
                     let mut inner = Vec::new();
+                    if desc.type_id == 0 {
+                        inner.push(Cell::from(desc.function_name.clone()));
+                        widths.push(Constraint::Max(desc.function_name.len() as u16));
+                        if let ModuleOrCap::ModuleId(id) = &desc.module_or_cap {
+                            if let Some(m) = self.modules.get(id) {
+                                match m.state {
+                                    ModuleState::NotStarted => {
+                                        let s = ": not started".to_string();
+                                        widths.push(Constraint::Max(s.len() as u16));
+                                        inner.push(Cell::from(s));
+                                    }
+                                    ModuleState::Initialized => {
+                                        let s = ": initialized".to_string();
+                                        widths.push(Constraint::Max(s.len() as u16));
+                                        inner.push(Cell::from(s));
+                                    }
+                                    ModuleState::Ready => {
+                                        let s = ": ready".to_string();
+                                        widths.push(Constraint::Max(s.len() as u16));
+                                        inner.push(Cell::from(s));
+                                    }
+                                    ModuleState::Paused => {
+                                        let s = ": paused".to_string();
+                                        widths.push(Constraint::Max(s.len() as u16));
+                                        inner.push(Cell::from(s));
+                                    }
+                                    ModuleState::Closing => {
+                                        let s = ": closing".to_string();
+                                        widths.push(Constraint::Max(s.len() as u16));
+                                        inner.push(Cell::from(s));
+                                    }
+                                    ModuleState::Closed => {
+                                        let s = ": closed".to_string();
+                                        widths.push(Constraint::Max(s.len() as u16));
+                                        inner.push(Cell::from(s));
+                                    }
+                                    ModuleState::Aborted => {
+                                        let s = ": aborted".to_string();
+                                        widths.push(Constraint::Max(s.len() as u16));
+                                        inner.push(Cell::from(s));
+                                    }
+                                    ModuleState::StartFailure => {
+                                        let s = ": start failure".to_string();
+                                        widths.push(Constraint::Max(s.len() as u16));
+                                        inner.push(Cell::from(s));
+                                    }
+                                    ModuleState::CloseFailure => {
+                                        let s = ": close failure".to_string();
+                                        widths.push(Constraint::Max(s.len() as u16));
+                                        inner.push(Cell::from(s));
+                                    }
+                                }
+                            }
+                        }
+                        rows.push(Row::new(inner));
+                        continue;
+                    }
+                    widths.push(Constraint::Max(2 + desc.function_name.len() as u16));
                     inner.push(Cell::from(format!("{} (", desc.function_name.clone())));
-                    for param in desc.params.iter() {
+                    for param in desc.params.iter_mut() {
+                        if let CapnpType::Struct(st) = &mut param.capnp_type {
+                            if st.fields.is_empty() {
+                            for field in st.schema.get_fields().unwrap() {
+                                st.fields.push(ParamResultType { name: field.get_proto().get_name().unwrap().to_string().unwrap(), capnp_type: field.get_type().which().into()});
+                            }
+                        }
+                        }
                         let p = param.clone().to_string();
                         widths.push(Constraint::Max(p.len().try_into().unwrap()));
                         inner.push(Cell::from(p));
@@ -848,6 +920,55 @@ impl ratatui::widgets::Widget for &mut Tui<'_> {
                 );
 
                 //StatefulWidget::render(table, main[0], buf, &mut self.keystone.table_state);
+            }
+            TabPage::Input => {
+                let mut desc = &mut self.instance.cap_functions[self.input.row];
+                let title = Line::from(" Input ".bold());
+                let instructions = Line::from(vec![
+                    " Quit ".into(),
+                    "<Q>".green().bold(),
+                    " — Scroll ".into(),
+                    "<⭡⭣>".green().bold(),
+                    " — Select ".into(),
+                    "<Enter>".green().bold(),
+                    " — Back ".into(),
+                    "<Esc>".green().bold(),
+                    " — Next Page ".into(),
+                    "<Tab> ".green().bold(),
+                ]);
+
+                let block = Block::bordered()
+                    .title(title.centered())
+                    .title_bottom(instructions.centered())
+                    .border_set(border::THICK);
+                block.render(tabarea[1], buf);
+
+                let main = Layout::default()
+                    .direction(Direction::Vertical)
+                    .margin(1)
+                    .constraints([Constraint::Length(1), Constraint::Min(1)])
+                    .split(tabarea[1]);
+                let mut fields = Vec::new();
+                if self.input.col != 0 {
+                    let mut desc = &mut self.instance.cap_functions[self.input.row];
+                    let param = &desc.params[self.input.col - 1];
+                    match &param.capnp_type {
+                        CapnpType::Data(items) => todo!(),
+                        CapnpType::Struct(st) => {
+                            for field in &st.fields {
+                                fields.push(field.clone().to_string());
+                            }
+                        }
+                        CapnpType::List(capnp_types) => todo!(),
+                        _ => todo!(),
+                    }
+                }
+
+                let list = List::new(fields)
+                    .direction(ratatui::widgets::ListDirection::TopToBottom)
+                    .highlight_style(Style::new().reversed());
+
+                StatefulWidget::render(list, main[1], buf, &mut self.list_state);
             }
             _ => (),
         }
@@ -1070,9 +1191,12 @@ impl Tui<'_> {
                 }
                 TabPage::Interface => {
                     if let Some(row) = self.keystone.table_state.selected() {
-                        let mut desc = &mut self.instance.cap_functions[row];
+                        let mut desc = &mut self.instance.cap_functions[row as usize];
                         if let Some(col) = self.keystone.table_state.selected_column() {
                             if col == 0 {
+                                if desc.type_id == 0 {
+                                    return Ok(());
+                                }
                                 let client = match &desc.module_or_cap {
                                     ModuleOrCap::ModuleId(id) => self
                                         .instance
@@ -1089,7 +1213,7 @@ impl Tui<'_> {
                                     ModuleOrCap::Cap(c) => c.clone(),
                                 };
                                 let mut call = client.new_call(desc.type_id, desc.method_id, None);
-                                if let Some(params_schema) = desc.params_schema.clone() {
+                                if let Some(params_schema) = desc.params_schema.clone() { //TODO reget schema every time or it explodes after restart
                                     let mut dyn_param_builder =
                                         call.get().init_dynamic(params_schema.into()).unwrap();
                                     for param in &desc.params {
@@ -1234,10 +1358,15 @@ impl Tui<'_> {
                                                         .unwrap()
                                                 }
                                             }
-                                            _ => todo!(),
+                                            _ => (), //TODO structs and such
                                         }
                                     }
-                                    let response = call.send().promise.await.unwrap();
+                                    let response = call.send().promise.await;
+                                    if let Err(e) = response {
+                                        eprintln!("{}", e.extra); //TODO
+                                        return Ok(());
+                                    }
+                                    let response = response.unwrap();
                                     let Some(res_schema) = desc.results_schema.clone() else {
                                         todo!()
                                     };
@@ -1313,9 +1442,15 @@ impl Tui<'_> {
                                             _ => (),
                                         }
                                     }
-                                } else {
-                                    if col == 10 {
-                                        //TODO user input probably here
+                                }
+                            } else {
+                                if let Some(row) = self.keystone.table_state.selected() {
+                                    if let Some(col) =
+                                        self.keystone.table_state.selected_column()
+                                    {
+                                        if col != 0 && col <= desc.params.len() {
+                                            self.input = RowCol { row, col };
+                                        }
                                     }
                                 }
                             }
@@ -1389,6 +1524,10 @@ impl Tui<'_> {
                     self.buffer = String::new();
                     self.keystone.table_state.select_previous();
                 }
+                TabPage::Input => {
+                    self.buffer = String::new();
+                    self.list_state.select_previous();
+                }
                 _ => (),
             },
             KeyCode::Down if key.kind != KeyEventKind::Release => match self.tab {
@@ -1401,6 +1540,10 @@ impl Tui<'_> {
                 TabPage::Interface => {
                     self.buffer = String::new();
                     self.keystone.table_state.select_next();
+                }
+                TabPage::Input => {
+                    self.buffer = String::new();
+                    self.list_state.select_next();
                 }
                 _ => (),
             },
@@ -1627,7 +1770,7 @@ async fn event_loop<B: ratatui::prelude::Backend>(
         list_state: ListState::default(),
         log_tx,
         holding: Vec::new(),
-        input: false,
+        input: RowCol { row: 0, col: 0 },
         buffer: String::new(),
     };
 

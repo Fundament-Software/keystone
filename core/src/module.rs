@@ -2,7 +2,7 @@ use capnp::any_pointer::Owned as any_pointer;
 use capnp::capability::RemotePromise;
 use eyre::Result;
 use serde::{Deserialize, Serialize};
-use std::time::Duration;
+use std::{collections::HashMap, time::Duration};
 
 use crate::{
     keystone::{Error, SpawnProcess, SpawnProgram},
@@ -64,10 +64,15 @@ pub enum CapnpType {
     Float64(Option<f64>),
     Text(Option<String>),
     Data(Option<Vec<u8>>),
-    Struct(Option<std::collections::HashMap<String, CapnpType>>),
-    List(Option<Vec<CapnpType>>),
+    Struct(CapnpStruct),
+    List(Vec<CapnpType>),
     //AnyPointer(Option<_>),
     Capability(Option<Box<dyn capnp::private::capability::ClientHook>>), //Enum(Option<_>),
+}
+#[derive(Clone)]
+pub struct CapnpStruct {
+    pub fields: Vec<ParamResultType>,
+    pub schema: capnp::schema::StructSchema,
 }
 impl Into<CapnpType> for capnp::introspect::TypeVariant {
     fn into(self) -> CapnpType {
@@ -87,14 +92,18 @@ impl Into<CapnpType> for capnp::introspect::TypeVariant {
             capnp::introspect::TypeVariant::Text => CapnpType::Text(None),
             capnp::introspect::TypeVariant::Data => CapnpType::Data(None),
             capnp::introspect::TypeVariant::Struct(raw_branded_struct_schema) => {
-                CapnpType::Struct(None)
+                let schema: capnp::schema::StructSchema = raw_branded_struct_schema.into();
+                CapnpType::Struct(CapnpStruct {
+                    fields: Vec::new(),
+                    schema: schema,
+                })
             }
             capnp::introspect::TypeVariant::AnyPointer => todo!(),
             capnp::introspect::TypeVariant::Capability(raw_capability_schema) => {
                 CapnpType::Capability(None)
             }
             capnp::introspect::TypeVariant::Enum(raw_enum_schema) => todo!(),
-            capnp::introspect::TypeVariant::List(_) => CapnpType::List(None),
+            capnp::introspect::TypeVariant::List(_) => CapnpType::List(Vec::new()),
         }
     }
 }
@@ -193,15 +202,14 @@ impl ParamResultType {
                     format!("{} :Data", self.name)
                 }
             }
-            CapnpType::Struct(hash_map) => {
-                //TODO struct
-                let b = Some("");
-                if let Some(b) = b {
-                    format!("{} - {b} :Struct", self.name)
-                } else {
-                    format!("{} :Struct", self.name)
+            CapnpType::Struct(st) => {
+                let mut fields = Vec::new();
+                for v in st.fields {
+                    fields.push(v.to_string());
                 }
+                format!("{{{}}} :{}", fields.join(", "), self.name)
             }
+
             CapnpType::List(l) => {
                 //TODO
                 /*if let Some(l) = l {
@@ -235,6 +243,9 @@ pub struct FunctionDescription {
 //TODO potentially doesn't work for multiple of the same module
 impl std::hash::Hash for FunctionDescription {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        if let ModuleOrCap::ModuleId(id) = self.module_or_cap {
+            id.hash(state);
+        }
         self.function_name.hash(state);
         self.type_id.hash(state);
     }

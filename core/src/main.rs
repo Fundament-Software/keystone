@@ -853,10 +853,18 @@ impl ratatui::widgets::Widget for &mut Tui<'_> {
                     for param in desc.params.iter_mut() {
                         if let CapnpType::Struct(st) = &mut param.capnp_type {
                             if st.fields.is_empty() {
-                            for field in st.schema.get_fields().unwrap() {
-                                st.fields.push(ParamResultType { name: field.get_proto().get_name().unwrap().to_string().unwrap(), capnp_type: field.get_type().which().into()});
+                                for field in st.schema.get_fields().unwrap() {
+                                    st.fields.push(ParamResultType {
+                                        name: field
+                                            .get_proto()
+                                            .get_name()
+                                            .unwrap()
+                                            .to_string()
+                                            .unwrap(),
+                                        capnp_type: field.get_type().which().into(),
+                                    });
+                                }
                             }
-                        }
                         }
                         let p = param.clone().to_string();
                         widths.push(Constraint::Max(p.len().try_into().unwrap()));
@@ -1213,7 +1221,8 @@ impl Tui<'_> {
                                     ModuleOrCap::Cap(c) => c.clone(),
                                 };
                                 let mut call = client.new_call(desc.type_id, desc.method_id, None);
-                                if let Some(params_schema) = desc.params_schema.clone() { //TODO reget schema every time or it explodes after restart
+                                if let Some(params_schema) = desc.params_schema.clone() {
+                                    //TODO reget schema every time or it explodes after restart
                                     let mut dyn_param_builder =
                                         call.get().init_dynamic(params_schema.into()).unwrap();
                                     for param in &desc.params {
@@ -1377,79 +1386,16 @@ impl Tui<'_> {
                                         dynamic_struct::Reader::new(res_struct, res_schema.into());
                                     let fields = dyn_reader.get_schema().get_fields().unwrap();
                                     for (index, field) in fields.iter().enumerate() {
-                                        match dyn_reader.get(field).unwrap() {
-                                            dynamic_value::Reader::Void => {
-                                                desc.results[index].capnp_type = CapnpType::Void;
-                                            }
-                                            dynamic_value::Reader::Bool(b) => {
-                                                desc.results[index].capnp_type =
-                                                    CapnpType::Bool(Some(b));
-                                            }
-                                            dynamic_value::Reader::Int8(i) => {
-                                                desc.results[index].capnp_type =
-                                                    CapnpType::Int8(Some(i));
-                                            }
-                                            dynamic_value::Reader::Int16(i) => {
-                                                desc.results[index].capnp_type =
-                                                    CapnpType::Int16(Some(i));
-                                            }
-                                            dynamic_value::Reader::Int32(i) => {
-                                                desc.results[index].capnp_type =
-                                                    CapnpType::Int32(Some(i));
-                                            }
-                                            dynamic_value::Reader::Int64(i) => {
-                                                desc.results[index].capnp_type =
-                                                    CapnpType::Int64(Some(i));
-                                            }
-                                            dynamic_value::Reader::UInt8(u) => {
-                                                desc.results[index].capnp_type =
-                                                    CapnpType::UInt8(Some(u));
-                                            }
-                                            dynamic_value::Reader::UInt16(u) => {
-                                                desc.results[index].capnp_type =
-                                                    CapnpType::UInt16(Some(u));
-                                            }
-                                            dynamic_value::Reader::UInt32(u) => {
-                                                desc.results[index].capnp_type =
-                                                    CapnpType::UInt32(Some(u));
-                                            }
-                                            dynamic_value::Reader::UInt64(u) => {
-                                                desc.results[index].capnp_type =
-                                                    CapnpType::UInt64(Some(u));
-                                            }
-                                            dynamic_value::Reader::Float32(f) => {
-                                                desc.results[index].capnp_type =
-                                                    CapnpType::Float32(Some(f));
-                                            }
-                                            dynamic_value::Reader::Float64(f) => {
-                                                desc.results[index].capnp_type =
-                                                    CapnpType::Float64(Some(f));
-                                            }
-                                            //dynamic_value::Reader::Enum(_) => todo!(),
-                                            dynamic_value::Reader::Text(r) => {
-                                                desc.results[index].capnp_type =
-                                                    CapnpType::Text(Some(r.to_string().unwrap()));
-                                            } /*
-                                            dynamic_value::Reader::Data(d) => {
-                                            }
-                                            dynamic_value::Reader::Struct(r) => {
-                                            }
-                                            dynamic_value::Reader::List(_) => todo!(),
-                                            dynamic_value::Reader::AnyPointer(_) => todo!(),
-                                            dynamic_value::Reader::Capability(cap) => {
-
-                                            }*/
-                                            _ => (),
-                                        }
+                                        desc.results[index].capnp_type =
+                                            dyn_reader.get(field).unwrap().try_into().unwrap();
                                     }
                                 }
                             } else {
                                 if let Some(row) = self.keystone.table_state.selected() {
-                                    if let Some(col) =
-                                        self.keystone.table_state.selected_column()
-                                    {
+                                    if let Some(col) = self.keystone.table_state.selected_column() {
                                         if col != 0 && col <= desc.params.len() {
                                             self.input = RowCol { row, col };
+                                            self.tab = TabPage::Input;
                                         }
                                     }
                                 }

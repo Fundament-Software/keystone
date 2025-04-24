@@ -1,5 +1,6 @@
-use capnp::any_pointer::Owned as any_pointer;
 use capnp::capability::RemotePromise;
+use capnp::{any_pointer::Owned as any_pointer, dynamic_struct};
+use capnp::{dynamic_list, dynamic_value};
 use eyre::Result;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, time::Duration};
@@ -48,6 +49,100 @@ pub struct ParamResultType {
     pub name: String,
     pub capnp_type: CapnpType,
 }
+impl<'a> TryInto<CapnpType> for dynamic_value::Reader<'a> {
+    type Error = core::str::Utf8Error;
+
+    fn try_into(self) -> std::result::Result<CapnpType, Self::Error> {
+        Ok(match self {
+            dynamic_value::Reader::Void => CapnpType::Void,
+            dynamic_value::Reader::Bool(b) => CapnpType::Bool(Some(b)),
+            dynamic_value::Reader::Int8(i) => CapnpType::Int8(Some(i)),
+            dynamic_value::Reader::Int16(i) => CapnpType::Int16(Some(i)),
+            dynamic_value::Reader::Int32(i) => CapnpType::Int32(Some(i)),
+            dynamic_value::Reader::Int64(i) => CapnpType::Int64(Some(i)),
+            dynamic_value::Reader::UInt8(u) => CapnpType::UInt8(Some(u)),
+            dynamic_value::Reader::UInt16(u) => CapnpType::UInt16(Some(u)),
+            dynamic_value::Reader::UInt32(u) => CapnpType::UInt32(Some(u)),
+            dynamic_value::Reader::UInt64(u) => CapnpType::UInt64(Some(u)),
+            dynamic_value::Reader::Float32(f) => CapnpType::Float32(Some(f)),
+            dynamic_value::Reader::Float64(f) => CapnpType::Float64(Some(f)),
+            //dynamic_value::Reader::Enum(e) => {
+            //    e.get_enumerant()
+            //},
+            dynamic_value::Reader::Text(r) => CapnpType::Text(Some(r.to_string().unwrap())),
+            dynamic_value::Reader::Data(d) => CapnpType::Data(Some(d.to_vec())),
+            dynamic_value::Reader::Struct(r) => struct_to_capnp_type(r)?,
+            dynamic_value::Reader::List(r) => list_to_capnp_type(r)?,
+            //dynamic_value::Reader::AnyPointer(_) => todo!(),
+            dynamic_value::Reader::Capability(cap) => {
+                todo!()
+            }
+            _ => todo!(),
+        })
+    }
+}
+fn struct_to_capnp_type(r: dynamic_struct::Reader<'_>) -> Result<CapnpType, core::str::Utf8Error> {
+    let schema = r.get_schema();
+    let mut fields = Vec::new();
+    for field in schema.get_fields().unwrap() {
+        //TODO recursive structs
+        fields.push(ParamResultType {
+            name: field.get_proto().get_name().unwrap().to_string().unwrap(),
+            capnp_type: match r.get(field).unwrap() {
+                dynamic_value::Reader::Void => CapnpType::Void,
+                dynamic_value::Reader::Bool(b) => CapnpType::Bool(Some(b)),
+                dynamic_value::Reader::Int8(i) => CapnpType::Int8(Some(i)),
+                dynamic_value::Reader::Int16(i) => CapnpType::Int16(Some(i)),
+                dynamic_value::Reader::Int32(i) => CapnpType::Int32(Some(i)),
+                dynamic_value::Reader::Int64(i) => CapnpType::Int64(Some(i)),
+                dynamic_value::Reader::UInt8(u) => CapnpType::UInt8(Some(u)),
+                dynamic_value::Reader::UInt16(u) => CapnpType::UInt16(Some(u)),
+                dynamic_value::Reader::UInt32(u) => CapnpType::UInt32(Some(u)),
+                dynamic_value::Reader::UInt64(u) => CapnpType::UInt64(Some(u)),
+                dynamic_value::Reader::Float32(f) => CapnpType::Float32(Some(f)),
+                dynamic_value::Reader::Float64(f) => CapnpType::Float64(Some(f)),
+                dynamic_value::Reader::Enum(_) => todo!(),
+                dynamic_value::Reader::Text(reader) => CapnpType::Text(Some(reader.to_string()?)),
+                dynamic_value::Reader::Data(items) => CapnpType::Data(Some(items.to_vec())),
+                dynamic_value::Reader::Struct(reader) => struct_to_capnp_type(reader)?,
+                dynamic_value::Reader::List(reader) => list_to_capnp_type(reader)?,
+                dynamic_value::Reader::AnyPointer(reader) => todo!(),
+                dynamic_value::Reader::Capability(capability) => todo!(),
+            },
+        });
+    }
+    Ok(CapnpType::Struct(CapnpStruct {
+        fields: fields,
+        schema: r.get_schema(),
+    }))
+}
+fn list_to_capnp_type(r: dynamic_list::Reader<'_>) -> Result<CapnpType, core::str::Utf8Error> {
+    let mut items = Vec::new();
+    for item in r.iter() {
+        items.push(match item.unwrap() {
+            dynamic_value::Reader::Void => CapnpType::Void,
+            dynamic_value::Reader::Bool(b) => CapnpType::Bool(Some(b)),
+            dynamic_value::Reader::Int8(i) => CapnpType::Int8(Some(i)),
+            dynamic_value::Reader::Int16(i) => CapnpType::Int16(Some(i)),
+            dynamic_value::Reader::Int32(i) => CapnpType::Int32(Some(i)),
+            dynamic_value::Reader::Int64(i) => CapnpType::Int64(Some(i)),
+            dynamic_value::Reader::UInt8(u) => CapnpType::UInt8(Some(u)),
+            dynamic_value::Reader::UInt16(u) => CapnpType::UInt16(Some(u)),
+            dynamic_value::Reader::UInt32(u) => CapnpType::UInt32(Some(u)),
+            dynamic_value::Reader::UInt64(u) => CapnpType::UInt64(Some(u)),
+            dynamic_value::Reader::Float32(f) => CapnpType::Float32(Some(f)),
+            dynamic_value::Reader::Float64(f) => CapnpType::Float64(Some(f)),
+            dynamic_value::Reader::Enum(_) => todo!(),
+            dynamic_value::Reader::Text(reader) => CapnpType::Text(Some(reader.to_string()?)),
+            dynamic_value::Reader::Data(items) => CapnpType::Data(Some(items.to_vec())),
+            dynamic_value::Reader::Struct(reader) => struct_to_capnp_type(reader)?,
+            dynamic_value::Reader::List(reader) => list_to_capnp_type(reader)?,
+            dynamic_value::Reader::AnyPointer(reader) => todo!(),
+            dynamic_value::Reader::Capability(capability) => todo!(),
+        });
+    }
+    Ok(CapnpType::List(items))
+}
 #[derive(Clone)]
 pub enum CapnpType {
     Void,
@@ -62,12 +157,13 @@ pub enum CapnpType {
     UInt64(Option<u64>),
     Float32(Option<f32>),
     Float64(Option<f64>),
+    //Enum(Option<_>),
     Text(Option<String>),
     Data(Option<Vec<u8>>),
     Struct(CapnpStruct),
     List(Vec<CapnpType>),
     //AnyPointer(Option<_>),
-    Capability(Option<Box<dyn capnp::private::capability::ClientHook>>), //Enum(Option<_>),
+    Capability(Option<Box<dyn capnp::private::capability::ClientHook>>),
 }
 #[derive(Clone)]
 pub struct CapnpStruct {

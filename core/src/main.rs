@@ -873,7 +873,22 @@ impl ratatui::widgets::Widget for &mut Tui<'_> {
                     inner.push(Cell::from(") -> ("));
                     widths.push(Constraint::Max(6));
                     let mut results = String::new();
-                    for result in desc.results.iter() {
+                    for result in desc.results.iter_mut() {
+                        if let CapnpType::Struct(st) = &mut result.capnp_type {
+                            if st.fields.is_empty() {
+                                for field in st.schema.get_fields().unwrap() {
+                                    st.fields.push(ParamResultType {
+                                        name: field
+                                            .get_proto()
+                                            .get_name()
+                                            .unwrap()
+                                            .to_string()
+                                            .unwrap(),
+                                        capnp_type: field.get_type().which().into(),
+                                    });
+                                }
+                            }
+                        }
                         let r = result.clone().to_string();
                         widths.push(Constraint::Max(r.len().try_into().unwrap()));
                         inner.push(Cell::from(r));
@@ -914,10 +929,12 @@ impl ratatui::widgets::Widget for &mut Tui<'_> {
                     .border_set(border::THICK);
                 block.render(tabarea[1], buf);
 
-                /*let mut widths = Vec::new();
-                for _ in 0..=longest + 2 {
-                    widths.push(Constraint::Max(10));
-                }*/
+                let mut widths = Vec::new();
+                widths.push(Constraint::Percentage(8));
+                for _ in 0..8 {
+                    widths.push(Constraint::Percentage(20)); //TODO table won't work, has to be some multi list solution instead
+                }
+                widths.push(Constraint::Percentage(1));
                 let table = StatefulWidget::render(
                     Table::new(rows, widths)
                         .column_spacing(1)
@@ -961,13 +978,15 @@ impl ratatui::widgets::Widget for &mut Tui<'_> {
                     let mut desc = &mut self.instance.cap_functions[self.input.row];
                     let param = &desc.params[self.input.col - 1];
                     match &param.capnp_type {
-                        CapnpType::Data(items) => todo!(),
-                        CapnpType::Struct(st) => {
-                            for field in &st.fields {
-                                fields.push(field.clone().to_string());
-                            }
+                        CapnpType::Data(items) => {
+                            field_data_helper(&mut fields, items, param.name.as_str())
                         }
-                        CapnpType::List(capnp_types) => todo!(),
+                        CapnpType::Struct(st) => {
+                            field_struct_helper(&mut fields, st, param.name.as_str())
+                        }
+                        CapnpType::List(capnp_types) => {
+                            field_list_helper(&mut fields, capnp_types, param.name.as_str())
+                        }
                         _ => todo!(),
                     }
                 }
@@ -980,6 +999,38 @@ impl ratatui::widgets::Widget for &mut Tui<'_> {
             }
             _ => (),
         }
+    }
+}
+fn field_data_helper(fields: &mut Vec<String>, items: &Vec<u8>, name: &str) {
+    fields.push(format!("{}: Add new element", name));
+    for item in items {
+        fields.push(item.clone().to_string());
+    }
+}
+fn field_struct_helper(fields: &mut Vec<String>, capnp_struct: &CapnpStruct, name: &str) {
+    fields.push(format!("{}: Struct init/clone/set", name));
+    for field in &capnp_struct.fields {
+        match &field.capnp_type {
+            CapnpType::Data(items) => field_data_helper(fields, items, field.name.as_str()),
+            CapnpType::Struct(capnp_struct) => {
+                field_struct_helper(fields, capnp_struct, field.name.as_str())
+            }
+            CapnpType::List(capnp_types) => {
+                field_list_helper(fields, capnp_types, field.name.as_str())
+            }
+            _ => fields.push(field.clone().to_string()),
+        };
+    }
+}
+fn field_list_helper(fields: &mut Vec<String>, capnp_types: &Vec<CapnpType>, name: &str) {
+    fields.push(format!("{}: Add new element", name));
+    for field in capnp_types {
+        match &field {
+            CapnpType::Data(items) => field_data_helper(fields, items, ""),
+            CapnpType::Struct(capnp_struct) => field_struct_helper(fields, capnp_struct, ""),
+            CapnpType::List(capnp_types) => field_list_helper(fields, capnp_types, ""),
+            _ => fields.push(field.clone().to_string("".to_string())),
+        };
     }
 }
 
@@ -1355,18 +1406,12 @@ impl Tui<'_> {
                                                         .unwrap()
                                                 }
                                             }
-                                            CapnpType::Data(d) => {
-                                                if let Some(d) = d {
-                                                    dyn_param_builder
-                                                        .set_named(
-                                                            param.name.as_str(),
-                                                            dynamic_value::Reader::Data(
-                                                                d.as_slice(),
-                                                            ),
-                                                        )
-                                                        .unwrap()
-                                                }
-                                            }
+                                            CapnpType::Data(d) => dyn_param_builder
+                                                .set_named(
+                                                    param.name.as_str(),
+                                                    dynamic_value::Reader::Data(d.as_slice()),
+                                                )
+                                                .unwrap(),
                                             _ => (), //TODO structs and such
                                         }
                                     }
@@ -1399,6 +1444,61 @@ impl Tui<'_> {
                                         }
                                     }
                                 }
+                            }
+                        }
+                    }
+                }
+                TabPage::Input => {
+                    if let Some(index) = self.list_state.selected() {
+                        let mut index = index as usize;
+                        if self.input.col != 0 {
+                            let mut desc = &mut self.instance.cap_functions[self.input.row];
+                            let mut param = &mut desc.params[self.input.col - 1];
+                            match &mut param.capnp_type {
+                                CapnpType::Data(items) => {
+                                    if index == 0 {
+                                        items.push(0);
+                                    }
+                                }
+                                CapnpType::Struct(st) => {
+                                    let mut count = 0;
+                                    for field in st.fields.iter_mut() {
+                                        match &mut field.capnp_type {
+                                            CapnpType::Data(items) => {
+                                                //if index == 0 {
+                                                //    items.push(0);
+                                                //}
+                                            }
+                                            CapnpType::Struct(capnp_struct) => {
+                                                for f in capnp_struct.fields.iter_mut() {
+                                                    /*if count == index {
+                                                        if let CapnpType::Struct(st) = &mut f.capnp_type {
+                                                            if st.fields.is_empty() {
+                                                                for f in st.schema.get_fields().unwrap() {
+                                                                    st.fields.push(ParamResultType {
+                                                                        name: f
+                                                                            .get_proto()
+                                                                            .get_name()
+                                                                            .unwrap()
+                                                                            .to_string()
+                                                                            .unwrap(),
+                                                                        capnp_type: f.get_type().which().into(),
+                                                                    });
+                                                                }
+                                                            }
+                                                        }
+                                                    }*/
+                                                }
+                                            }
+                                            CapnpType::List(items) => {
+                                                todo!()
+                                            }
+                                            _ => (),
+                                        }
+                                    }
+                                }
+                                //CapnpType::List(capnp_types) => ,
+                                _ => (),
                             }
                         }
                     }
@@ -1669,6 +1769,49 @@ impl Tui<'_> {
                                         todo!();
                                     }
                                 }
+                            }
+                        }
+                    }
+                }
+                TabPage::Input => {
+                    if let Some(index) = self.list_state.selected() {
+                        let mut index = index as usize;
+                        if self.input.col != 0 {
+                            let mut desc = &mut self.instance.cap_functions[self.input.row];
+                            let mut param = &mut desc.params[self.input.col - 1];
+                            let mut count = 0;
+                            self.buffer.push(c);
+                            match &mut param.capnp_type {
+                                CapnpType::Data(items) => {
+                                    if index != 0 {
+                                        if let Ok(t) = self.buffer.parse::<u8>() {
+                                            items[index - 1] = t;
+                                        } else {
+                                            self.buffer = String::new();
+                                            items[index - 1] = 0;
+                                        }
+                                    }
+                                }
+                                CapnpType::Struct(st) => {
+                                    for field in st.fields.iter_mut() {
+                                        match &mut field.capnp_type {
+                                            CapnpType::Data(items) => {
+                                                for item in items {
+                                                    if count == index {}
+                                                }
+                                            }
+                                            CapnpType::Struct(capnp_struct) => {
+                                                for f in capnp_struct.fields.iter_mut() {}
+                                            }
+                                            CapnpType::List(items) => {
+                                                todo!()
+                                            }
+                                            _ => (),
+                                        }
+                                    }
+                                }
+                                CapnpType::List(l) => {}
+                                _ => (),
                             }
                         }
                     }

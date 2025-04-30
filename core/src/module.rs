@@ -74,9 +74,10 @@ impl<'a> TryInto<CapnpType> for dynamic_value::Reader<'a> {
             dynamic_value::Reader::Struct(r) => struct_to_capnp_type(r)?,
             dynamic_value::Reader::List(r) => list_to_capnp_type(r)?,
             //dynamic_value::Reader::AnyPointer(_) => todo!(),
-            dynamic_value::Reader::Capability(cap) => {
-                todo!()
-            }
+            dynamic_value::Reader::Capability(cap) => CapnpType::Capability(CapnpCap {
+                hook: None,
+                schema: cap.get_schema(),
+            }),
             _ => todo!(),
         })
     }
@@ -163,7 +164,13 @@ pub enum CapnpType {
     Struct(CapnpStruct),
     List(Vec<CapnpType>),
     //AnyPointer(Option<_>),
-    Capability(Option<Box<dyn capnp::private::capability::ClientHook>>),
+    Capability(CapnpCap),
+    None,
+}
+#[derive(Clone)]
+pub struct CapnpCap {
+    pub hook: Option<Box<dyn capnp::private::capability::ClientHook>>,
+    pub schema: capnp::schema::CapabilitySchema,
 }
 #[derive(Clone)]
 pub struct CapnpStruct {
@@ -186,20 +193,25 @@ impl Into<CapnpType> for capnp::introspect::TypeVariant {
             capnp::introspect::TypeVariant::Float32 => CapnpType::Float32(None),
             capnp::introspect::TypeVariant::Float64 => CapnpType::Float64(None),
             capnp::introspect::TypeVariant::Text => CapnpType::Text(None),
-            capnp::introspect::TypeVariant::Data => CapnpType::Data(Vec::new()),
+            capnp::introspect::TypeVariant::Data => CapnpType::Data(vec![0]),
             capnp::introspect::TypeVariant::Struct(raw_branded_struct_schema) => {
-                let schema: capnp::schema::StructSchema = raw_branded_struct_schema.into();
                 CapnpType::Struct(CapnpStruct {
-                    fields: Vec::new(),
-                    schema: schema,
+                    fields: vec![ParamResultType {
+                        name: "".to_string(),
+                        capnp_type: CapnpType::None,
+                    }],
+                    schema: raw_branded_struct_schema.into(),
                 })
             }
             capnp::introspect::TypeVariant::AnyPointer => todo!(),
             capnp::introspect::TypeVariant::Capability(raw_capability_schema) => {
-                CapnpType::Capability(None)
+                CapnpType::Capability(CapnpCap {
+                    hook: None,
+                    schema: raw_capability_schema.into(),
+                })
             }
             capnp::introspect::TypeVariant::Enum(raw_enum_schema) => todo!(),
-            capnp::introspect::TypeVariant::List(_) => CapnpType::List(Vec::new()), //TODO list type
+            capnp::introspect::TypeVariant::List(ty) => CapnpType::List(vec![CapnpType::None]), //TODO list type
         }
     }
 }
@@ -297,31 +309,41 @@ impl CapnpType {
                 }
             }
             CapnpType::Data(items) => {
-                format!("{} - {:?} :Data", name, items)
+                let mut fields = Vec::new();
+                let mut iter = items.into_iter();
+                iter.next();
+                for v in iter {
+                    fields.push(v.to_string());
+                }
+                format!("{} - [{}] :Data", name, fields.join(", "))
             }
             CapnpType::Struct(st) => {
                 let mut fields = Vec::new();
-                for v in st.fields {
+                let mut iter = st.fields.into_iter();
+                iter.next();
+                for v in iter {
                     fields.push(v.to_string());
                 }
                 format!("{{{}}} :{}", fields.join(", "), name)
             }
-
             CapnpType::List(l) => {
                 let mut fields = Vec::new();
-                for v in l {
+                let mut iter = l.into_iter();
+                iter.next();
+                for v in iter {
                     fields.push(v.to_string("".to_string()));
                 }
                 format!("{} - {{{}}} :List<>", name, fields.join(", ")) //TODO list type
             }
             CapnpType::Capability(c) => {
                 //TODO specify cap
-                if let Some(c) = c {
+                if let Some(c) = c.hook {
                     format!("{} - Some :Client", name)
                 } else {
                     format!("{} :Client", name)
                 }
             }
+            CapnpType::None => name.to_string(),
         }
     }
 }

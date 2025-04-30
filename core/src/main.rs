@@ -852,7 +852,7 @@ impl ratatui::widgets::Widget for &mut Tui<'_> {
                     inner.push(Cell::from(format!("{} (", desc.function_name.clone())));
                     for param in desc.params.iter_mut() {
                         if let CapnpType::Struct(st) = &mut param.capnp_type {
-                            if st.fields.is_empty() {
+                            if st.fields.len() == 1 {
                                 for field in st.schema.get_fields().unwrap() {
                                     st.fields.push(ParamResultType {
                                         name: field
@@ -875,7 +875,7 @@ impl ratatui::widgets::Widget for &mut Tui<'_> {
                     let mut results = String::new();
                     for result in desc.results.iter_mut() {
                         if let CapnpType::Struct(st) = &mut result.capnp_type {
-                            if st.fields.is_empty() {
+                            if st.fields.len() == 1 {
                                 for field in st.schema.get_fields().unwrap() {
                                     st.fields.push(ParamResultType {
                                         name: field
@@ -1003,13 +1003,13 @@ impl ratatui::widgets::Widget for &mut Tui<'_> {
 }
 fn field_data_helper(fields: &mut Vec<String>, items: &Vec<u8>, name: &str) {
     fields.push(format!("{}: Add new element", name));
-    for item in items {
+    for item in &items[1..] {
         fields.push(item.clone().to_string());
     }
 }
 fn field_struct_helper(fields: &mut Vec<String>, capnp_struct: &CapnpStruct, name: &str) {
     fields.push(format!("{}: Struct init/clone/set", name));
-    for field in &capnp_struct.fields {
+    for field in &capnp_struct.fields[1..] {
         match &field.capnp_type {
             CapnpType::Data(items) => field_data_helper(fields, items, field.name.as_str()),
             CapnpType::Struct(capnp_struct) => {
@@ -1024,7 +1024,7 @@ fn field_struct_helper(fields: &mut Vec<String>, capnp_struct: &CapnpStruct, nam
 }
 fn field_list_helper(fields: &mut Vec<String>, capnp_types: &Vec<CapnpType>, name: &str) {
     fields.push(format!("{}: Add new element", name));
-    for field in capnp_types {
+    for field in &capnp_types[1..] {
         match &field {
             CapnpType::Data(items) => field_data_helper(fields, items, ""),
             CapnpType::Struct(capnp_struct) => field_struct_helper(fields, capnp_struct, ""),
@@ -1249,8 +1249,10 @@ impl Tui<'_> {
                     }
                 }
                 TabPage::Interface => {
+                    let mut new_functions = Vec::new();
                     if let Some(row) = self.keystone.table_state.selected() {
                         let mut desc = &mut self.instance.cap_functions[row as usize];
+
                         if let Some(col) = self.keystone.table_state.selected_column() {
                             if col == 0 {
                                 if desc.type_id == 0 {
@@ -1431,8 +1433,17 @@ impl Tui<'_> {
                                         dynamic_struct::Reader::new(res_struct, res_schema.into());
                                     let fields = dyn_reader.get_schema().get_fields().unwrap();
                                     for (index, field) in fields.iter().enumerate() {
-                                        desc.results[index].capnp_type =
-                                            dyn_reader.get(field).unwrap().try_into().unwrap();
+                                        let r = dyn_reader.get(field).unwrap();
+                                        if let dynamic_value::Reader::Capability(_) = r {
+                                            let mut capnp_type = r.try_into().unwrap();
+                                            if let CapnpType::Capability(cap) = &mut capnp_type {
+                                                cap.hook =
+                                                    Some(dyn_reader.get_clienthook(field).unwrap());
+                                                desc.results[index].capnp_type = capnp_type;
+                                            }
+                                        } else {
+                                            desc.results[index].capnp_type = r.try_into().unwrap();
+                                        }
                                     }
                                 }
                             } else {
@@ -1441,12 +1452,135 @@ impl Tui<'_> {
                                         if col != 0 && col <= desc.params.len() {
                                             self.input = RowCol { row, col };
                                             self.tab = TabPage::Input;
+                                        } else if col < (desc.params.len() + desc.results.len() + 2)
+                                        {
+                                            if let CapnpType::Capability(cap) = desc.results
+                                                [col - desc.params.len() - 2]
+                                                .capnp_type
+                                                .clone()
+                                            {
+                                                if let Some(h) = &cap.hook {
+                                                    new_functions.push(FunctionDescription {
+                                                        module_or_cap: ModuleOrCap::Cap(h.clone()),
+                                                        function_name: desc.results
+                                                            [col - desc.params.len() - 2]
+                                                            .clone()
+                                                            .to_string(),
+                                                        type_id: 0,
+                                                        method_id: 0,
+                                                        params: Vec::new(),
+                                                        params_schema: None,
+                                                        results: Vec::new(),
+                                                        results_schema: None,
+                                                    });
+                                                    let capnp::schema_capnp::node::Which::Interface(
+                                                        interface,
+                                                    ) = cap
+                                                        .schema
+                                                        .clone()
+                                                        .get_proto()
+                                                        .which()
+                                                        .unwrap()
+                                                    else {
+                                                        todo!();
+                                                    };
+                                                    let methods = interface.get_methods().unwrap();
+                                                    for (ordinal, method) in
+                                                        methods.into_iter().enumerate()
+                                                    {
+                                                        let mut params = Vec::new();
+                                                        let mut params_schema: Option<
+                                                            capnp::schema::StructSchema,
+                                                        > = None;
+                                                        let mut results_schema: Option<
+                                                            capnp::schema::StructSchema,
+                                                        > = None;
+                                                        let ModuleOrCap::ModuleId(mod_id) =
+                                                            &desc.module_or_cap
+                                                        else {
+                                                            todo!()
+                                                        };
+                                                        let dyn_schema = self
+                                                            .instance
+                                                            .modules
+                                                            .get(mod_id)
+                                                            .unwrap()
+                                                            .dyn_schema
+                                                            .as_ref()
+                                                            .unwrap();
+                                                        match dyn_schema
+                            .get_type_by_id(method.get_param_struct_type())
+                            .unwrap()
+                        {
+                            capnp::introspect::TypeVariant::Struct(st) => {
+                                let sc: capnp::schema::StructSchema = st.clone().into();
+                                params_schema = Some(sc.clone());
+                                for field in sc.get_fields().unwrap() {
+                                    params.push(ParamResultType {
+                                        name: field
+                                            .get_proto()
+                                            .get_name()
+                                            .unwrap()
+                                            .to_string()
+                                            .unwrap(),
+                                        capnp_type: field.get_type().which().into(),
+                                    });
+                                }
+                            }
+                            _ => (),
+                        };
+                                                        let mut results = Vec::new();
+                                                        match dyn_schema
+                            .get_type_by_id(method.get_result_struct_type())
+                            .unwrap()
+                        {
+                            capnp::introspect::TypeVariant::Struct(st) => {
+                                let sc: capnp::schema::StructSchema = st.clone().into();
+                                results_schema = Some(sc.clone());
+                                for field in sc.get_fields().unwrap() {
+                                    results.push(ParamResultType {
+                                        name: field
+                                            .get_proto()
+                                            .get_name()
+                                            .unwrap()
+                                            .to_string()
+                                            .unwrap(),
+                                        capnp_type: field.get_type().which().into(),
+                                    });
+                                }
+                            }
+                            _ => (),
+                        };
+                                                        new_functions.push(FunctionDescription {
+                                                            module_or_cap: ModuleOrCap::Cap(
+                                                                h.add_ref(),
+                                                            ),
+                                                            function_name: method
+                                                                .get_name()
+                                                                .unwrap()
+                                                                .to_str()?
+                                                                .to_string(),
+                                                            type_id: cap
+                                                                .schema
+                                                                .clone()
+                                                                .get_proto()
+                                                                .get_id(),
+                                                            method_id: ordinal as u16,
+                                                            params: params,
+                                                            params_schema: params_schema,
+                                                            results: results,
+                                                            results_schema: results_schema,
+                                                        });
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
                                 }
                             }
                         }
                     }
+                    self.instance.cap_functions.append(&mut new_functions); //TODO some sort of delete for de initializing structs and deleting caps like this
                 }
                 TabPage::Input => {
                     if let Some(index) = self.list_state.selected() {
@@ -1640,135 +1774,8 @@ impl Tui<'_> {
                             if col != 0 && col <= desc.params.len() {
                                 self.buffer.push(c);
                                 //TODO maybe show an error somewhere
-                                match &desc.params[col - 1].capnp_type {
-                                    CapnpType::Void => {
-                                        todo!();
-                                    }
-                                    CapnpType::Bool(_) => {
-                                        if let Ok(t) = self.buffer.parse::<bool>() {
-                                            desc.params[col - 1].capnp_type =
-                                                CapnpType::Bool(Some(t));
-                                        } else {
-                                            self.buffer = String::new();
-                                            desc.params[col - 1].capnp_type = CapnpType::Bool(None);
-                                        }
-                                    }
-                                    CapnpType::Int8(_) => {
-                                        if let Ok(t) = self.buffer.parse::<i8>() {
-                                            desc.params[col - 1].capnp_type =
-                                                CapnpType::Int8(Some(t));
-                                        } else {
-                                            self.buffer = String::new();
-                                            desc.params[col - 1].capnp_type = CapnpType::Int8(None);
-                                        }
-                                    }
-                                    CapnpType::Int16(_) => {
-                                        if let Ok(t) = self.buffer.parse::<i16>() {
-                                            desc.params[col - 1].capnp_type =
-                                                CapnpType::Int16(Some(t));
-                                        } else {
-                                            self.buffer = String::new();
-                                            desc.params[col - 1].capnp_type =
-                                                CapnpType::Int16(None);
-                                        }
-                                    }
-                                    CapnpType::Int32(_) => {
-                                        if let Ok(t) = self.buffer.parse::<i32>() {
-                                            desc.params[col - 1].capnp_type =
-                                                CapnpType::Int32(Some(t));
-                                        } else {
-                                            self.buffer = String::new();
-                                            desc.params[col - 1].capnp_type =
-                                                CapnpType::Int32(None);
-                                        }
-                                    }
-                                    CapnpType::Int64(_) => {
-                                        if let Ok(t) = self.buffer.parse::<i64>() {
-                                            desc.params[col - 1].capnp_type =
-                                                CapnpType::Int64(Some(t));
-                                        } else {
-                                            self.buffer = String::new();
-                                            desc.params[col - 1].capnp_type =
-                                                CapnpType::Int64(None);
-                                        }
-                                    }
-                                    CapnpType::UInt8(_) => {
-                                        if let Ok(t) = self.buffer.parse::<u8>() {
-                                            desc.params[col - 1].capnp_type =
-                                                CapnpType::UInt8(Some(t));
-                                        } else {
-                                            self.buffer = String::new();
-                                            desc.params[col - 1].capnp_type =
-                                                CapnpType::UInt8(None);
-                                        }
-                                    }
-                                    CapnpType::UInt16(_) => {
-                                        if let Ok(t) = self.buffer.parse::<u16>() {
-                                            desc.params[col - 1].capnp_type =
-                                                CapnpType::UInt16(Some(t));
-                                        } else {
-                                            self.buffer = String::new();
-                                            desc.params[col - 1].capnp_type =
-                                                CapnpType::UInt16(None);
-                                        }
-                                    }
-                                    CapnpType::UInt32(_) => {
-                                        if let Ok(t) = self.buffer.parse::<u32>() {
-                                            desc.params[col - 1].capnp_type =
-                                                CapnpType::UInt32(Some(t));
-                                        } else {
-                                            self.buffer = String::new();
-                                            desc.params[col - 1].capnp_type =
-                                                CapnpType::UInt32(None);
-                                        }
-                                    }
-                                    CapnpType::UInt64(_) => {
-                                        if let Ok(t) = self.buffer.parse::<u64>() {
-                                            desc.params[col - 1].capnp_type =
-                                                CapnpType::UInt64(Some(t));
-                                        } else {
-                                            self.buffer = String::new();
-                                            desc.params[col - 1].capnp_type =
-                                                CapnpType::UInt64(None);
-                                        }
-                                    }
-                                    CapnpType::Float32(_) => {
-                                        if let Ok(t) = self.buffer.parse::<f32>() {
-                                            desc.params[col - 1].capnp_type =
-                                                CapnpType::Float32(Some(t));
-                                        } else {
-                                            self.buffer = String::new();
-                                            desc.params[col - 1].capnp_type =
-                                                CapnpType::Float32(None);
-                                        }
-                                    }
-                                    CapnpType::Float64(_) => {
-                                        if let Ok(t) = self.buffer.parse::<f64>() {
-                                            desc.params[col - 1].capnp_type =
-                                                CapnpType::Float64(Some(t));
-                                        } else {
-                                            self.buffer = String::new();
-                                            desc.params[col - 1].capnp_type =
-                                                CapnpType::Float64(None);
-                                        }
-                                    }
-                                    CapnpType::Text(_) => {
-                                        desc.params[col - 1].capnp_type =
-                                            CapnpType::Text(Some(self.buffer.clone()));
-                                    }
-                                    CapnpType::Data(_) => {
-                                        todo!();
-                                    }
-                                    CapnpType::Struct(hash_map) => {
-                                        todo!();
-                                    }
-                                    CapnpType::List(capnp_types) => {
-                                        todo!();
-                                    }
-                                    CapnpType::Capability(client_hook) => {
-                                        todo!();
-                                    }
-                                }
+                                let capnp_type = &mut desc.params[col - 1].capnp_type;
+                                set_trivial_capnp_type(&mut self.buffer, capnp_type);
                             }
                         }
                     }
@@ -1783,13 +1790,11 @@ impl Tui<'_> {
                             self.buffer.push(c);
                             match &mut param.capnp_type {
                                 CapnpType::Data(items) => {
-                                    if index != 0 {
-                                        if let Ok(t) = self.buffer.parse::<u8>() {
-                                            items[index - 1] = t;
-                                        } else {
-                                            self.buffer = String::new();
-                                            items[index - 1] = 0;
-                                        }
+                                    if let Ok(t) = self.buffer.parse::<u8>() {
+                                        items[index] = t;
+                                    } else {
+                                        self.buffer = String::new();
+                                        items[index] = 0;
                                     }
                                 }
                                 CapnpType::Struct(st) => {
@@ -1823,7 +1828,105 @@ impl Tui<'_> {
         Ok(())
     }
 }
-
+fn find_field_in_struct() {}
+fn find_field_in_list() {}
+fn find_field_in_data() {}
+fn set_trivial_capnp_type(buffer: &mut String, capnp_type: &mut CapnpType) {
+    match capnp_type {
+        CapnpType::Bool(_) => {
+            if let Ok(t) = buffer.parse::<bool>() {
+                *capnp_type = CapnpType::Bool(Some(t));
+            } else {
+                *buffer = String::new();
+                *capnp_type = CapnpType::Bool(None);
+            }
+        }
+        CapnpType::Int8(_) => {
+            if let Ok(t) = buffer.parse::<i8>() {
+                *capnp_type = CapnpType::Int8(Some(t));
+            } else {
+                *buffer = String::new();
+                *capnp_type = CapnpType::Int8(None);
+            }
+        }
+        CapnpType::Int16(_) => {
+            if let Ok(t) = buffer.parse::<i16>() {
+                *capnp_type = CapnpType::Int16(Some(t));
+            } else {
+                *buffer = String::new();
+                *capnp_type = CapnpType::Int16(None);
+            }
+        }
+        CapnpType::Int32(_) => {
+            if let Ok(t) = buffer.parse::<i32>() {
+                *capnp_type = CapnpType::Int32(Some(t));
+            } else {
+                *buffer = String::new();
+                *capnp_type = CapnpType::Int32(None);
+            }
+        }
+        CapnpType::Int64(_) => {
+            if let Ok(t) = buffer.parse::<i64>() {
+                *capnp_type = CapnpType::Int64(Some(t));
+            } else {
+                *buffer = String::new();
+                *capnp_type = CapnpType::Int64(None);
+            }
+        }
+        CapnpType::UInt8(_) => {
+            if let Ok(t) = buffer.parse::<u8>() {
+                *capnp_type = CapnpType::UInt8(Some(t));
+            } else {
+                *buffer = String::new();
+                *capnp_type = CapnpType::UInt8(None);
+            }
+        }
+        CapnpType::UInt16(_) => {
+            if let Ok(t) = buffer.parse::<u16>() {
+                *capnp_type = CapnpType::UInt16(Some(t));
+            } else {
+                *buffer = String::new();
+                *capnp_type = CapnpType::UInt16(None);
+            }
+        }
+        CapnpType::UInt32(_) => {
+            if let Ok(t) = buffer.parse::<u32>() {
+                *capnp_type = CapnpType::UInt32(Some(t));
+            } else {
+                *buffer = String::new();
+                *capnp_type = CapnpType::UInt32(None);
+            }
+        }
+        CapnpType::UInt64(_) => {
+            if let Ok(t) = buffer.parse::<u64>() {
+                *capnp_type = CapnpType::UInt64(Some(t));
+            } else {
+                *buffer = String::new();
+                *capnp_type = CapnpType::UInt64(None);
+            }
+        }
+        CapnpType::Float32(_) => {
+            if let Ok(t) = buffer.parse::<f32>() {
+                *capnp_type = CapnpType::Float32(Some(t));
+            } else {
+                *buffer = String::new();
+                *capnp_type = CapnpType::Float32(None);
+            }
+        }
+        CapnpType::Float64(_) => {
+            if let Ok(t) = buffer.parse::<f64>() {
+                *capnp_type = CapnpType::Float64(Some(t));
+            } else {
+                *buffer = String::new();
+                *capnp_type = CapnpType::Float64(None);
+            }
+        }
+        CapnpType::Text(_) => {
+            *capnp_type = CapnpType::Text(Some(buffer.clone()));
+        }
+        _ => (),
+    }
+}
 async fn event_loop<B: ratatui::prelude::Backend>(
     instance: &mut Keystone,
     mut terminal: ratatui::Terminal<B>,

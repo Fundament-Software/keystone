@@ -27,6 +27,12 @@ impl root::Server for HelloWorldImpl {
         results.get().set(i as u16);
         return Ok(());
     }
+    async fn int(self: Rc<Self>) -> capnp::Result<Self> {
+        results.get().set(capnp_rpc::new_client(HelloWorldImpl {
+            greeting: "".to_string(),
+        }));
+        return Ok(());
+    }
 }
 
 impl keystone::Module<hello_world_capnp::config::Owned> for HelloWorldImpl {

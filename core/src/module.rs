@@ -42,7 +42,11 @@ impl std::fmt::Display for ModuleState {
 
 pub enum ModuleOrCap {
     ModuleId(u64),
-    Cap(Box<dyn capnp::private::capability::ClientHook>),
+    Cap(CapnpHook),
+}
+pub struct CapnpHook {
+    pub cap: Box<dyn capnp::private::capability::ClientHook>,
+    pub module_id: u64, //For getting schema
 }
 #[derive(Clone)]
 pub struct ParamResultType {
@@ -66,9 +70,19 @@ impl<'a> TryInto<CapnpType> for dynamic_value::Reader<'a> {
             dynamic_value::Reader::UInt64(u) => CapnpType::UInt64(Some(u)),
             dynamic_value::Reader::Float32(f) => CapnpType::Float32(Some(f)),
             dynamic_value::Reader::Float64(f) => CapnpType::Float64(Some(f)),
-            //dynamic_value::Reader::Enum(e) => {
-            //    e.get_enumerant()
-            //},
+            dynamic_value::Reader::Enum(e) => CapnpType::Enum(CapnpEnum {
+                value: Some(e.get_value()),
+                schema: e.get_enumerant().unwrap().unwrap().get_containing_enum(),
+                enumerant_name: Some(
+                    e.get_enumerant()
+                        .unwrap()
+                        .unwrap()
+                        .get_proto()
+                        .get_name()
+                        .unwrap()
+                        .to_string()?,
+                ),
+            }),
             dynamic_value::Reader::Text(r) => CapnpType::Text(Some(r.to_string().unwrap())),
             dynamic_value::Reader::Data(d) => CapnpType::Data(d.to_vec()),
             dynamic_value::Reader::Struct(r) => struct_to_capnp_type(r)?,
@@ -86,7 +100,6 @@ fn struct_to_capnp_type(r: dynamic_struct::Reader<'_>) -> Result<CapnpType, core
     let schema = r.get_schema();
     let mut fields = Vec::new();
     for field in schema.get_fields().unwrap() {
-        //TODO recursive structs
         fields.push(ParamResultType {
             name: field.get_proto().get_name().unwrap().to_string().unwrap(),
             capnp_type: match r.get(field).unwrap() {
@@ -102,13 +115,28 @@ fn struct_to_capnp_type(r: dynamic_struct::Reader<'_>) -> Result<CapnpType, core
                 dynamic_value::Reader::UInt64(u) => CapnpType::UInt64(Some(u)),
                 dynamic_value::Reader::Float32(f) => CapnpType::Float32(Some(f)),
                 dynamic_value::Reader::Float64(f) => CapnpType::Float64(Some(f)),
-                dynamic_value::Reader::Enum(_) => todo!(),
+                dynamic_value::Reader::Enum(e) => CapnpType::Enum(CapnpEnum {
+                    value: Some(e.get_value()),
+                    schema: e.get_enumerant().unwrap().unwrap().get_containing_enum(),
+                    enumerant_name: Some(
+                        e.get_enumerant()
+                            .unwrap()
+                            .unwrap()
+                            .get_proto()
+                            .get_name()
+                            .unwrap()
+                            .to_string()?,
+                    ),
+                }),
                 dynamic_value::Reader::Text(reader) => CapnpType::Text(Some(reader.to_string()?)),
                 dynamic_value::Reader::Data(items) => CapnpType::Data(items.to_vec()),
                 dynamic_value::Reader::Struct(reader) => struct_to_capnp_type(reader)?,
                 dynamic_value::Reader::List(reader) => list_to_capnp_type(reader)?,
                 dynamic_value::Reader::AnyPointer(reader) => todo!(),
-                dynamic_value::Reader::Capability(capability) => todo!(),
+                dynamic_value::Reader::Capability(cap) => CapnpType::Capability(CapnpCap {
+                    hook: None, //TODO set this while getting struct
+                    schema: cap.get_schema(),
+                }),
             },
         });
     }
@@ -133,13 +161,28 @@ fn list_to_capnp_type(r: dynamic_list::Reader<'_>) -> Result<CapnpType, core::st
             dynamic_value::Reader::UInt64(u) => CapnpType::UInt64(Some(u)),
             dynamic_value::Reader::Float32(f) => CapnpType::Float32(Some(f)),
             dynamic_value::Reader::Float64(f) => CapnpType::Float64(Some(f)),
-            dynamic_value::Reader::Enum(_) => todo!(),
+            dynamic_value::Reader::Enum(e) => CapnpType::Enum(CapnpEnum {
+                value: Some(e.get_value()),
+                schema: e.get_enumerant().unwrap().unwrap().get_containing_enum(),
+                enumerant_name: Some(
+                    e.get_enumerant()
+                        .unwrap()
+                        .unwrap()
+                        .get_proto()
+                        .get_name()
+                        .unwrap()
+                        .to_string()?,
+                ),
+            }),
             dynamic_value::Reader::Text(reader) => CapnpType::Text(Some(reader.to_string()?)),
             dynamic_value::Reader::Data(items) => CapnpType::Data(items.to_vec()),
             dynamic_value::Reader::Struct(reader) => struct_to_capnp_type(reader)?,
             dynamic_value::Reader::List(reader) => list_to_capnp_type(reader)?,
             dynamic_value::Reader::AnyPointer(reader) => todo!(),
-            dynamic_value::Reader::Capability(capability) => todo!(),
+            dynamic_value::Reader::Capability(cap) => CapnpType::Capability(CapnpCap {
+                hook: None, //TODO set this while getting struct
+                schema: cap.get_schema(),
+            }),
         });
     }
     Ok(CapnpType::List(items))
@@ -158,7 +201,7 @@ pub enum CapnpType {
     UInt64(Option<u64>),
     Float32(Option<f32>),
     Float64(Option<f64>),
-    //Enum(Option<_>),
+    Enum(CapnpEnum),
     Text(Option<String>),
     Data(Vec<u8>),
     Struct(CapnpStruct),
@@ -173,9 +216,27 @@ pub struct CapnpCap {
     pub schema: capnp::schema::CapabilitySchema,
 }
 #[derive(Clone)]
+pub struct CapnpEnum {
+    pub value: Option<u16>,
+    pub schema: capnp::schema::EnumSchema,
+    pub enumerant_name: Option<String>,
+}
+#[derive(Clone)]
 pub struct CapnpStruct {
     pub fields: Vec<ParamResultType>,
     pub schema: capnp::schema::StructSchema,
+}
+impl CapnpStruct {
+    pub fn init(&mut self) {
+        if self.fields.len() == 1 {
+            for field in self.schema.get_fields().unwrap() {
+                self.fields.push(ParamResultType {
+                    name: field.get_proto().get_name().unwrap().to_string().unwrap(),
+                    capnp_type: field.get_type().which().into(),
+                });
+            }
+        }
+    }
 }
 impl Into<CapnpType> for capnp::introspect::TypeVariant {
     fn into(self) -> CapnpType {
@@ -210,8 +271,12 @@ impl Into<CapnpType> for capnp::introspect::TypeVariant {
                     schema: raw_capability_schema.into(),
                 })
             }
-            capnp::introspect::TypeVariant::Enum(raw_enum_schema) => todo!(),
-            capnp::introspect::TypeVariant::List(ty) => CapnpType::List(vec![CapnpType::None]), //TODO list type
+            capnp::introspect::TypeVariant::Enum(raw_enum_schema) => CapnpType::Enum(CapnpEnum {
+                value: None,
+                schema: raw_enum_schema.into(),
+                enumerant_name: None,
+            }),
+            capnp::introspect::TypeVariant::List(ty) => CapnpType::List(vec![ty.which().into()]),
         }
     }
 }
@@ -301,6 +366,13 @@ impl CapnpType {
                     format!("{} :Float64", name)
                 }
             }
+            CapnpType::Enum(e) => {
+                if let Some(e) = e.enumerant_name {
+                    format!("{} - {e} :Enum", name)
+                } else {
+                    format!("{} :Enum", name)
+                }
+            }
             CapnpType::Text(t) => {
                 if let Some(t) = t {
                     format!("{} - {t} :Text", name)
@@ -353,9 +425,9 @@ pub struct FunctionDescription {
     pub type_id: u64,
     pub method_id: u16,
     pub params: Vec<ParamResultType>,
-    pub params_schema: Option<capnp::schema::StructSchema>,
+    pub params_schema: u64,
     pub results: Vec<ParamResultType>,
-    pub results_schema: Option<capnp::schema::StructSchema>,
+    pub results_schema: u64,
 }
 //TODO potentially doesn't work for multiple of the same module
 impl std::hash::Hash for FunctionDescription {

@@ -16,9 +16,9 @@ interface Root {
         }
     }
     struct Nested {
-        req @0 :HelloRequest;
-        l @1 :List(HelloReply);
-        d @2 :Data;
+        d @0 :Data;
+        req @1 :HelloRequest;
+        l @2 :List(HelloReply);
     }
 
     sayHello @0 (request :HelloRequest) -> (reply: HelloReply);
@@ -28,6 +28,7 @@ interface Root {
     nest @4 (n :Nested) -> (n :Nested);
     slice @5 (s :Data) -> ();
     int @6 () -> (test :Root);
+    str @7 (request :HelloRequest) -> (reply :Text);
 }
 
 # All modules must have a struct named "Config" that keystone can look up when compiling

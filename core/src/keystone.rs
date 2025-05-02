@@ -733,7 +733,6 @@ impl Keystone {
                 nesting_limit: 128,
             },
         )?)?;
-        //TODO other types
         //TODO extends
         if self.cap_functions.is_empty() {
             let schema: capnp::schema::CapabilitySchema =
@@ -751,21 +750,18 @@ impl Keystone {
                         type_id: 0,
                         method_id: 0,
                         params: Vec::new(),
-                        params_schema: None,
+                        params_schema: 0,
                         results: Vec::new(),
-                        results_schema: None,
+                        results_schema: 0,
                     });
                     for (ordinal, method) in methods.into_iter().enumerate() {
                         let mut params = Vec::new();
-                        let mut params_schema: Option<capnp::schema::StructSchema> = None; //TODO invert the whole thing with let else so this isn't needed
-                        let mut results_schema: Option<capnp::schema::StructSchema> = None;
                         match dyn_schema
                             .get_type_by_id(method.get_param_struct_type())
                             .unwrap()
                         {
                             capnp::introspect::TypeVariant::Struct(st) => {
                                 let sc: capnp::schema::StructSchema = st.clone().into();
-                                params_schema = Some(sc.clone());
                                 for field in sc.get_fields().unwrap() {
                                     params.push(ParamResultType {
                                         name: field
@@ -787,7 +783,6 @@ impl Keystone {
                         {
                             capnp::introspect::TypeVariant::Struct(st) => {
                                 let sc: capnp::schema::StructSchema = st.clone().into();
-                                results_schema = Some(sc.clone());
                                 for field in sc.get_fields().unwrap() {
                                     results.push(ParamResultType {
                                         name: field
@@ -808,9 +803,9 @@ impl Keystone {
                             type_id: root_id,
                             method_id: ordinal as u16,
                             params: params,
-                            params_schema: params_schema,
+                            params_schema: method.get_param_struct_type(),
                             results: results,
-                            results_schema: results_schema,
+                            results_schema: method.get_result_struct_type(),
                         });
                     }
                 }

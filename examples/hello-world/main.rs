@@ -33,6 +33,10 @@ impl root::Server for HelloWorldImpl {
         }));
         return Ok(());
     }
+    async fn str(self: Rc<Self>, request: Reader) -> capnp::Result<Self> {
+        results.get().set(request.get_name()?.to_str()?);
+        return Ok(());
+    }
 }
 
 impl keystone::Module<hello_world_capnp::config::Owned> for HelloWorldImpl {

@@ -1824,7 +1824,7 @@ fn set_dyn_list(
     l: Vec<CapnpType>,
 ) -> Result<()> {
     //dyn_list_builder.init(index, size)
-    //TODO not sure how to grow a dynamic list
+    //TODO not sure how to grow/initialize with size a dynamic list
     return Ok(());
 }
 fn find_field_in_struct(

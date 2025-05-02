@@ -1310,6 +1310,7 @@ impl Tui<'_> {
                                             } else {
                                                 desc.results[index].capnp_type =
                                                     r.try_into().unwrap();
+                                                    //TODO for some reason reply from hello world doesn't show up, probably something to do with dyn reader > struct
                                             }
                                         }
                                     }

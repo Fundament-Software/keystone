@@ -39,11 +39,12 @@ impl std::fmt::Display for ModuleState {
         }
     }
 }
-
+#[derive(Clone)]
 pub enum ModuleOrCap {
     ModuleId(u64),
     Cap(CapnpHook),
 }
+#[derive(Clone)]
 pub struct CapnpHook {
     pub cap: Box<dyn capnp::private::capability::ClientHook>,
     pub module_id: u64, //For getting schema
@@ -281,108 +282,47 @@ impl Into<CapnpType> for capnp::introspect::TypeVariant {
     }
 }
 impl ParamResultType {
-    pub fn to_string(self) -> String {
-        self.capnp_type.to_string(self.name)
+    pub fn to_string(&self) -> String {
+        self.capnp_type.to_string(self.name.as_str())
     }
 }
+macro_rules! format_capnp_type {
+    ($name:expr, $value:expr, $type_name:literal) => {{
+        if let Some(val) = $value {
+            format!("{} - {} :{}", $name, val, $type_name)
+        } else {
+            format!("{} :{}", $name, $type_name)
+        }
+    }};
+}
+
 impl CapnpType {
-    pub fn to_string(self, name: String) -> String {
+    pub fn to_string(&self, name: &str) -> String {
         match self {
             CapnpType::Void => format!("{} :Void,", name),
-            CapnpType::Bool(b) => {
-                if let Some(b) = b {
-                    format!("{} - {b} :Bool", name)
+            CapnpType::Bool(b) => format_capnp_type!(name, b, "Bool"),
+            CapnpType::Int8(i) => format_capnp_type!(name, i, "Int8"),
+            CapnpType::Int16(i) => format_capnp_type!(name, i, "Int16"),
+            CapnpType::Int32(i) => format_capnp_type!(name, i, "Int32"),
+            CapnpType::Int64(i) => format_capnp_type!(name, i, "Int64"),
+            CapnpType::UInt8(u) => format_capnp_type!(name, u, "UInt8"),
+            CapnpType::UInt16(u) => format_capnp_type!(name, u, "UInt16"),
+            CapnpType::UInt32(u) => format_capnp_type!(name, u, "UInt32"),
+            CapnpType::UInt64(u) => format_capnp_type!(name, u, "UInt64"),
+            CapnpType::Float32(f) => format_capnp_type!(name, f, "Float32"),
+            CapnpType::Float64(f) => format_capnp_type!(name, f, "Float64"),
+            CapnpType::Enum(e) => format_capnp_type!(name, e.enumerant_name.as_ref(), "Enum"),
+            CapnpType::Text(t) => format_capnp_type!(name, t, "Text"),
+            CapnpType::AnyPointer(capnp_type) => {
+                if let Some(c) = capnp_type {
+                    format!("{} - {} :AnyPointer", name, c.to_string(""))
                 } else {
-                    format!("{} :Bool", name)
-                }
-            }
-            CapnpType::Int8(i) => {
-                if let Some(i) = i {
-                    format!("{} - {i} :Int8", name)
-                } else {
-                    format!("{} :Int8", name)
-                }
-            }
-            CapnpType::Int16(i) => {
-                if let Some(i) = i {
-                    format!("{} - {i} :Int16", name)
-                } else {
-                    format!("{} :Int16", name)
-                }
-            }
-            CapnpType::Int32(i) => {
-                if let Some(i) = i {
-                    format!("{} - {i} :Int32", name)
-                } else {
-                    format!("{} :Int32", name)
-                }
-            }
-            CapnpType::Int64(i) => {
-                if let Some(i) = i {
-                    format!("{} - {i} :Int32", name)
-                } else {
-                    format!("{} :Int32", name)
-                }
-            }
-            CapnpType::UInt8(u) => {
-                if let Some(u) = u {
-                    format!("{} - {u} :UInt8", name)
-                } else {
-                    format!("{} :UInt8", name)
-                }
-            }
-            CapnpType::UInt16(u) => {
-                if let Some(u) = u {
-                    format!("{} - {u} :UInt16", name)
-                } else {
-                    format!("{} :UInt16", name)
-                }
-            }
-            CapnpType::UInt32(u) => {
-                if let Some(u) = u {
-                    format!("{} - {u} :UInt32", name)
-                } else {
-                    format!("{} :UInt32", name)
-                }
-            }
-            CapnpType::UInt64(u) => {
-                if let Some(u) = u {
-                    format!("{} - {u} :UInt64", name)
-                } else {
-                    format!("{} :UInt64", name)
-                }
-            }
-            CapnpType::Float32(f) => {
-                if let Some(f) = f {
-                    format!("{} - {f} :Float32", name)
-                } else {
-                    format!("{} :Float32", name)
-                }
-            }
-            CapnpType::Float64(f) => {
-                if let Some(f) = f {
-                    format!("{} - {f} :Float64", name)
-                } else {
-                    format!("{} :Float64", name)
-                }
-            }
-            CapnpType::Enum(e) => {
-                if let Some(e) = e.enumerant_name {
-                    format!("{} - {e} :Enum", name)
-                } else {
-                    format!("{} :Enum", name)
-                }
-            }
-            CapnpType::Text(t) => {
-                if let Some(t) = t {
-                    format!("{} - {t} :Text", name)
-                } else {
-                    format!("{} :Text", name)
+                    format!("{} :AnyPointer", name)
                 }
             }
             CapnpType::Data(items) => {
                 let mut fields = Vec::new();
-                let mut iter = items.into_iter();
+                let mut iter = items.iter();
                 iter.next();
                 for v in iter {
                     fields.push(v.to_string());
@@ -391,7 +331,7 @@ impl CapnpType {
             }
             CapnpType::Struct(st) => {
                 let mut fields = Vec::new();
-                let mut iter = st.fields.into_iter();
+                let mut iter = st.fields.iter();
                 iter.next();
                 for v in iter {
                     fields.push(v.to_string());
@@ -400,29 +340,22 @@ impl CapnpType {
             }
             CapnpType::List(l) => {
                 let mut fields = Vec::new();
-                let mut iter = l.into_iter();
+                let mut iter = l.iter();
                 iter.next();
                 for v in iter {
-                    fields.push(v.to_string("".to_string()));
+                    fields.push(v.to_string(""));
                 }
                 format!("{} - {{{}}} :List<>", name, fields.join(", ")) //TODO list type
             }
             CapnpType::Capability(c) => {
                 //TODO specify cap
-                if let Some(c) = c.hook {
+                if let Some(c) = &c.hook {
                     format!("{} - Some :Client", name)
                 } else {
                     format!("{} :Client", name)
                 }
             }
             CapnpType::None => name.to_string(),
-            CapnpType::AnyPointer(capnp_type) => {
-                if let Some(c) = capnp_type {
-                    format!("{} - {} :AnyPointer", name, c.to_string("".to_string()))
-                } else {
-                    format!("{} :AnyPointer", name)
-                }
-            }
         }
     }
 }

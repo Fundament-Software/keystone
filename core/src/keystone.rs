@@ -733,7 +733,6 @@ impl Keystone {
                 nesting_limit: 128,
             },
         )?)?;
-        //TODO extends
         let schema: capnp::schema::CapabilitySchema =
             match dyn_schema.get_type_by_scope(&["Root"], None).unwrap() {
                 capnp::introspect::TypeVariant::Capability(s) => s.to_owned().into(),
@@ -742,7 +741,6 @@ impl Keystone {
         let root_id = schema.get_proto().get_id();
         match schema.get_proto().which().unwrap() {
             capnp::schema_capnp::node::Which::Interface(interface) => {
-                let methods = interface.get_methods().unwrap();
                 self.cap_functions.push(FunctionDescription {
                     module_or_cap: ModuleOrCap::ModuleId(id),
                     function_name: module.name.clone(),
@@ -753,60 +751,14 @@ impl Keystone {
                     results: Vec::new(),
                     results_schema: 0,
                 });
-                for (ordinal, method) in methods.into_iter().enumerate() {
-                    let mut params = Vec::new();
-                    match dyn_schema
-                        .get_type_by_id(method.get_param_struct_type())
-                        .unwrap()
-                    {
-                        capnp::introspect::TypeVariant::Struct(st) => {
-                            let sc: capnp::schema::StructSchema = st.clone().into();
-                            for field in sc.get_fields().unwrap() {
-                                params.push(ParamResultType {
-                                    name: field
-                                        .get_proto()
-                                        .get_name()
-                                        .unwrap()
-                                        .to_string()
-                                        .unwrap(),
-                                    capnp_type: field.get_type().which().into(),
-                                });
-                            }
-                        }
-                        _ => (),
-                    };
-                    let mut results = Vec::new();
-                    match dyn_schema
-                        .get_type_by_id(method.get_result_struct_type())
-                        .unwrap()
-                    {
-                        capnp::introspect::TypeVariant::Struct(st) => {
-                            let sc: capnp::schema::StructSchema = st.clone().into();
-                            for field in sc.get_fields().unwrap() {
-                                results.push(ParamResultType {
-                                    name: field
-                                        .get_proto()
-                                        .get_name()
-                                        .unwrap()
-                                        .to_string()
-                                        .unwrap(),
-                                    capnp_type: field.get_type().which().into(),
-                                });
-                            }
-                        }
-                        _ => (),
-                    };
-                    self.cap_functions.push(FunctionDescription {
-                        module_or_cap: ModuleOrCap::ModuleId(id),
-                        function_name: method.get_name().unwrap().to_str()?.to_string(),
-                        type_id: root_id,
-                        method_id: ordinal as u16,
-                        params: params,
-                        params_schema: method.get_param_struct_type(),
-                        results: results,
-                        results_schema: method.get_result_struct_type(),
-                    });
-                }
+                fill_function_descriptions(
+                    &mut self.cap_functions,
+                    &dyn_schema,
+                    interface,
+                    root_id,
+                    ModuleOrCap::ModuleId(id),
+                    &mut 0,
+                )?;
             }
             _ => todo!(),
         }
@@ -952,6 +904,83 @@ impl Keystone {
 
         Ok(capnp::capability::FromClientHook::new(pipe))
     }
+}
+
+pub fn fill_function_descriptions(
+    cap_functions: &mut Vec<FunctionDescription>,
+    dyn_schema: &capnp::schema::DynamicSchema,
+    interface: capnp::schema_capnp::node::interface::Reader,
+    root_id: u64,
+    module_or_cap: ModuleOrCap,
+    method_count: &mut u16,
+) -> Result<()> {
+    let methods = interface.get_methods().unwrap();
+    for method in methods.into_iter() {
+        let mut params = Vec::new();
+        match dyn_schema
+            .get_type_by_id(method.get_param_struct_type())
+            .unwrap()
+        {
+            capnp::introspect::TypeVariant::Struct(st) => {
+                let sc: capnp::schema::StructSchema = st.clone().into();
+                for field in sc.get_fields().unwrap() {
+                    params.push(ParamResultType {
+                        name: field.get_proto().get_name().unwrap().to_string().unwrap(),
+                        capnp_type: field.get_type().which().into(),
+                    });
+                }
+            }
+            _ => (),
+        };
+        let mut results = Vec::new();
+        match dyn_schema
+            .get_type_by_id(method.get_result_struct_type())
+            .unwrap()
+        {
+            capnp::introspect::TypeVariant::Struct(st) => {
+                let sc: capnp::schema::StructSchema = st.clone().into();
+                for field in sc.get_fields().unwrap() {
+                    results.push(ParamResultType {
+                        name: field.get_proto().get_name().unwrap().to_string().unwrap(),
+                        capnp_type: field.get_type().which().into(),
+                    });
+                }
+            }
+            _ => (),
+        };
+        cap_functions.push(FunctionDescription {
+            module_or_cap: module_or_cap.clone(),
+            function_name: method.get_name().unwrap().to_str()?.to_string(),
+            type_id: root_id,
+            method_id: *method_count,
+            params: params,
+            params_schema: method.get_param_struct_type(),
+            results: results,
+            results_schema: method.get_result_struct_type(),
+        });
+        *method_count += 1;
+    }
+    for s in interface.get_superclasses().unwrap().iter() {
+        let schema: capnp::schema::CapabilitySchema =
+            match dyn_schema.get_type_by_id(s.get_id()).unwrap() {
+                capnp::introspect::TypeVariant::Capability(s) => s.to_owned().into(),
+                _ => todo!(),
+            };
+        match schema.get_proto().which().unwrap() {
+            capnp::schema_capnp::node::Which::Interface(int) => {
+                fill_function_descriptions(
+                    cap_functions,
+                    dyn_schema,
+                    int,
+                    root_id,
+                    module_or_cap.clone(),
+                    method_count,
+                )?;
+            }
+            _ => todo!(),
+        }
+    }
+    Ok(())
 }
 
 /* sadly we can't actually do this, because if an error happens the rpc_system won't be drained.

@@ -85,21 +85,25 @@ impl<'a> TryInto<CapnpType> for dynamic_value::Reader<'a> {
                 ),
             }),
             dynamic_value::Reader::Text(r) => CapnpType::Text(Some(r.to_string().unwrap())),
-            dynamic_value::Reader::Data(d) => CapnpType::Data(d.to_vec()),
+            dynamic_value::Reader::Data(d) => {
+                let mut data = d.to_vec();
+                data.insert(0, 0);
+                CapnpType::Data(data)
+            },
             dynamic_value::Reader::Struct(r) => struct_to_capnp_type(r)?,
             dynamic_value::Reader::List(r) => list_to_capnp_type(r)?,
-            //dynamic_value::Reader::AnyPointer(_) => todo!(),
+            dynamic_value::Reader::AnyPointer(_) => CapnpType::AnyPointer(None), //TODO
             dynamic_value::Reader::Capability(cap) => CapnpType::Capability(CapnpCap {
                 hook: None,
                 schema: cap.get_schema(),
             }),
-            _ => todo!(),
         })
     }
 }
 fn struct_to_capnp_type(r: dynamic_struct::Reader<'_>) -> Result<CapnpType, core::str::Utf8Error> {
     let schema = r.get_schema();
     let mut fields = Vec::new();
+    fields.push(ParamResultType { name: "".to_string(), capnp_type: CapnpType::None });
     for field in schema.get_fields().unwrap() {
         fields.push(ParamResultType {
             name: field.get_proto().get_name().unwrap().to_string().unwrap(),
@@ -148,6 +152,7 @@ fn struct_to_capnp_type(r: dynamic_struct::Reader<'_>) -> Result<CapnpType, core
 }
 fn list_to_capnp_type(r: dynamic_list::Reader<'_>) -> Result<CapnpType, core::str::Utf8Error> {
     let mut items = Vec::new();
+    items.push(CapnpType::None);
     for item in r.iter() {
         items.push(match item.unwrap() {
             dynamic_value::Reader::Void => CapnpType::Void,

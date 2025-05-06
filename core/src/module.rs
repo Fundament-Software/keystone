@@ -206,7 +206,7 @@ pub enum CapnpType {
     Data(Vec<u8>),
     Struct(CapnpStruct),
     List(Vec<CapnpType>),
-    //AnyPointer(Option<_>),
+    AnyPointer(Option<Box<CapnpType>>), //TODO requires some ui elemnts to make sense
     Capability(CapnpCap),
     None,
 }
@@ -264,7 +264,7 @@ impl Into<CapnpType> for capnp::introspect::TypeVariant {
                     schema: raw_branded_struct_schema.into(),
                 })
             }
-            capnp::introspect::TypeVariant::AnyPointer => todo!(),
+            capnp::introspect::TypeVariant::AnyPointer => CapnpType::AnyPointer(None),
             capnp::introspect::TypeVariant::Capability(raw_capability_schema) => {
                 CapnpType::Capability(CapnpCap {
                     hook: None,
@@ -416,6 +416,13 @@ impl CapnpType {
                 }
             }
             CapnpType::None => name.to_string(),
+            CapnpType::AnyPointer(capnp_type) => {
+                if let Some(c) = capnp_type {
+                    format!("{} - {} :AnyPointer", name, c.to_string("".to_string()))
+                } else {
+                    format!("{} :AnyPointer", name)
+                }
+            }
         }
     }
 }

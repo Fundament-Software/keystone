@@ -921,7 +921,6 @@ impl ratatui::widgets::Widget for &mut Tui<'_> {
                 );
             }
             TabPage::Input => {
-                let mut desc = &mut self.instance.cap_functions[self.input.row];
                 let title = Line::from(" Input ".bold());
                 let instructions = Line::from(vec![
                     " Quit ".into(),
@@ -1102,6 +1101,8 @@ impl Tui<'_> {
                                     0 => {
                                         if let Some(x) = self.instance.modules.get_mut(&m.id) {
                                             x.stop(self.instance.timeout).await?;
+                                            self.instance.cap_functions = Vec::new();
+                                            self.input = RowCol { row: 0, col: 0 };
                                         }
                                     }
                                     1 => {
@@ -1115,6 +1116,8 @@ impl Tui<'_> {
                                         let log_state = m.trace.as_str().to_ascii_lowercase();
                                         if let Some(x) = self.instance.modules.get_mut(&id) {
                                             x.stop(self.instance.timeout).await?;
+                                            self.instance.cap_functions = Vec::new();
+                                            self.input = RowCol { row: 0, col: 0 };
                                         }
                                         let s = Self::find_module_config(
                                             &self.config,
@@ -1154,6 +1157,8 @@ impl Tui<'_> {
                                     0 => {
                                         if let Some(x) = self.instance.modules.get_mut(&m.id) {
                                             x.stop(self.instance.timeout).await?;
+                                            self.instance.cap_functions = Vec::new();
+                                            self.input = RowCol { row: 0, col: 0 };
                                         }
                                     }
                                     1 => {
@@ -1167,6 +1172,8 @@ impl Tui<'_> {
                                         let log_state = m.trace.as_str().to_ascii_lowercase();
                                         if let Some(x) = self.instance.modules.get_mut(&id) {
                                             x.stop(self.instance.timeout).await?;
+                                            self.instance.cap_functions = Vec::new();
+                                            self.input = RowCol { row: 0, col: 0 };
                                         }
                                         let s = Self::find_module_config(
                                             &self.config,
@@ -1206,6 +1213,8 @@ impl Tui<'_> {
                                     0 => {
                                         if let Some(x) = self.instance.modules.get_mut(&m.id) {
                                             x.kill().await;
+                                            self.instance.cap_functions = Vec::new();
+                                            self.input = RowCol { row: 0, col: 0 };
                                         }
                                     }
                                     1 => m.trace = m.rotate_trace(),
@@ -1310,7 +1319,7 @@ impl Tui<'_> {
                                             } else {
                                                 desc.results[index].capnp_type =
                                                     r.try_into().unwrap();
-                                                    //TODO for some reason reply from hello world doesn't show up, probably something to do with dyn reader > struct
+                                                //TODO for some reason reply from hello world doesn't show up, probably something to do with dyn reader > struct
                                             }
                                         }
                                     }
@@ -1816,6 +1825,11 @@ fn set_dyn_field(
             }
         }
         CapnpType::None => (),
+        CapnpType::AnyPointer(capnp_type) => {
+            if let Some(v) = capnp_type {
+                set_dyn_field(dyn_param_builder, *v, name)?;
+            }
+        }
     }
     Ok(())
 }

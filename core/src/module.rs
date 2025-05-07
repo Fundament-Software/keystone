@@ -89,7 +89,7 @@ impl<'a> TryInto<CapnpType> for dynamic_value::Reader<'a> {
                 let mut data = d.to_vec();
                 data.insert(0, 0);
                 CapnpType::Data(data)
-            },
+            }
             dynamic_value::Reader::Struct(r) => struct_to_capnp_type(r)?,
             dynamic_value::Reader::List(r) => list_to_capnp_type(r)?,
             dynamic_value::Reader::AnyPointer(_) => CapnpType::AnyPointer(None), //TODO
@@ -103,7 +103,10 @@ impl<'a> TryInto<CapnpType> for dynamic_value::Reader<'a> {
 fn struct_to_capnp_type(r: dynamic_struct::Reader<'_>) -> Result<CapnpType, core::str::Utf8Error> {
     let schema = r.get_schema();
     let mut fields = Vec::new();
-    fields.push(ParamResultType { name: "".to_string(), capnp_type: CapnpType::None });
+    fields.push(ParamResultType {
+        name: "".to_string(),
+        capnp_type: CapnpType::None,
+    });
     for field in schema.get_fields().unwrap() {
         fields.push(ParamResultType {
             name: field.get_proto().get_name().unwrap().to_string().unwrap(),

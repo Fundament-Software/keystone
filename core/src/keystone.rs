@@ -13,16 +13,16 @@ use capnp::capability::{FromClientHook, RemotePromise};
 use capnp::private::capability::ClientHook;
 use capnp::traits::SetPointerBuilder;
 use capnp_rpc::twoparty::VatNetwork;
-use capnp_rpc::{rpc_twoparty_capnp, CapabilityServerSet, RpcSystem};
+use capnp_rpc::{CapabilityServerSet, RpcSystem, rpc_twoparty_capnp};
 use eyre::Result;
 use eyre::WrapErr;
-use futures_util::stream::FuturesUnordered;
 use futures_util::FutureExt;
+use futures_util::stream::FuturesUnordered;
 use std::future::Future;
 use std::io::Write;
 use std::pin::Pin;
 use std::time::Duration;
-use std::{cell::RefCell, collections::HashMap, path::Path, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, collections::HashSet, path::Path, rc::Rc};
 use tokio::io::AsyncReadExt;
 use tokio::task::JoinHandle;
 
@@ -92,7 +92,9 @@ pub enum Error {
     MissingType(String, u64),
     #[error("Couldn't find {0} in {1}!")]
     MissingMethod(String, String),
-    #[error("Method {0} did not specify a parameter list! If a method takes no parameters, you must provide an empty parameter list.")]
+    #[error(
+        "Method {0} did not specify a parameter list! If a method takes no parameters, you must provide an empty parameter list."
+    )]
     MissingMethodParameters(String),
     #[error("TOML value {0} was not a {1}!")]
     InvalidTypeTOML(String, String),
@@ -142,6 +144,7 @@ where
 
 pub type ModuleJoinSet = Rc<RefCell<tokio::task::JoinSet<Result<()>>>>;
 pub type RpcSystemSet = FuturesUnordered<Pin<Box<dyn Future<Output = Result<()>>>>>;
+
 pub struct Keystone {
     db: Rc<SqliteDatabase>,
     scheduler: Rc<Scheduler>,
@@ -149,6 +152,7 @@ pub struct Keystone {
     pub log: Rc<RefCell<CapLog<MAX_BUFFER_SIZE>>>, // TODO: Remove RefCell once CapLog is made thread-safe.
     file_server: Rc<RefCell<AmbientAuthorityImpl>>,
     pub modules: HashMap<u64, ModuleInstance>,
+    pub cap_functions: Vec<FunctionDescription>,
     pub namemap: HashMap<String, u64>,
     pub cells: Rc<RefCell<CellCapSet>>,
     pub timeout: Duration,
@@ -325,6 +329,7 @@ impl Keystone {
                             state: ModuleState::NotStarted,
                             queue: capnp_rpc::queued::Client::new(None),
                             pause: empty_send.clone(),
+                            dyn_schema: None,
                         },
                     )
                 })
@@ -396,6 +401,7 @@ impl Keystone {
                 process_set: Rc::new(RefCell::new(crate::posix_process::ProcessCapSet::new())),
                 namemap,
                 snowflake: Rc::new(SnowflakeSource::new()),
+                cap_functions: Vec::new(),
             },
             Default::default(),
         ))
@@ -623,7 +629,6 @@ impl Keystone {
             .get_mut(&id)
             .ok_or(Error::ModuleNotFound(id))?
             .state = ModuleState::Initialized;
-
         let span = tracing::debug_span!("Initializing", name = self.modules.get(&id).unwrap().name);
         let _enter = span.enter();
         tracing::debug!("Set Initialized flag");
@@ -717,8 +722,50 @@ impl Keystone {
             Ok(p.pipeline.get_api().as_cap()),
         );
 
+        let file_contents =
+            std::fs::read(config_dir.join(Path::new(config.get_path()?.to_str()?)))?;
+        let binary = crate::binary_embed::load_deps_from_binary(&file_contents)?;
+        let bufread = std::io::BufReader::new(binary);
+        let dyn_schema = capnp::schema::DynamicSchema::new(capnp::serialize::read_message(
+            bufread,
+            capnp::message::ReaderOptions {
+                traversal_limit_in_words: None,
+                nesting_limit: 128,
+            },
+        )?)?;
+        let schema: capnp::schema::CapabilitySchema =
+            match dyn_schema.get_type_by_scope(&["Root"], None).unwrap() {
+                capnp::introspect::TypeVariant::Capability(s) => s.to_owned().into(),
+                _ => todo!(),
+            };
+        let root_id = schema.get_proto().get_id();
+        match schema.get_proto().which().unwrap() {
+            capnp::schema_capnp::node::Which::Interface(interface) => {
+                self.cap_functions.push(FunctionDescription {
+                    module_or_cap: ModuleOrCap::ModuleId(id),
+                    function_name: module.name.clone(),
+                    type_id: 0,
+                    method_id: 0,
+                    params: Vec::new(),
+                    params_schema: 0,
+                    results: Vec::new(),
+                    results_schema: 0,
+                });
+                fill_function_descriptions(
+                    &mut self.cap_functions,
+                    &dyn_schema,
+                    interface,
+                    root_id,
+                    ModuleOrCap::ModuleId(id),
+                    &mut 0,
+                )?;
+            }
+            _ => todo!(),
+        }
+
         inner.borrow_mut().debug_name = Some(module.name.clone());
 
+        module.dyn_schema = Some(dyn_schema);
         module.process = Some(process);
         module.program = Some(program);
         module.bootstrap = inner.borrow_mut().bootstrap.take();
@@ -857,6 +904,83 @@ impl Keystone {
 
         Ok(capnp::capability::FromClientHook::new(pipe))
     }
+}
+
+pub fn fill_function_descriptions(
+    cap_functions: &mut Vec<FunctionDescription>,
+    dyn_schema: &capnp::schema::DynamicSchema,
+    interface: capnp::schema_capnp::node::interface::Reader,
+    root_id: u64,
+    module_or_cap: ModuleOrCap,
+    method_count: &mut u16,
+) -> Result<()> {
+    let methods = interface.get_methods().unwrap();
+    for method in methods.into_iter() {
+        let mut params = Vec::new();
+        match dyn_schema
+            .get_type_by_id(method.get_param_struct_type())
+            .unwrap()
+        {
+            capnp::introspect::TypeVariant::Struct(st) => {
+                let sc: capnp::schema::StructSchema = st.clone().into();
+                for field in sc.get_fields().unwrap() {
+                    params.push(ParamResultType {
+                        name: field.get_proto().get_name().unwrap().to_string().unwrap(),
+                        capnp_type: field.get_type().which().into(),
+                    });
+                }
+            }
+            _ => (),
+        };
+        let mut results = Vec::new();
+        match dyn_schema
+            .get_type_by_id(method.get_result_struct_type())
+            .unwrap()
+        {
+            capnp::introspect::TypeVariant::Struct(st) => {
+                let sc: capnp::schema::StructSchema = st.clone().into();
+                for field in sc.get_fields().unwrap() {
+                    results.push(ParamResultType {
+                        name: field.get_proto().get_name().unwrap().to_string().unwrap(),
+                        capnp_type: field.get_type().which().into(),
+                    });
+                }
+            }
+            _ => (),
+        };
+        cap_functions.push(FunctionDescription {
+            module_or_cap: module_or_cap.clone(),
+            function_name: method.get_name().unwrap().to_str()?.to_string(),
+            type_id: root_id,
+            method_id: *method_count,
+            params: params,
+            params_schema: method.get_param_struct_type(),
+            results: results,
+            results_schema: method.get_result_struct_type(),
+        });
+        *method_count += 1;
+    }
+    for s in interface.get_superclasses().unwrap().iter() {
+        let schema: capnp::schema::CapabilitySchema =
+            match dyn_schema.get_type_by_id(s.get_id()).unwrap() {
+                capnp::introspect::TypeVariant::Capability(s) => s.to_owned().into(),
+                _ => todo!(),
+            };
+        match schema.get_proto().which().unwrap() {
+            capnp::schema_capnp::node::Which::Interface(int) => {
+                fill_function_descriptions(
+                    cap_functions,
+                    dyn_schema,
+                    int,
+                    root_id,
+                    module_or_cap.clone(),
+                    method_count,
+                )?;
+            }
+            _ => todo!(),
+        }
+    }
+    Ok(())
 }
 
 /* sadly we can't actually do this, because if an error happens the rpc_system won't be drained.

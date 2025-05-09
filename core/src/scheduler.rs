@@ -634,9 +634,9 @@ impl root::Server for Scheduler {
 #[cfg(test)]
 mod tests {
     use crate::keystone::CapnpResult;
+    use crate::scheduler_capnp::MissBehavior;
     use crate::scheduler_capnp::action;
     use crate::scheduler_capnp::repeat_callback;
-    use crate::scheduler_capnp::MissBehavior;
     use crate::sqlite::SqliteDatabase;
     use crate::sqlite_capnp::root::ServerDispatch;
     use crate::storage_capnp::restore;

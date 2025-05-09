@@ -22,6 +22,8 @@ mod util;
 use crate::byte_stream::ByteStreamBufferImpl;
 use crate::keystone_capnp::keystone_config;
 use capnp::any_pointer::Owned as any_pointer;
+use capnp::introspect::Introspect;
+use capnp::{dynamic_struct, dynamic_value};
 use circular_buffer::CircularBuffer;
 use clap::{Parser, Subcommand, ValueEnum};
 use crossterm::event::KeyCode::Char;
@@ -263,13 +265,15 @@ enum TabPage {
     Module = 1,
     Network = 2,
     Interface = 3,
+    Input = 4,
 }
 
-static TABPAGES: [TabPage; 4] = [
+static TABPAGES: [TabPage; 5] = [
     TabPage::Keystone,
     TabPage::Module,
     TabPage::Network,
     TabPage::Interface,
+    TabPage::Input,
 ];
 
 impl std::string::ToString for TabPage {
@@ -279,6 +283,7 @@ impl std::string::ToString for TabPage {
             TabPage::Module => "Module",
             TabPage::Interface => "API Explorer",
             TabPage::Network => "Network",
+            TabPage::Input => "Input",
         }
         .to_owned()
     }
@@ -334,6 +339,14 @@ struct Tui<'a> {
     config: keystone_config::Reader<'a>,
     list_state: ListState,
     log_tx: UnboundedSender<(u64, String)>,
+    holding: Vec<ParamResultType>,
+    input: RowCol,
+    buffer: String, //TODO optimize input stuff
+}
+
+struct RowCol {
+    row: usize,
+    col: usize,
 }
 
 fn invert_style(selected: bool, style: ratatui::prelude::Style) -> ratatui::prelude::Style {
@@ -388,9 +401,7 @@ impl ratatui::widgets::Widget for &mut Tui<'_> {
         for tab in TABPAGES.iter() {
             let style = if self.tab == *tab {
                 tab_select
-            } else if (*tab == TabPage::Module || *tab == TabPage::Interface)
-                && self.module.is_none()
-            {
+            } else if (*tab == TabPage::Module) && self.module.is_none() {
                 tab_disable
             } else {
                 tab_unselect
@@ -656,20 +667,38 @@ impl ratatui::widgets::Widget for &mut Tui<'_> {
                     .select(module.selected)
                     .render(actionbar[1], buf);
 
-                // TODO: not currently selectable
-                Paragraph::new(Span::styled(
-                    "[API Explorer]",
-                    Style::new().dark_gray().bold(),
-                ))
-                .render(actionbar[2], buf);
-
-                Paragraph::new("Trace Level: ").render(actionbar[3], buf);
-
-                let is_selected = if let Some(x) = module.selected.map(|s| s == (count + 0)) {
+                let mut is_selected = if let Some(x) = module.selected.map(|s| s == (count + 0)) {
                     x
                 } else {
                     false
                 };
+
+                Paragraph::new(Span::styled(
+                    "[API Explorer]",
+                    match module.state {
+                        ModuleState::NotStarted
+                        | ModuleState::Closed
+                        | ModuleState::Aborted
+                        | ModuleState::StartFailure
+                        | ModuleState::CloseFailure
+                        | ModuleState::Closing => Style::new().dark_gray().bold(),
+                        ModuleState::Initialized | ModuleState::Ready | ModuleState::Paused => {
+                            let sel = is_selected;
+
+                            is_selected = if let Some(x) = module.selected.map(|s| s == (count + 1))
+                            {
+                                x
+                            } else {
+                                false
+                            };
+
+                            invert_style(sel, Style::new().white().bold())
+                        }
+                    },
+                ))
+                .render(actionbar[2], buf);
+
+                Paragraph::new("Trace Level: ").render(actionbar[3], buf);
 
                 Paragraph::new(match module.trace {
                     tracing::Level::TRACE => Span::styled(
@@ -751,8 +780,230 @@ impl ratatui::widgets::Widget for &mut Tui<'_> {
 
                 StatefulWidget::render(list, main[1], buf, &mut self.list_state);
             }
+            TabPage::Interface => {
+                let main = Layout::default()
+                    .direction(Direction::Vertical)
+                    .margin(1)
+                    .constraints([Constraint::Length(10)])
+                    .split(tabarea[1]);
+                let mut rows: Vec<Row> = Vec::new();
+                let mut widths = Vec::new();
+                //TODO Table doesn't work for this, swap to multiple lists or seperate widgets for everything eventually
+                for desc in self.instance.cap_functions.iter_mut() {
+                    let mut inner = Vec::new();
+                    if desc.type_id == 0 {
+                        inner.push(Cell::from(desc.function_name.clone()));
+                        widths.push(Constraint::Max(desc.function_name.len() as u16));
+                        if let ModuleOrCap::ModuleId(id) = &desc.module_or_cap {
+                            if let Some(m) = self.modules.get(id) {
+                                match m.state {
+                                    ModuleState::NotStarted => {
+                                        let s = ": not started".to_string();
+                                        widths.push(Constraint::Max(s.len() as u16));
+                                        inner.push(Cell::from(s));
+                                    }
+                                    ModuleState::Initialized => {
+                                        let s = ": initialized".to_string();
+                                        widths.push(Constraint::Max(s.len() as u16));
+                                        inner.push(Cell::from(s));
+                                    }
+                                    ModuleState::Ready => {
+                                        let s = ": ready".to_string();
+                                        widths.push(Constraint::Max(s.len() as u16));
+                                        inner.push(Cell::from(s));
+                                    }
+                                    ModuleState::Paused => {
+                                        let s = ": paused".to_string();
+                                        widths.push(Constraint::Max(s.len() as u16));
+                                        inner.push(Cell::from(s));
+                                    }
+                                    ModuleState::Closing => {
+                                        let s = ": closing".to_string();
+                                        widths.push(Constraint::Max(s.len() as u16));
+                                        inner.push(Cell::from(s));
+                                    }
+                                    ModuleState::Closed => {
+                                        let s = ": closed".to_string();
+                                        widths.push(Constraint::Max(s.len() as u16));
+                                        inner.push(Cell::from(s));
+                                    }
+                                    ModuleState::Aborted => {
+                                        let s = ": aborted".to_string();
+                                        widths.push(Constraint::Max(s.len() as u16));
+                                        inner.push(Cell::from(s));
+                                    }
+                                    ModuleState::StartFailure => {
+                                        let s = ": start failure".to_string();
+                                        widths.push(Constraint::Max(s.len() as u16));
+                                        inner.push(Cell::from(s));
+                                    }
+                                    ModuleState::CloseFailure => {
+                                        let s = ": close failure".to_string();
+                                        widths.push(Constraint::Max(s.len() as u16));
+                                        inner.push(Cell::from(s));
+                                    }
+                                }
+                            }
+                        }
+                        rows.push(Row::new(inner));
+                        continue;
+                    }
+                    widths.push(Constraint::Max(2 + desc.function_name.len() as u16));
+                    inner.push(Cell::from(format!("{} (", desc.function_name.clone())));
+                    for param in desc.params.iter_mut() {
+                        if let CapnpType::Struct(st) = &mut param.capnp_type {
+                            st.init();
+                        }
+                        let p = param.to_string();
+                        widths.push(Constraint::Max(p.len().try_into().unwrap()));
+                        inner.push(Cell::from(p));
+                    }
+                    inner.push(Cell::from(") -> ("));
+                    widths.push(Constraint::Max(6));
+                    let mut results = String::new();
+                    for result in desc.results.iter_mut() {
+                        if let CapnpType::Struct(st) = &mut result.capnp_type {
+                            st.init();
+                        }
+                        let r = result.to_string();
+                        widths.push(Constraint::Max(r.len().try_into().unwrap()));
+                        inner.push(Cell::from(r));
+                    }
+                    inner.push(Cell::from(")"));
+                    widths.push(Constraint::Max(1));
+                    rows.push(Row::new(inner));
+                }
+
+                let title = Line::from(" API ".bold());
+                let holding = if let Some(t) = self.holding.last() {
+                    format!("[{}]", t.to_string().as_str())
+                } else {
+                    "[]".to_string()
+                };
+                let instructions = Line::from(vec![
+                    " Quit ".into(),
+                    "<Q>".green().bold(),
+                    " — Scroll ".into(),
+                    "<⭡⭣>".green().bold(),
+                    " — Select ".into(),
+                    "<Enter>".green().bold(),
+                    " — Back ".into(),
+                    "<Esc>".green().bold(),
+                    " — Next Page ".into(),
+                    "<Tab> ".green().bold(),
+                    "<->".green().bold(),
+                    " — Clone ".into(),
+                    "<=>".green().bold(),
+                    " — Set ".into(),
+                    holding.as_str().green().bold(),
+                    " — Currently Holding ".into(),
+                ]);
+
+                let block = Block::bordered()
+                    .title(title.centered())
+                    .title_bottom(instructions.centered())
+                    .border_set(border::THICK);
+                block.render(tabarea[1], buf);
+
+                let mut widths = Vec::new();
+                widths.push(Constraint::Percentage(8));
+                for _ in 0..8 {
+                    widths.push(Constraint::Percentage(20));
+                }
+                widths.push(Constraint::Percentage(1));
+                let table = StatefulWidget::render(
+                    Table::new(rows, widths)
+                        .column_spacing(1)
+                        .cell_highlight_style(Style::new().reversed()),
+                    main[0],
+                    buf,
+                    &mut self.keystone.table_state,
+                );
+            }
+            TabPage::Input => {
+                let title = Line::from(" Input ".bold());
+                let instructions = Line::from(vec![
+                    " Quit ".into(),
+                    "<Q>".green().bold(),
+                    " — Scroll ".into(),
+                    "<⭡⭣>".green().bold(),
+                    " — Select ".into(),
+                    "<Enter>".green().bold(),
+                    " — Back ".into(),
+                    "<Esc>".green().bold(),
+                    " — Next Page ".into(),
+                    "<Tab> ".green().bold(),
+                ]);
+
+                let block = Block::bordered()
+                    .title(title.centered())
+                    .title_bottom(instructions.centered())
+                    .border_set(border::THICK);
+                block.render(tabarea[1], buf);
+
+                let main = Layout::default()
+                    .direction(Direction::Vertical)
+                    .margin(1)
+                    .constraints([Constraint::Length(1), Constraint::Min(1)])
+                    .split(tabarea[1]);
+                let mut fields = Vec::new();
+                if self.input.col != 0 {
+                    let mut desc = &mut self.instance.cap_functions[self.input.row];
+                    let param = &desc.params[self.input.col - 1];
+                    match &param.capnp_type {
+                        CapnpType::Data(items) => {
+                            field_data_helper(&mut fields, items, param.name.as_str())
+                        }
+                        CapnpType::Struct(st) => {
+                            field_struct_helper(&mut fields, st, param.name.as_str())
+                        }
+                        CapnpType::List(capnp_types) => {
+                            field_list_helper(&mut fields, capnp_types, param.name.as_str())
+                        }
+                        _ => todo!(),
+                    }
+                }
+
+                let list = List::new(fields)
+                    .direction(ratatui::widgets::ListDirection::TopToBottom)
+                    .highlight_style(Style::new().reversed());
+
+                StatefulWidget::render(list, main[1], buf, &mut self.list_state);
+            }
             _ => (),
         }
+    }
+}
+fn field_data_helper(fields: &mut Vec<String>, items: &Vec<u8>, name: &str) {
+    fields.push(format!("{}: Add new element", name));
+    for item in &items[1..] {
+        fields.push(item.to_string());
+    }
+}
+fn field_struct_helper(fields: &mut Vec<String>, capnp_struct: &CapnpStruct, name: &str) {
+    fields.push(format!("{}: Struct init/clone/set", name));
+    for field in &capnp_struct.fields[1..] {
+        match &field.capnp_type {
+            CapnpType::Data(items) => field_data_helper(fields, items, field.name.as_str()),
+            CapnpType::Struct(capnp_struct) => {
+                field_struct_helper(fields, capnp_struct, field.name.as_str())
+            }
+            CapnpType::List(capnp_types) => {
+                field_list_helper(fields, capnp_types, field.name.as_str())
+            }
+            _ => fields.push(field.to_string()),
+        };
+    }
+}
+fn field_list_helper(fields: &mut Vec<String>, capnp_types: &Vec<CapnpType>, name: &str) {
+    fields.push(format!("{}: Add new element", name));
+    for field in &capnp_types[1..] {
+        match &field {
+            CapnpType::Data(items) => field_data_helper(fields, items, ""),
+            CapnpType::Struct(capnp_struct) => field_struct_helper(fields, capnp_struct, ""),
+            CapnpType::List(capnp_types) => field_list_helper(fields, capnp_types, ""),
+            _ => fields.push(field.to_string("")),
+        };
     }
 }
 
@@ -780,7 +1031,6 @@ impl Tui<'_> {
     ) -> Result<()> {
         use crossterm::event::KeyCode;
         use crossterm::event::KeyEventKind;
-
         match key.code {
             Char('q') => {
                 if key.kind == KeyEventKind::Press {
@@ -851,6 +1101,8 @@ impl Tui<'_> {
                                     0 => {
                                         if let Some(x) = self.instance.modules.get_mut(&m.id) {
                                             x.stop(self.instance.timeout).await?;
+                                            self.instance.cap_functions = Vec::new();
+                                            self.input = RowCol { row: 0, col: 0 };
                                         }
                                     }
                                     1 => {
@@ -864,6 +1116,8 @@ impl Tui<'_> {
                                         let log_state = m.trace.as_str().to_ascii_lowercase();
                                         if let Some(x) = self.instance.modules.get_mut(&id) {
                                             x.stop(self.instance.timeout).await?;
+                                            self.instance.cap_functions = Vec::new();
+                                            self.input = RowCol { row: 0, col: 0 };
                                         }
                                         let s = Self::find_module_config(
                                             &self.config,
@@ -893,7 +1147,8 @@ impl Tui<'_> {
                                             .expect("Failed to recover from failed module start");
                                         }
                                     }
-                                    3 => m.trace = m.rotate_trace(),
+                                    3 => self.tab = TabPage::Interface,
+                                    4 => m.trace = m.rotate_trace(),
                                     _ => (),
                                 }
                             }
@@ -902,6 +1157,8 @@ impl Tui<'_> {
                                     0 => {
                                         if let Some(x) = self.instance.modules.get_mut(&m.id) {
                                             x.stop(self.instance.timeout).await?;
+                                            self.instance.cap_functions = Vec::new();
+                                            self.input = RowCol { row: 0, col: 0 };
                                         }
                                     }
                                     1 => {
@@ -915,6 +1172,8 @@ impl Tui<'_> {
                                         let log_state = m.trace.as_str().to_ascii_lowercase();
                                         if let Some(x) = self.instance.modules.get_mut(&id) {
                                             x.stop(self.instance.timeout).await?;
+                                            self.instance.cap_functions = Vec::new();
+                                            self.input = RowCol { row: 0, col: 0 };
                                         }
                                         let s = Self::find_module_config(
                                             &self.config,
@@ -944,7 +1203,8 @@ impl Tui<'_> {
                                             .expect("Failed to recover from failed module start");
                                         }
                                     }
-                                    3 => m.trace = m.rotate_trace(),
+                                    3 => self.tab = TabPage::Interface,
+                                    4 => m.trace = m.rotate_trace(),
                                     _ => (),
                                 }
                             }
@@ -953,6 +1213,8 @@ impl Tui<'_> {
                                     0 => {
                                         if let Some(x) = self.instance.modules.get_mut(&m.id) {
                                             x.kill().await;
+                                            self.instance.cap_functions = Vec::new();
+                                            self.input = RowCol { row: 0, col: 0 };
                                         }
                                     }
                                     1 => m.trace = m.rotate_trace(),
@@ -967,6 +1229,200 @@ impl Tui<'_> {
                 TabPage::Network => {
                     if self.list_state.selected().is_some() {
                         self.tab = TabPage::Keystone;
+                    }
+                }
+                TabPage::Interface => {
+                    if let Some(row) = self.keystone.table_state.selected() {
+                        let mut desc = &mut self.instance.cap_functions[row as usize];
+
+                        if let Some(col) = self.keystone.table_state.selected_column() {
+                            if col == 0 {
+                                if desc.type_id == 0 {
+                                    return Ok(());
+                                }
+                                let client = match &desc.module_or_cap {
+                                    ModuleOrCap::ModuleId(id) => self
+                                        .instance
+                                        .modules
+                                        .get(&id)
+                                        .as_ref()
+                                        .unwrap()
+                                        .api
+                                        .as_ref()
+                                        .unwrap()
+                                        .pipeline
+                                        .get_api()
+                                        .as_cap(),
+                                    ModuleOrCap::Cap(c) => c.cap.clone(),
+                                };
+                                let module_id = match &desc.module_or_cap {
+                                    ModuleOrCap::ModuleId(id) => id,
+                                    ModuleOrCap::Cap(c) => &c.module_id,
+                                };
+                                if let Some(dyn_schema) = &self
+                                    .instance
+                                    .modules
+                                    .get(&module_id)
+                                    .as_ref()
+                                    .unwrap()
+                                    .dyn_schema
+                                {
+                                    let mut call =
+                                        client.new_call(desc.type_id, desc.method_id, None);
+                                    if let Some(capnp::introspect::TypeVariant::Struct(
+                                        params_schema,
+                                    )) = dyn_schema.get_type_by_id(desc.params_schema)
+                                    {
+                                        let mut dyn_param_builder = call
+                                            .get()
+                                            .init_dynamic(params_schema.clone().into())
+                                            .unwrap();
+                                        for param in &desc.params {
+                                            set_dyn_field(
+                                                &mut dyn_param_builder,
+                                                param.capnp_type.clone(),
+                                                param.name.as_str(),
+                                            )?;
+                                        }
+                                        let response = call.send().promise.await;
+                                        if let Err(e) = response {
+                                            eprintln!("{}", e.extra); //TODO
+                                            return Ok(());
+                                        }
+                                        let response = response.unwrap();
+                                        let Some(capnp::introspect::TypeVariant::Struct(
+                                            res_schema,
+                                        )) = dyn_schema.get_type_by_id(desc.results_schema)
+                                        else {
+                                            todo!()
+                                        };
+                                        let get: crate::proxy::GetPointerReader =
+                                            response.get().unwrap().get_as().unwrap();
+                                        let res_struct = get.reader.get_struct(None).unwrap();
+                                        let dyn_reader = dynamic_struct::Reader::new(
+                                            res_struct,
+                                            res_schema.clone().into(),
+                                        );
+                                        let fields = dyn_reader.get_schema().get_fields().unwrap();
+                                        for (index, field) in fields.iter().enumerate() {
+                                            let r = dyn_reader.get(field).unwrap();
+                                            if let dynamic_value::Reader::Capability(_) = r {
+                                                let mut capnp_type = r.try_into().unwrap();
+                                                if let CapnpType::Capability(cap) = &mut capnp_type
+                                                {
+                                                    cap.hook = Some(
+                                                        dyn_reader.get_clienthook(field).unwrap(),
+                                                    );
+                                                    desc.results[index].capnp_type = capnp_type;
+                                                }
+                                            } else {
+                                                desc.results[index].capnp_type =
+                                                    r.try_into().unwrap();
+                                                //TODO for some reason reply from hello world doesn't show up, probably something to do with dyn reader > struct
+                                            }
+                                        }
+                                    }
+                                }
+                            } else {
+                                if let Some(row) = self.keystone.table_state.selected() {
+                                    if let Some(col) = self.keystone.table_state.selected_column() {
+                                        if col != 0 && col <= desc.params.len() {
+                                            self.input = RowCol { row, col };
+                                            self.tab = TabPage::Input;
+                                        } else if col < (desc.params.len() + desc.results.len() + 2)
+                                        {
+                                            if let CapnpType::Capability(cap) = desc.results
+                                                [col - desc.params.len() - 2]
+                                                .capnp_type
+                                                .clone()
+                                            {
+                                                let parent_id = match &desc.module_or_cap {
+                                                    ModuleOrCap::Cap(c) => c.module_id.clone(),
+                                                    ModuleOrCap::ModuleId(id) => id.clone(),
+                                                };
+                                                if let Some(h) = &cap.hook {
+                                                    let module_or_cap =
+                                                        ModuleOrCap::Cap(CapnpHook {
+                                                            cap: h.clone(),
+                                                            module_id: parent_id,
+                                                        });
+                                                    let func = FunctionDescription {
+                                                        module_or_cap: module_or_cap.clone(),
+                                                        function_name: desc.results
+                                                            [col - desc.params.len() - 2]
+                                                            .to_string(),
+                                                        type_id: 0,
+                                                        method_id: 0,
+                                                        params: Vec::new(),
+                                                        params_schema: 0,
+                                                        results: Vec::new(),
+                                                        results_schema: 0,
+                                                    };
+                                                    self.instance.cap_functions.push(func);
+                                                    let capnp::schema_capnp::node::Which::Interface(
+                                                        interface,
+                                                    ) = cap
+                                                        .schema
+                                                        .clone()
+                                                        .get_proto()
+                                                        .which()
+                                                        .unwrap()
+                                                    else {
+                                                        todo!();
+                                                    };
+                                                    let dyn_schema = self
+                                                        .instance
+                                                        .modules
+                                                        .get(&parent_id)
+                                                        .unwrap()
+                                                        .dyn_schema
+                                                        .as_ref()
+                                                        .unwrap();
+                                                    fill_function_descriptions(
+                                                        &mut self.instance.cap_functions,
+                                                        dyn_schema,
+                                                        interface,
+                                                        cap.schema.clone().get_proto().get_id(),
+                                                        module_or_cap,
+                                                        &mut 0,
+                                                    )?;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    //TODO some sort of delete for de initializing structs and deleting caps like this
+                }
+                TabPage::Input => {
+                    if let Some(index) = self.list_state.selected() {
+                        let mut index = index as usize;
+                        if self.input.col != 0 {
+                            let mut desc = &mut self.instance.cap_functions[self.input.row];
+                            let mut param = &mut desc.params[self.input.col - 1];
+                            match &mut param.capnp_type {
+                                CapnpType::Data(items) => {
+                                    if index == 0 {
+                                        items.push(0);
+                                        return Ok(());
+                                    }
+                                }
+                                CapnpType::Struct(st) => {
+                                    find_field_in_struct(&mut self.buffer, st, &mut index, true)?
+                                }
+                                CapnpType::List(capnp_types) => {
+                                    find_field_in_list(
+                                        &mut self.buffer,
+                                        capnp_types,
+                                        &mut index,
+                                        true,
+                                    );
+                                }
+                                _ => (),
+                            }
+                        }
                     }
                 }
                 _ => (),
@@ -991,6 +1447,10 @@ impl Tui<'_> {
                         }
                     }
                 }
+                TabPage::Interface => {
+                    self.buffer = String::new();
+                    self.keystone.table_state.select_previous_column();
+                }
                 _ => (),
             },
             KeyCode::Right if key.kind != KeyEventKind::Release => match self.tab {
@@ -1009,11 +1469,15 @@ impl Tui<'_> {
                                     | ModuleState::Closing => 1,
                                     ModuleState::Initialized
                                     | ModuleState::Ready
-                                    | ModuleState::Paused => 3,
+                                    | ModuleState::Paused => 4,
                                 },
                             ))
                         }
                     }
+                }
+                TabPage::Interface => {
+                    self.buffer = String::new();
+                    self.keystone.table_state.select_next_column();
                 }
                 _ => (),
             },
@@ -1022,6 +1486,14 @@ impl Tui<'_> {
                     self.keystone.table_state.select_next();
                 }
                 TabPage::Network => {
+                    self.list_state.select_previous();
+                }
+                TabPage::Interface => {
+                    self.buffer = String::new();
+                    self.keystone.table_state.select_previous();
+                }
+                TabPage::Input => {
+                    self.buffer = String::new();
                     self.list_state.select_previous();
                 }
                 _ => (),
@@ -1033,6 +1505,14 @@ impl Tui<'_> {
                 TabPage::Network => {
                     self.list_state.select_next();
                 }
+                TabPage::Interface => {
+                    self.buffer = String::new();
+                    self.keystone.table_state.select_next();
+                }
+                TabPage::Input => {
+                    self.buffer = String::new();
+                    self.list_state.select_next();
+                }
                 _ => (),
             },
             KeyCode::Tab if key.kind != KeyEventKind::Release => {
@@ -1041,16 +1521,319 @@ impl Tui<'_> {
                 if self.tab == TabPage::Module && self.module.is_none() {
                     self.tab = increment(self.tab);
                 }
-                if self.tab == TabPage::Interface && self.module.is_none() {
-                    self.tab = increment(self.tab);
-                }
             }
+            //TODO idk which keys make sense for this
+            //TODO clone set delete for nested types, delete in general
+            KeyCode::Char('-') if key.kind != KeyEventKind::Release => match self.tab {
+                TabPage::Interface => {
+                    if let Some(row) = self.keystone.table_state.selected() {
+                        let desc = &mut self.instance.cap_functions[row];
+                        if let Some(col) = self.keystone.table_state.selected_column() {
+                            if col != 0 && col <= desc.params.len() {
+                                self.holding.push(desc.params[col - 1].clone());
+                            } else if col < (desc.params.len() + desc.results.len() + 2) {
+                                self.holding
+                                    .push(desc.results[col - desc.params.len() - 2].clone());
+                            }
+                        }
+                    }
+                }
+                _ => (),
+            },
+            KeyCode::Char('=') if key.kind != KeyEventKind::Release => match self.tab {
+                TabPage::Interface => {
+                    if let Some(row) = self.keystone.table_state.selected() {
+                        let mut desc = &mut self.instance.cap_functions[row];
+                        if let Some(col) = self.keystone.table_state.selected_column() {
+                            if col != 0 && col <= desc.params.len() {
+                                if let Some(p) = self.holding.pop() {
+                                    desc.params[col - 1] = p;
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => (),
+            },
+            KeyCode::Char(c) if key.kind != KeyEventKind::Release => match self.tab {
+                TabPage::Interface => {
+                    if let Some(row) = self.keystone.table_state.selected() {
+                        let mut desc = &mut self.instance.cap_functions[row];
+                        if let Some(col) = self.keystone.table_state.selected_column() {
+                            if col != 0 && col <= desc.params.len() {
+                                self.buffer.push(c);
+                                //TODO maybe show an error somewhere
+                                let capnp_type = &mut desc.params[col - 1].capnp_type;
+                                set_trivial_capnp_type(&mut self.buffer, capnp_type);
+                            }
+                        }
+                    }
+                }
+                TabPage::Input => {
+                    if let Some(index) = self.list_state.selected() {
+                        let mut index = index as usize;
+                        if self.input.col != 0 {
+                            let mut desc = &mut self.instance.cap_functions[self.input.row];
+                            let mut param = &mut desc.params[self.input.col - 1];
+                            self.buffer.push(c);
+                            match &mut param.capnp_type {
+                                CapnpType::Data(items) => {
+                                    if let Ok(t) = self.buffer.parse::<u8>() {
+                                        items[index] = t;
+                                    } else {
+                                        self.buffer = String::new();
+                                        items[index] = 0;
+                                    }
+                                }
+                                CapnpType::Struct(st) => {
+                                    find_field_in_struct(&mut self.buffer, st, &mut index, false)?;
+                                }
+                                CapnpType::List(l) => {
+                                    find_field_in_list(&mut self.buffer, l, &mut index, false)?;
+                                }
+                                _ => (),
+                            }
+                        }
+                    }
+                }
+                _ => (),
+            },
             _ => (),
         }
         Ok(())
     }
 }
+fn set_dyn_struct<'a>(
+    dyn_field_builder: &mut capnp::dynamic_value::Builder<'a>,
+    st: CapnpStruct,
+) -> Result<()> {
+    if let capnp::dynamic_value::Builder::Struct(b) = dyn_field_builder {
+        let mut iter = st.fields.into_iter();
+        iter.next();
+        for capnp_type in iter {
+            set_dyn_field(b, capnp_type.capnp_type.clone(), capnp_type.name.as_str())?;
+        }
+    }
+    Ok(())
+}
+macro_rules! set_primitive_field {
+    ($builder:expr, $name:expr, $value:expr, $reader_type:ident) => {
+        if let Some(val) = $value {
+            $builder
+                .set_named($name, dynamic_value::Reader::$reader_type(val))
+                .unwrap();
+        }
+    };
+}
 
+fn set_dyn_field(
+    dyn_param_builder: &mut capnp::dynamic_struct::Builder,
+    capnp_type: CapnpType,
+    name: &str,
+) -> Result<()> {
+    match capnp_type {
+        CapnpType::Void => dyn_param_builder
+            .set_named(name, dynamic_value::Reader::Void)
+            .unwrap(),
+        CapnpType::Bool(b) => set_primitive_field!(dyn_param_builder, name, b, Bool),
+        CapnpType::Int8(i) => set_primitive_field!(dyn_param_builder, name, i, Int8),
+        CapnpType::Int16(i) => set_primitive_field!(dyn_param_builder, name, i, Int16),
+        CapnpType::Int32(i) => set_primitive_field!(dyn_param_builder, name, i, Int32),
+        CapnpType::Int64(i) => set_primitive_field!(dyn_param_builder, name, i, Int64),
+        CapnpType::UInt8(u) => set_primitive_field!(dyn_param_builder, name, u, UInt8),
+        CapnpType::UInt16(u) => set_primitive_field!(dyn_param_builder, name, u, UInt16),
+        CapnpType::UInt32(u) => set_primitive_field!(dyn_param_builder, name, u, UInt32),
+        CapnpType::UInt64(u) => set_primitive_field!(dyn_param_builder, name, u, UInt64),
+        CapnpType::Float32(f) => set_primitive_field!(dyn_param_builder, name, f, Float32),
+        CapnpType::Float64(f) => set_primitive_field!(dyn_param_builder, name, f, Float64),
+        CapnpType::Text(t) => {
+            if let Some(t) = t {
+                dyn_param_builder
+                    .set_named(name, dynamic_value::Reader::Text(t.as_str().into()))
+                    .unwrap();
+            }
+        }
+        CapnpType::Data(d) => {
+            if d.len() > 1 {
+                dyn_param_builder
+                    .set_named(name, dynamic_value::Reader::Data(&d[1..]))
+                    .unwrap();
+            }
+        }
+        CapnpType::Enum(e) => {
+            if let Some(v) = e.value {
+                dyn_param_builder
+                    .set_named(
+                        name,
+                        dynamic_value::Reader::Enum(capnp::dynamic_value::Enum::new(v, e.schema)),
+                    )
+                    .unwrap();
+            }
+        }
+        CapnpType::Struct(st) => {
+            if st.fields.len() > 1 {
+                if let Ok(mut b) = dyn_param_builder.reborrow().init_named(name) {
+                    set_dyn_struct(&mut b, st)?;
+                }
+            }
+        }
+        CapnpType::List(l) => {
+            if l.len() > 1 {
+                let field = dyn_param_builder
+                    .get_schema()
+                    .find_field_by_name(name)
+                    .unwrap()
+                    .unwrap();
+            }
+            if let dynamic_value::Builder::List(lb) =
+                &mut dyn_param_builder.reborrow().get_named(name).unwrap()
+            {
+                set_dyn_list(lb, l)?;
+            }
+        }
+        CapnpType::Capability(capnp_cap) => {
+            if let Some(hook) = capnp_cap.hook {
+                //TODO idk how to set this
+            }
+        }
+        CapnpType::None => (),
+        CapnpType::AnyPointer(capnp_type) => {
+            if let Some(v) = capnp_type {
+                set_dyn_field(dyn_param_builder, *v, name)?;
+            }
+        }
+    }
+    Ok(())
+}
+fn set_dyn_list(
+    dyn_list_builder: &mut capnp::dynamic_list::Builder,
+    l: Vec<CapnpType>,
+) -> Result<()> {
+    //dyn_list_builder.init(index, size)
+    //TODO not sure how to grow/initialize with size a dynamic list
+    return Ok(());
+}
+fn find_field_in_struct(
+    buffer: &mut String,
+    st: &mut CapnpStruct,
+    index: &mut usize,
+    init: bool,
+) -> Result<()> {
+    for field in st.fields.iter_mut() {
+        match &mut field.capnp_type {
+            CapnpType::Data(items) => {
+                if *index == 0 && init == true {
+                    items.push(0);
+                    return Ok(());
+                } else {
+                    if items.len() > *index {
+                        if let Ok(t) = buffer.parse::<u8>() {
+                            items[*index] = t;
+                        } else {
+                            *buffer = String::new();
+                            items[*index] = 0;
+                        }
+                        return Ok(());
+                    } else {
+                        *index -= items.len() - 1;
+                    }
+                }
+            }
+            CapnpType::Struct(capnp_struct) => {
+                find_field_in_struct(buffer, capnp_struct, index, init)?;
+            }
+            CapnpType::List(items) => {
+                find_field_in_list(buffer, items, index, init)?;
+            }
+            CapnpType::None => {
+                if *index == 0 && init == true {
+                    st.init();
+                    return Ok(());
+                }
+            }
+            _ => set_trivial_capnp_type(buffer, &mut field.capnp_type),
+        }
+        if *index == 0 {
+            return Ok(());
+        } else {
+            *index -= 1;
+        }
+    }
+    Ok(())
+}
+fn find_field_in_list(
+    buffer: &mut String,
+    l: &mut Vec<CapnpType>,
+    index: &mut usize,
+    init: bool,
+) -> Result<()> {
+    if *index == 0 {
+        l.push(l[0].clone());
+        return Ok(());
+    }
+    *index -= 1;
+    for field in &mut l[1..] {
+        match field {
+            CapnpType::Data(items) => {
+                if *index == 0 && init == true {
+                    items.push(0);
+                    return Ok(());
+                } else {
+                    if items.len() > *index {
+                        if let Ok(t) = buffer.parse::<u8>() {
+                            items[*index] = t;
+                        } else {
+                            *buffer = String::new();
+                            items[*index] = 0;
+                        }
+                        return Ok(());
+                    } else {
+                        *index -= items.len() - 1;
+                    }
+                }
+            }
+            CapnpType::Struct(st) => find_field_in_struct(buffer, st, index, init)?,
+            CapnpType::List(l) => find_field_in_list(buffer, l, index, init)?,
+            _ => set_trivial_capnp_type(buffer, field),
+        }
+        if *index == 0 {
+            return Ok(());
+        } else {
+            *index -= 1;
+        }
+    }
+    return Ok(());
+}
+macro_rules! set_trivial_capnp_type {
+    ($capnp_type:expr, $buffer:expr, $target_type:ty, $variant:ident) => {
+        if let Ok(value) = $buffer.parse::<$target_type>() {
+            *$capnp_type = CapnpType::$variant(Some(value));
+        } else {
+            *$buffer = String::new();
+            *$capnp_type = CapnpType::$variant(None);
+        }
+    };
+}
+
+fn set_trivial_capnp_type(buffer: &mut String, capnp_type: &mut CapnpType) {
+    match capnp_type {
+        CapnpType::Bool(_) => set_trivial_capnp_type!(capnp_type, buffer, bool, Bool),
+        CapnpType::Int8(_) => set_trivial_capnp_type!(capnp_type, buffer, i8, Int8),
+        CapnpType::Int16(_) => set_trivial_capnp_type!(capnp_type, buffer, i16, Int16),
+        CapnpType::Int32(_) => set_trivial_capnp_type!(capnp_type, buffer, i32, Int32),
+        CapnpType::Int64(_) => set_trivial_capnp_type!(capnp_type, buffer, i64, Int64),
+        CapnpType::UInt8(_) => set_trivial_capnp_type!(capnp_type, buffer, u8, UInt8),
+        CapnpType::UInt16(_) => set_trivial_capnp_type!(capnp_type, buffer, u16, UInt16),
+        CapnpType::UInt32(_) => set_trivial_capnp_type!(capnp_type, buffer, u32, UInt32),
+        CapnpType::UInt64(_) => set_trivial_capnp_type!(capnp_type, buffer, u64, UInt64),
+        CapnpType::Float32(_) => set_trivial_capnp_type!(capnp_type, buffer, f32, Float32),
+        CapnpType::Float64(_) => set_trivial_capnp_type!(capnp_type, buffer, f64, Float64),
+        CapnpType::Text(_) => {
+            *capnp_type = CapnpType::Text(Some(buffer.clone()));
+        }
+        _ => (),
+    }
+}
 async fn event_loop<B: ratatui::prelude::Backend>(
     instance: &mut Keystone,
     mut terminal: ratatui::Terminal<B>,
@@ -1085,6 +1868,9 @@ async fn event_loop<B: ratatui::prelude::Backend>(
         config,
         list_state: ListState::default(),
         log_tx,
+        holding: Vec::new(),
+        input: RowCol { row: 0, col: 0 },
+        buffer: String::new(),
     };
 
     let mut sys =
@@ -1171,7 +1957,6 @@ async fn event_loop<B: ratatui::prelude::Backend>(
             }
         }
     }
-
     Ok(())
 }
 

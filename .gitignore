@@ -4,3 +4,6 @@
 /*.exe
 /core/schema/*.rs
 /core/schema/std/*.rs
+/caplog_0
+/caplog.trie
+/keystone.sqlite

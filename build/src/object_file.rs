@@ -4,8 +4,8 @@
 
 use object::write::{self, StandardSegment, Symbol, SymbolSection};
 use object::{
-    elf, Architecture, BinaryFormat, Endianness, FileFlags, SectionFlags, SectionKind, SymbolFlags,
-    SymbolKind, SymbolScope,
+    Architecture, BinaryFormat, Endianness, FileFlags, SectionFlags, SectionKind, SymbolFlags,
+    SymbolKind, SymbolScope, elf,
 };
 
 /// Returns None if the architecture is not supported

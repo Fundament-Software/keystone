@@ -26,7 +26,7 @@ use capnp::any_pointer::Owned as any_pointer;
 use capnp::capability::FromServer;
 use capnp::traits::Owned;
 use capnp_macros::capnproto_rpc;
-use capnp_rpc::{rpc_twoparty_capnp, twoparty, RpcSystem};
+use capnp_rpc::{RpcSystem, rpc_twoparty_capnp, twoparty};
 use eyre::Context;
 use futures_util::StreamExt;
 pub use keystone::*;
@@ -81,10 +81,10 @@ pub struct ModuleImpl<
 
 #[capnproto_rpc(module_start)]
 impl<
-        Config: 'static + capnp::traits::Owned,
-        Impl: 'static + Module<Config>,
-        API: 'static + for<'c> capnp::traits::Owned<Reader<'c>: capnp::capability::FromServer<Impl>>,
-    > module_start::Server<Config, API> for ModuleImpl<Config, Impl, API>
+    Config: 'static + capnp::traits::Owned,
+    Impl: 'static + Module<Config>,
+    API: 'static + for<'c> capnp::traits::Owned<Reader<'c>: capnp::capability::FromServer<Impl>>,
+> module_start::Server<Config, API> for ModuleImpl<Config, Impl, API>
 {
     async fn start(self: Rc<Self>, config: Reader) -> capnp::Result<()> {
         if let Some(sender) = self.sender.take() {
@@ -161,7 +161,9 @@ pub async fn start<
             .await
             .is_err()
         {
-            eprintln!("The RPC system hasn't received a bootstrap response in 5 seconds! Did you try to start this module directly instead of from inside a keystone instance? It has to be started from inside a keystone configuration!");
+            eprintln!(
+                "The RPC system hasn't received a bootstrap response in 5 seconds! Did you try to start this module directly instead of from inside a keystone instance? It has to be started from inside a keystone configuration!"
+            );
         }
     });
     tracing::debug!("Spawning RPC system");

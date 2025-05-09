@@ -1,9 +1,9 @@
 use super::Path;
 use capnp_macros::capnproto_rpc;
 use http_body_util::BodyExt;
-use hyper::{http::uri::Authority, HeaderMap};
+use hyper::{HeaderMap, http::uri::Authority};
 use hyper_tls::HttpsConnector;
-use hyper_util::client::legacy::{connect::HttpConnector, Client as HttpClient, ResponseFuture};
+use hyper_util::client::legacy::{Client as HttpClient, ResponseFuture, connect::HttpConnector};
 use std::rc::Rc;
 
 use Path::HttpVerb;

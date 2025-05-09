@@ -1,5 +1,5 @@
-use keystone::http::https_client;
 use keystone::http::Path;
+use keystone::http::https_client;
 
 #[tokio::test]
 async fn basic_test() -> eyre::Result<()> {

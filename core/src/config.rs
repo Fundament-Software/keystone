@@ -12,7 +12,7 @@ use capnp::{
     traits::HasTypeId,
 };
 use eyre::{Context, Result};
-use toml::{value::Offset, Table, Value};
+use toml::{Table, Value, value::Offset};
 
 fn expr_recurse(val: &Value, exprs: &mut HashMap<*const Value, u32>) {
     match val {

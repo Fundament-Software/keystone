@@ -3,7 +3,7 @@ use super::{Domain, Path};
 use capnp_macros::capnproto_rpc;
 use hyper::http::uri::Authority;
 use hyper_tls::HttpsConnector;
-use hyper_util::client::legacy::{connect::HttpConnector, Client as HttpClient};
+use hyper_util::client::legacy::{Client as HttpClient, connect::HttpConnector};
 use std::rc::Rc;
 
 #[derive(Clone)]

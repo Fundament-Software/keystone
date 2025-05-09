@@ -7,10 +7,10 @@ use capnp::capability::FromClientHook;
 use capnp_macros::capnproto_rpc;
 use chrono::Datelike;
 use chrono::Timelike;
+use keystone::CapnpResult;
 use keystone::scheduler_capnp::action;
 use keystone::storage_capnp::restore;
 use keystone::storage_capnp::saveable;
-use keystone::CapnpResult;
 use std::rc::Rc;
 use tokio::sync::oneshot;
 

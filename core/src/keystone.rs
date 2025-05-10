@@ -919,7 +919,8 @@ pub fn fill_function_descriptions(
         let mut params = Vec::new();
         if let capnp::introspect::TypeVariant::Struct(st) = dyn_schema
             .get_type_by_id(method.get_param_struct_type())
-            .unwrap() {
+            .unwrap()
+        {
             let sc: capnp::schema::StructSchema = (*st).into();
             for field in sc.get_fields().unwrap() {
                 params.push(ParamResultType {
@@ -931,7 +932,8 @@ pub fn fill_function_descriptions(
         let mut results = Vec::new();
         if let capnp::introspect::TypeVariant::Struct(st) = dyn_schema
             .get_type_by_id(method.get_result_struct_type())
-            .unwrap() {
+            .unwrap()
+        {
             let sc: capnp::schema::StructSchema = (*st).into();
             for field in sc.get_fields().unwrap() {
                 results.push(ParamResultType {

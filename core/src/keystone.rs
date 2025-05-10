@@ -298,7 +298,7 @@ impl Keystone {
         let caplog_config = config.get_caplog()?;
         let db = crate::database::open_database(
             Path::new(config.get_database()?.to_str()?),
-            |c| SqliteDatabase::new_connection(c).map(|r| Rc::new(r)),
+            |c| SqliteDatabase::new_connection(c).map(Rc::new),
             crate::database::OpenOptions::Create,
         )?;
 
@@ -917,45 +917,37 @@ pub fn fill_function_descriptions(
     let methods = interface.get_methods().unwrap();
     for method in methods.into_iter() {
         let mut params = Vec::new();
-        match dyn_schema
+        if let capnp::introspect::TypeVariant::Struct(st) = dyn_schema
             .get_type_by_id(method.get_param_struct_type())
-            .unwrap()
-        {
-            capnp::introspect::TypeVariant::Struct(st) => {
-                let sc: capnp::schema::StructSchema = st.clone().into();
-                for field in sc.get_fields().unwrap() {
-                    params.push(ParamResultType {
-                        name: field.get_proto().get_name().unwrap().to_string().unwrap(),
-                        capnp_type: field.get_type().which().into(),
-                    });
-                }
+            .unwrap() {
+            let sc: capnp::schema::StructSchema = (*st).into();
+            for field in sc.get_fields().unwrap() {
+                params.push(ParamResultType {
+                    name: field.get_proto().get_name().unwrap().to_string().unwrap(),
+                    capnp_type: field.get_type().which().into(),
+                });
             }
-            _ => (),
         };
         let mut results = Vec::new();
-        match dyn_schema
+        if let capnp::introspect::TypeVariant::Struct(st) = dyn_schema
             .get_type_by_id(method.get_result_struct_type())
-            .unwrap()
-        {
-            capnp::introspect::TypeVariant::Struct(st) => {
-                let sc: capnp::schema::StructSchema = st.clone().into();
-                for field in sc.get_fields().unwrap() {
-                    results.push(ParamResultType {
-                        name: field.get_proto().get_name().unwrap().to_string().unwrap(),
-                        capnp_type: field.get_type().which().into(),
-                    });
-                }
+            .unwrap() {
+            let sc: capnp::schema::StructSchema = (*st).into();
+            for field in sc.get_fields().unwrap() {
+                results.push(ParamResultType {
+                    name: field.get_proto().get_name().unwrap().to_string().unwrap(),
+                    capnp_type: field.get_type().which().into(),
+                });
             }
-            _ => (),
         };
         cap_functions.push(FunctionDescription {
             module_or_cap: module_or_cap.clone(),
             function_name: method.get_name().unwrap().to_str()?.to_string(),
             type_id: root_id,
             method_id: *method_count,
-            params: params,
+            params,
             params_schema: method.get_param_struct_type(),
-            results: results,
+            results,
             results_schema: method.get_result_struct_type(),
         });
         *method_count += 1;
@@ -1018,7 +1010,7 @@ pub fn get_binary_path(name: &str) -> std::path::PathBuf {
 
     #[cfg(windows)]
     {
-        return target_dir.join(format!("{}.exe", name).as_str());
+        target_dir.join(format!("{}.exe", name).as_str())
     }
 
     #[cfg(not(windows))]

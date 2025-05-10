@@ -17,7 +17,6 @@ use crate::sturdyref::SturdyRefImpl;
 use capnp::capability::{FromClientHook, RemotePromise};
 use capnp_macros::{capnp_let, capnproto_rpc};
 use capnp_rpc::CapabilityServerSet;
-use d_b_any::DBAny;
 use eyre::eyre;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use rusqlite::{Connection, OpenFlags, Result, params_from_iter};
@@ -175,9 +174,9 @@ impl SqliteDatabase {
             .get_id())
     }
 
-    async fn build_insert_statement<'a>(
+    async fn build_insert_statement(
         &self,
-        ins: insert::Reader<'a>,
+        ins: insert::Reader<'_>,
         mut statement_and_params: StatementAndParams,
     ) -> capnp::Result<StatementAndParams> {
         let fallback_reader = ins.get_fallback()?;
@@ -291,9 +290,9 @@ impl SqliteDatabase {
         Ok(statement_and_params)
     }
 
-    async fn build_delete_statement<'a>(
+    async fn build_delete_statement(
         &self,
-        del: delete::Reader<'a>,
+        del: delete::Reader<'_>,
         mut statement_and_params: StatementAndParams,
     ) -> capnp::Result<StatementAndParams> {
         capnp_let!({from, returning} = del);
@@ -423,9 +422,9 @@ impl SqliteDatabase {
         Ok(())
     }
 
-    async fn build_update_statement<'a>(
+    async fn build_update_statement(
         &self,
-        upd: update::Reader<'a>,
+        upd: update::Reader<'_>,
         mut statement_and_params: StatementAndParams,
     ) -> capnp::Result<StatementAndParams> {
         capnp_let!({assignments, from, returning} = upd);
@@ -511,9 +510,9 @@ impl SqliteDatabase {
         Ok(statement_and_params)
     }
 
-    async fn build_select_statement<'a>(
+    async fn build_select_statement(
         &self,
-        select: select::Reader<'a>,
+        select: select::Reader<'_>,
         mut statement_and_params: StatementAndParams,
     ) -> Result<StatementAndParams, capnp::Error> {
         capnp_let!({names, selectcore, mergeoperations, orderby, limit} = select);
@@ -698,9 +697,9 @@ impl SqliteDatabase {
         }
         Ok(statement_and_params)
     }
-    async fn build_function_invocation<'a>(
+    async fn build_function_invocation(
         &self,
-        function_reader: function_invocation::Reader<'a>,
+        function_reader: function_invocation::Reader<'_>,
         statement_and_params: &mut StatementAndParams,
     ) -> Result<(), capnp::Error> {
         let Some(server) = self
@@ -726,9 +725,9 @@ impl SqliteDatabase {
         }
         Ok(())
     }
-    async fn build_join_clause<'a>(
+    async fn build_join_clause(
         &self,
-        join_clause: join_clause::Reader<'a>,
+        join_clause: join_clause::Reader<'_>,
         mut statement_and_params: StatementAndParams,
     ) -> Result<StatementAndParams, capnp::Error> {
         match join_clause.get_tableorsubquery()?.which()? {
@@ -835,9 +834,9 @@ impl SqliteDatabase {
         Ok(statement_and_params)
     }
 
-    async fn match_expr<'a>(
+    async fn match_expr(
         &self,
-        expr: expr::Reader<'a>,
+        expr: expr::Reader<'_>,
         statement_and_params: &mut StatementAndParams,
     ) -> capnp::Result<()> {
         match expr.which()? {
@@ -880,9 +879,9 @@ impl SqliteDatabase {
         }
         Ok(())
     }
-    async fn match_dbany<'a>(
+    async fn match_dbany(
         &self,
-        dbany: d_b_any::Reader<'a>,
+        dbany: d_b_any::Reader<'_>,
         statement_and_params: &mut StatementAndParams,
     ) -> capnp::Result<()> {
         fn inner(statement_and_params: &mut StatementAndParams, value: rusqlite::types::Value) {
@@ -929,11 +928,11 @@ impl SqliteDatabase {
         }
         Ok(())
     }
-    async fn fill_in_bindparams<'a>(
+    async fn fill_in_bindparams(
         &self,
         bindparam_indexes: &Vec<usize>,
         params: &mut [rusqlite::types::Value],
-        bindings_reader: capnp::struct_list::Reader<'a, d_b_any::Owned>,
+        bindings_reader: capnp::struct_list::Reader<'_, d_b_any::Owned>,
     ) -> capnp::Result<()> {
         let mut bindings_iter = bindings_reader.iter();
         for index in bindparam_indexes {
@@ -2713,6 +2712,7 @@ mod tests {
     use crate::sqlite_capnp::select_core;
     use capnp::capability::FromServer;
     use capnp::private::capability::ClientHook;
+    use d_b_any::DBAny;
     use tempfile::NamedTempFile;
 
     use super::*;

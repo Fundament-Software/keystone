@@ -54,7 +54,7 @@ pub struct ParamResultType {
     pub name: String,
     pub capnp_type: CapnpType,
 }
-impl<'a> TryInto<CapnpType> for dynamic_value::Reader<'a> {
+impl TryInto<CapnpType> for dynamic_value::Reader<'_> {
     type Error = core::str::Utf8Error;
 
     fn try_into(self) -> std::result::Result<CapnpType, Self::Error> {
@@ -149,7 +149,7 @@ fn struct_to_capnp_type(r: dynamic_struct::Reader<'_>) -> Result<CapnpType, core
         });
     }
     Ok(CapnpType::Struct(CapnpStruct {
-        fields: fields,
+        fields,
         schema: r.get_schema(),
     }))
 }
@@ -247,9 +247,9 @@ impl CapnpStruct {
         }
     }
 }
-impl Into<CapnpType> for capnp::introspect::TypeVariant {
-    fn into(self) -> CapnpType {
-        match self {
+impl From<capnp::introspect::TypeVariant> for CapnpType {
+    fn from(val: capnp::introspect::TypeVariant) -> Self {
+        match val {
             capnp::introspect::TypeVariant::Void => CapnpType::Void,
             capnp::introspect::TypeVariant::Bool => CapnpType::Bool(None),
             capnp::introspect::TypeVariant::Int8 => CapnpType::Int8(None),
@@ -289,11 +289,13 @@ impl Into<CapnpType> for capnp::introspect::TypeVariant {
         }
     }
 }
-impl ParamResultType {
-    pub fn to_string(&self) -> String {
-        self.capnp_type.to_string(self.name.as_str())
+
+impl std::fmt::Display for ParamResultType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.capnp_type.to_string(self.name.as_str()))
     }
 }
+
 macro_rules! format_capnp_type {
     ($name:expr, $value:expr, $type_name:literal) => {{
         if let Some(val) = $value {

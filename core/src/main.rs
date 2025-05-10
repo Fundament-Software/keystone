@@ -1705,12 +1705,39 @@ fn set_dyn_field(
     }
     Ok(())
 }
-fn set_dyn_list(
+fn create_dyn_list(
     dyn_list_builder: &mut capnp::dynamic_list::Builder,
     l: Vec<CapnpType>,
 ) -> Result<()> {
     //dyn_list_builder.init(index, size)
     //TODO not sure how to grow/initialize with size a dynamic list
+    let mut message = capnp::message::Builder::new_default();
+    let mut root: capnp::primitive_list::Builder = message.initn_root();
+    /*match &l[0] {
+        CapnpType::Void => (),
+        CapnpType::None => (),
+        CapnpType::Enum(capnp_enum) => todo!(),
+        CapnpType::Text(_) => todo!(),
+        CapnpType::Data(items) => todo!(),
+        CapnpType::Struct(capnp_struct) => todo!(),
+        CapnpType::List(capnp_types) => todo!(),
+        CapnpType::AnyPointer(capnp_type) => todo!(),
+        CapnpType::Capability(capnp_cap) => todo!(),
+        CapnpType::Bool(_) => {
+            let mut root: capnp::primitive_list::Builder<bool> = message.initn_root(l.len() - 1);
+        },
+        CapnpType::Int8(_) => todo!(),
+        CapnpType::Int16(_) => todo!(),
+        CapnpType::Int32(_) => todo!(),
+        CapnpType::Int64(_) => todo!(),
+        CapnpType::UInt8(_) => todo!(),
+        CapnpType::UInt16(_) => todo!(),
+        CapnpType::UInt32(_) => todo!(),
+        CapnpType::UInt64(_) => todo!(),
+        CapnpType::Float32(_) => todo!(),
+        CapnpType::Float64(_) => todo!(),
+    }*/
+
     return Ok(());
 }
 fn find_field_in_struct(

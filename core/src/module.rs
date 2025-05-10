@@ -3,7 +3,7 @@ use capnp::{any_pointer::Owned as any_pointer, dynamic_struct};
 use capnp::{dynamic_list, dynamic_value};
 use eyre::Result;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, time::Duration};
+use std::time::Duration;
 
 use crate::{
     keystone::{Error, SpawnProcess, SpawnProgram},
@@ -140,7 +140,7 @@ fn struct_to_capnp_type(r: dynamic_struct::Reader<'_>) -> Result<CapnpType, core
                 dynamic_value::Reader::Data(items) => CapnpType::Data(items.to_vec()),
                 dynamic_value::Reader::Struct(reader) => struct_to_capnp_type(reader)?,
                 dynamic_value::Reader::List(reader) => list_to_capnp_type(reader)?,
-                dynamic_value::Reader::AnyPointer(reader) => todo!(),
+                dynamic_value::Reader::AnyPointer(_) => todo!(),
                 dynamic_value::Reader::Capability(cap) => CapnpType::Capability(CapnpCap {
                     hook: None, //TODO set this while getting struct
                     schema: cap.get_schema(),
@@ -187,7 +187,7 @@ fn list_to_capnp_type(r: dynamic_list::Reader<'_>) -> Result<CapnpType, core::st
             dynamic_value::Reader::Data(items) => CapnpType::Data(items.to_vec()),
             dynamic_value::Reader::Struct(reader) => struct_to_capnp_type(reader)?,
             dynamic_value::Reader::List(reader) => list_to_capnp_type(reader)?,
-            dynamic_value::Reader::AnyPointer(reader) => todo!(),
+            dynamic_value::Reader::AnyPointer(_) => todo!(),
             dynamic_value::Reader::Capability(cap) => CapnpType::Capability(CapnpCap {
                 hook: None, //TODO set this while getting struct
                 schema: cap.get_schema(),
@@ -358,7 +358,7 @@ impl CapnpType {
             CapnpType::Capability(c) => {
                 //TODO specify cap
                 if let Some(c) = &c.hook {
-                    format!("{} - Some :Client", name)
+                    format!("{} - Some({}) :Client", name, c.get_brand())
                 } else {
                     format!("{} :Client", name)
                 }

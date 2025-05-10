@@ -1339,7 +1339,6 @@ pub mod tests {
         cap_std_capnproto::AmbientAuthorityImpl,
     };
     use std::cell::RefCell;
-    use std::rc::Rc;
 
     #[tokio::test]
     async fn create_dir_all_canonicalize_test() -> eyre::Result<()> {

@@ -4,7 +4,6 @@ use crate::keystone::CapabilityServerSetExt;
 use crate::keystone::CapnpResult;
 use crate::sqlite_capnp::database::prepare_insert_results;
 use crate::sqlite_capnp::join_clause::join_operation;
-use crate::sqlite_capnp::root::ServerDispatch;
 use crate::sqlite_capnp::select::{limit_operation, merge_operation, ordering_term};
 use crate::sqlite_capnp::update::assignment;
 use crate::sqlite_capnp::{
@@ -15,7 +14,6 @@ use crate::sqlite_capnp::{
 };
 use crate::storage_capnp::{saveable, sturdy_ref};
 use crate::sturdyref::SturdyRefImpl;
-use capnp::capability::FromServer;
 use capnp::capability::{FromClientHook, RemotePromise};
 use capnp_macros::{capnp_let, capnproto_rpc};
 use capnp_rpc::CapabilityServerSet;
@@ -26,7 +24,7 @@ use rusqlite::{Connection, OpenFlags, Result, params_from_iter};
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::{cell::RefCell, path::Path, rc::Rc, rc::Weak};
+use std::{cell::RefCell, path::Path, rc::Rc};
 
 enum SqlDBAny {
     None,
@@ -2713,6 +2711,7 @@ pub enum ParseError {
 mod tests {
     use crate::sqlite_capnp::insert::source;
     use crate::sqlite_capnp::select_core;
+    use capnp::capability::FromServer;
     use capnp::private::capability::ClientHook;
     use tempfile::NamedTempFile;
 

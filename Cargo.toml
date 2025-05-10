@@ -25,7 +25,7 @@ readme = "README.md"
 [workspace.dependencies]
 color-eyre = "0.6"
 eyre = "0.6"
-rand = { version = "0.8.5", features = ["std_rng"] }
+rand = { version = "0.9", features = ["std_rng"] }
 tracing-subscriber = { version = "0.3.18", features = ["time", "env-filter"] }
 tracing = "0.1.40"
 tokio = { version = "1.40", features = [
@@ -48,7 +48,7 @@ capstone-macros = { git = "https://github.com/Fundament-Software/capstone-rs" }
 capstone-gen = { git = "https://github.com/Fundament-Software/capstone-rs" }
 async-byte-channel = { git = "https://github.com/Fundament-Software/capstone-rs" }
 uuid = "1.*"
-rusqlite = { version = "0.32", features = [
+rusqlite = { version = "0.35", features = [
   "bundled",
   "modern_sqlite",
   "i128_blob",

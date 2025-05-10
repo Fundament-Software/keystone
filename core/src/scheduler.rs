@@ -11,7 +11,6 @@ use crate::database::DatabaseExt;
 use crate::keystone::CapnpResult;
 use crate::scheduler_capnp::MissBehavior;
 use crate::sqlite::SqliteDatabase;
-use crate::sqlite_capnp::root::ServerDispatch;
 use atomicbox::AtomicOptionBox;
 use capnp::any_pointer::Owned as any_pointer;
 use capnp::private::capability::ClientHook;
@@ -638,7 +637,6 @@ mod tests {
     use crate::scheduler_capnp::action;
     use crate::scheduler_capnp::repeat_callback;
     use crate::sqlite::SqliteDatabase;
-    use crate::sqlite_capnp::root::ServerDispatch;
     use crate::storage_capnp::restore;
     use crate::storage_capnp::saveable;
     use atomic_take::AtomicTake;

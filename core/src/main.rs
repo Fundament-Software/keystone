@@ -1712,7 +1712,7 @@ fn create_dyn_list(
     //dyn_list_builder.init(index, size)
     //TODO not sure how to grow/initialize with size a dynamic list
     let mut message = capnp::message::Builder::new_default();
-    let mut root: capnp::primitive_list::Builder = message.initn_root();
+    //let mut root: capnp::primitive_list::Builder = message.initn_root();
     /*match &l[0] {
         CapnpType::Void => (),
         CapnpType::None => (),

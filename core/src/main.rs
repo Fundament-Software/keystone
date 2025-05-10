@@ -21,6 +21,7 @@ mod util;
 
 use crate::byte_stream::ByteStreamBufferImpl;
 use crate::keystone_capnp::keystone_config;
+use cap_std_capnp::metadata::len_results;
 use capnp::any_pointer::Owned as any_pointer;
 use capnp::introspect::Introspect;
 use capnp::{dynamic_struct, dynamic_value};
@@ -1619,9 +1620,7 @@ fn set_dyn_struct<'a>(
 macro_rules! set_primitive_field {
     ($builder:expr, $name:expr, $value:expr, $reader_type:ident) => {
         if let Some(val) = $value {
-            $builder
-                .set_named($name, dynamic_value::Reader::$reader_type(val))
-                .unwrap();
+            $builder.set_named($name, dynamic_value::Reader::$reader_type(val))?;
         }
     };
 }
@@ -1679,16 +1678,12 @@ fn set_dyn_field(
         }
         CapnpType::List(l) => {
             if l.len() > 1 {
-                let field = dyn_param_builder
-                    .get_schema()
-                    .find_field_by_name(name)
-                    .unwrap()
-                    .unwrap();
-            }
-            if let dynamic_value::Builder::List(lb) =
-                &mut dyn_param_builder.reborrow().get_named(name).unwrap()
-            {
-                set_dyn_list(lb, l)?;
+                if let Ok(dynamic_value::Builder::List(lb)) = &mut dyn_param_builder
+                    .reborrow()
+                    .initn_named(name, l.len() as u32 - 1)
+                {
+                    set_dyn_list(lb, l)?;
+                }
             }
         }
         CapnpType::Capability(capnp_cap) => {
@@ -1705,38 +1700,78 @@ fn set_dyn_field(
     }
     Ok(())
 }
-fn create_dyn_list(
+macro_rules! set_primitive_list {
+    ($builder:expr, $index:expr, $value:expr, $reader_type:ident) => {
+        if let Some(val) = $value {
+            $builder.set($index, dynamic_value::Reader::$reader_type(val))?;
+        }
+    };
+}
+fn set_dyn_list(
     dyn_list_builder: &mut capnp::dynamic_list::Builder,
     l: Vec<CapnpType>,
 ) -> Result<()> {
-    //dyn_list_builder.init(index, size)
-    //TODO not sure how to grow/initialize with size a dynamic list
-    let mut message = capnp::message::Builder::new_default();
-    //let mut root: capnp::primitive_list::Builder = message.initn_root();
-    /*match &l[0] {
-        CapnpType::Void => (),
-        CapnpType::None => (),
-        CapnpType::Enum(capnp_enum) => todo!(),
-        CapnpType::Text(_) => todo!(),
-        CapnpType::Data(items) => todo!(),
-        CapnpType::Struct(capnp_struct) => todo!(),
-        CapnpType::List(capnp_types) => todo!(),
-        CapnpType::AnyPointer(capnp_type) => todo!(),
-        CapnpType::Capability(capnp_cap) => todo!(),
-        CapnpType::Bool(_) => {
-            let mut root: capnp::primitive_list::Builder<bool> = message.initn_root(l.len() - 1);
-        },
-        CapnpType::Int8(_) => todo!(),
-        CapnpType::Int16(_) => todo!(),
-        CapnpType::Int32(_) => todo!(),
-        CapnpType::Int64(_) => todo!(),
-        CapnpType::UInt8(_) => todo!(),
-        CapnpType::UInt16(_) => todo!(),
-        CapnpType::UInt32(_) => todo!(),
-        CapnpType::UInt64(_) => todo!(),
-        CapnpType::Float32(_) => todo!(),
-        CapnpType::Float64(_) => todo!(),
-    }*/
+    let mut iter = l.into_iter().enumerate();
+    iter.next();
+    for (index, value) in iter {
+        let index = index as u32;
+        match value {
+            CapnpType::Void => dyn_list_builder.set(index, dynamic_value::Reader::Void)?,
+            CapnpType::Bool(b) => set_primitive_list!(dyn_list_builder, index, b, Bool),
+            CapnpType::Int8(i) => set_primitive_list!(dyn_list_builder, index, i, Int8),
+            CapnpType::Int16(i) => set_primitive_list!(dyn_list_builder, index, i, Int16),
+            CapnpType::Int32(i) => set_primitive_list!(dyn_list_builder, index, i, Int32),
+            CapnpType::Int64(i) => set_primitive_list!(dyn_list_builder, index, i, Int64),
+            CapnpType::UInt8(u) => set_primitive_list!(dyn_list_builder, index, u, UInt8),
+            CapnpType::UInt16(u) => set_primitive_list!(dyn_list_builder, index, u, UInt16),
+            CapnpType::UInt32(u) => set_primitive_list!(dyn_list_builder, index, u, UInt32),
+            CapnpType::UInt64(u) => set_primitive_list!(dyn_list_builder, index, u, UInt64),
+            CapnpType::Float32(f) => set_primitive_list!(dyn_list_builder, index, f, Float32),
+            CapnpType::Float64(f) => set_primitive_list!(dyn_list_builder, index, f, Float64),
+            CapnpType::Enum(e) => {
+                if let Some(v) = e.value {
+                    dyn_list_builder.set(
+                        index,
+                        dynamic_value::Reader::Enum(capnp::dynamic_value::Enum::new(v, e.schema)),
+                    )?;
+                }
+            }
+            CapnpType::Text(t) => {
+                if let Some(t) = t {
+                    dyn_list_builder.set(index, dynamic_value::Reader::Text(t.as_str().into()))?;
+                }
+            }
+            CapnpType::Data(d) => {
+                if d.len() > 1 {
+                    dyn_list_builder.set(index, dynamic_value::Reader::Data(&d[1..]))?;
+                }
+            }
+            CapnpType::Struct(st) => {
+                if st.fields.len() > 1 {
+                    if let Ok(mut b) = dyn_list_builder.reborrow().get(index) {
+                        set_dyn_struct(&mut b, st.clone())?;
+                    }
+                }
+            }
+            CapnpType::List(l) => {
+                if l.len() > 1 {
+                    if let dynamic_value::Builder::List(lb) = &mut dyn_list_builder
+                        .reborrow()
+                        .init(index, l.len() as u32 - 1)?
+                    {
+                        set_dyn_list(lb, l.clone())?;
+                    }
+                }
+            }
+            CapnpType::AnyPointer(capnp_type) => {
+                //TODO
+            }
+            CapnpType::Capability(capnp_cap) => {
+                //TODO
+            }
+            CapnpType::None => (),
+        };
+    }
 
     return Ok(());
 }
@@ -1901,7 +1936,7 @@ async fn event_loop<B: ratatui::prelude::Backend>(
     };
 
     let mut sys =
-        System::new_with_specifics(RefreshKind::new().with_cpu(CpuRefreshKind::everything()));
+        System::new_with_specifics(RefreshKind::nothing().with_cpu(CpuRefreshKind::everything()));
 
     while let Some(evt) = event_rx.recv().await {
         match evt {
@@ -1917,7 +1952,7 @@ async fn event_loop<B: ratatui::prelude::Backend>(
                 .draw(|frame| frame.render_widget(&mut app, frame.area()))
                 .map(|_| ())?,
             TerminalEvent::Tick => {
-                sys.refresh_memory_specifics(MemoryRefreshKind::new().with_ram());
+                sys.refresh_memory_specifics(MemoryRefreshKind::nothing().with_ram());
                 sys.refresh_cpu_all();
                 let mut total = 0.0;
                 for cpu in sys.cpus() {

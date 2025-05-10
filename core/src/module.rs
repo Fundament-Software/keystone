@@ -140,7 +140,7 @@ fn struct_to_capnp_type(r: dynamic_struct::Reader<'_>) -> Result<CapnpType, core
                 dynamic_value::Reader::Data(items) => CapnpType::Data(items.to_vec()),
                 dynamic_value::Reader::Struct(reader) => struct_to_capnp_type(reader)?,
                 dynamic_value::Reader::List(reader) => list_to_capnp_type(reader)?,
-                dynamic_value::Reader::AnyPointer(_) => todo!(),
+                dynamic_value::Reader::AnyPointer(_) => CapnpType::Void, //TODO
                 dynamic_value::Reader::Capability(cap) => CapnpType::Capability(CapnpCap {
                     hook: None, //TODO set this while getting struct
                     schema: cap.get_schema(),
@@ -187,7 +187,7 @@ fn list_to_capnp_type(r: dynamic_list::Reader<'_>) -> Result<CapnpType, core::st
             dynamic_value::Reader::Data(items) => CapnpType::Data(items.to_vec()),
             dynamic_value::Reader::Struct(reader) => struct_to_capnp_type(reader)?,
             dynamic_value::Reader::List(reader) => list_to_capnp_type(reader)?,
-            dynamic_value::Reader::AnyPointer(_) => todo!(),
+            dynamic_value::Reader::AnyPointer(_) => CapnpType::Void, //TODO
             dynamic_value::Reader::Capability(cap) => CapnpType::Capability(CapnpCap {
                 hook: None, //TODO set this while getting struct
                 schema: cap.get_schema(),
@@ -359,10 +359,16 @@ impl CapnpType {
             }
             CapnpType::Capability(c) => {
                 //TODO specify cap
-                if let Some(c) = &c.hook {
-                    format!("{} - Some({}) :Client", name, c.get_brand())
+                let ty = if let Ok(r) = &c.schema.get_proto().get_display_name() {
+                    &r.to_str().unwrap()
+                        [c.schema.get_proto().get_display_name_prefix_length() as usize..]
                 } else {
-                    format!("{} :Client", name)
+                    &"Client"
+                };
+                if let Some(c) = &c.hook {
+                    format!("{} - Some({}) :{ty}", name, c.get_brand())
+                } else {
+                    format!("{} :{ty}", name)
                 }
             }
             CapnpType::None => name.to_string(),

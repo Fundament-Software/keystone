@@ -12,7 +12,7 @@ pub struct SturdyRefImpl {
 }
 
 impl SturdyRefImpl {
-    pub async fn init<'a, R: SetPointerBuilder + Clone>(
+    pub async fn init<R: SetPointerBuilder + Clone>(
         module_id: u64,
         data: R,
         db: Rc<SqliteDatabase>,

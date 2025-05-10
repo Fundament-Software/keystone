@@ -57,9 +57,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .await
 }
 
-#[cfg(test)]
-use tempfile::NamedTempFile;
-
 #[test]
 fn test_complex_config() -> eyre::Result<()> {
     #[cfg(feature = "tracing")]

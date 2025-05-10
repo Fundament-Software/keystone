@@ -3,7 +3,7 @@ include!(concat!(env!("OUT_DIR"), "/capnproto.rs"));
 use crate::hello_world_capnp::root;
 use capnp::any_pointer::Owned as any_pointer;
 use capnp_macros::capnproto_rpc;
-use std::{fmt::format, rc::Rc};
+use std::rc::Rc;
 
 pub struct HelloWorldImpl {
     pub greeting: String,

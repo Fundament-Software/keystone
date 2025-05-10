@@ -7,20 +7,23 @@ unsafe fn get_mac() -> Option<u64> {
         [const { MaybeUninit::uninit() }; 32];
     let mut len: u32 = size_of_val(&info) as u32;
 
-    let status = IpHelper::GetAdaptersInfo(info[0].as_mut_ptr(), &mut len);
+    let status = unsafe { IpHelper::GetAdaptersInfo(info[0].as_mut_ptr(), &mut len) };
     if status != ERROR_SUCCESS {
         return None;
     }
 
     let mut all = Vec::new();
-    let mut padapter = info[0].assume_init_mut() as *mut IpHelper::IP_ADAPTER_INFO;
-    let mut i = 0;
-    while !padapter.is_null() {
-        (*padapter).Address[(*padapter).AddressLength as usize..].fill(0);
-        all.push(u64::from_le_bytes((*padapter).Address));
-        padapter = (*padapter).Next;
-        info[i].assume_init_drop();
-        i += 1;
+
+    unsafe {
+        let mut padapter = info[0].assume_init_mut() as *mut IpHelper::IP_ADAPTER_INFO;
+        let mut i = 0;
+        while !padapter.is_null() {
+            (*padapter).Address[(*padapter).AddressLength as usize..].fill(0);
+            all.push(u64::from_le_bytes((*padapter).Address));
+            padapter = (*padapter).Next;
+            info[i].assume_init_drop();
+            i += 1;
+        }
     }
 
     // We only need one MAC address but we have to be absolutely sure it's the same one every time.

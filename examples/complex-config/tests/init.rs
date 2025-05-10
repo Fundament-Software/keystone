@@ -18,7 +18,7 @@ fn test_complex_config_init() -> Result<()> {
                 let get_config = config_client.get_config_request();
                 let get_response = get_config.send().promise.await?;
 
-                let response = get_response.get()?.get_reply()?;
+                let _ = get_response.get()?.get_reply()?;
                 Ok::<(), capnp::Error>(())
             };
 

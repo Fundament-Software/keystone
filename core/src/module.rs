@@ -3,7 +3,7 @@ use capnp::{any_pointer::Owned as any_pointer, dynamic_struct};
 use capnp::{dynamic_list, dynamic_value};
 use eyre::Result;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, time::Duration};
+use std::time::Duration;
 
 use crate::{
     keystone::{Error, SpawnProcess, SpawnProgram},
@@ -54,7 +54,7 @@ pub struct ParamResultType {
     pub name: String,
     pub capnp_type: CapnpType,
 }
-impl<'a> TryInto<CapnpType> for dynamic_value::Reader<'a> {
+impl TryInto<CapnpType> for dynamic_value::Reader<'_> {
     type Error = core::str::Utf8Error;
 
     fn try_into(self) -> std::result::Result<CapnpType, Self::Error> {
@@ -140,7 +140,7 @@ fn struct_to_capnp_type(r: dynamic_struct::Reader<'_>) -> Result<CapnpType, core
                 dynamic_value::Reader::Data(items) => CapnpType::Data(items.to_vec()),
                 dynamic_value::Reader::Struct(reader) => struct_to_capnp_type(reader)?,
                 dynamic_value::Reader::List(reader) => list_to_capnp_type(reader)?,
-                dynamic_value::Reader::AnyPointer(reader) => todo!(),
+                dynamic_value::Reader::AnyPointer(_) => todo!(),
                 dynamic_value::Reader::Capability(cap) => CapnpType::Capability(CapnpCap {
                     hook: None, //TODO set this while getting struct
                     schema: cap.get_schema(),
@@ -149,7 +149,7 @@ fn struct_to_capnp_type(r: dynamic_struct::Reader<'_>) -> Result<CapnpType, core
         });
     }
     Ok(CapnpType::Struct(CapnpStruct {
-        fields: fields,
+        fields,
         schema: r.get_schema(),
     }))
 }
@@ -187,7 +187,7 @@ fn list_to_capnp_type(r: dynamic_list::Reader<'_>) -> Result<CapnpType, core::st
             dynamic_value::Reader::Data(items) => CapnpType::Data(items.to_vec()),
             dynamic_value::Reader::Struct(reader) => struct_to_capnp_type(reader)?,
             dynamic_value::Reader::List(reader) => list_to_capnp_type(reader)?,
-            dynamic_value::Reader::AnyPointer(reader) => todo!(),
+            dynamic_value::Reader::AnyPointer(_) => todo!(),
             dynamic_value::Reader::Capability(cap) => CapnpType::Capability(CapnpCap {
                 hook: None, //TODO set this while getting struct
                 schema: cap.get_schema(),
@@ -247,9 +247,9 @@ impl CapnpStruct {
         }
     }
 }
-impl Into<CapnpType> for capnp::introspect::TypeVariant {
-    fn into(self) -> CapnpType {
-        match self {
+impl From<capnp::introspect::TypeVariant> for CapnpType {
+    fn from(val: capnp::introspect::TypeVariant) -> Self {
+        match val {
             capnp::introspect::TypeVariant::Void => CapnpType::Void,
             capnp::introspect::TypeVariant::Bool => CapnpType::Bool(None),
             capnp::introspect::TypeVariant::Int8 => CapnpType::Int8(None),
@@ -289,11 +289,13 @@ impl Into<CapnpType> for capnp::introspect::TypeVariant {
         }
     }
 }
-impl ParamResultType {
-    pub fn to_string(&self) -> String {
-        self.capnp_type.to_string(self.name.as_str())
+
+impl std::fmt::Display for ParamResultType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.capnp_type.to_string(self.name.as_str()))
     }
 }
+
 macro_rules! format_capnp_type {
     ($name:expr, $value:expr, $type_name:literal) => {{
         if let Some(val) = $value {
@@ -358,7 +360,7 @@ impl CapnpType {
             CapnpType::Capability(c) => {
                 //TODO specify cap
                 if let Some(c) = &c.hook {
-                    format!("{} - Some :Client", name)
+                    format!("{} - Some({}) :Client", name, c.get_brand())
                 } else {
                     format!("{} :Client", name)
                 }

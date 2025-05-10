@@ -1,6 +1,5 @@
 use crate::database::DatabaseExt;
 use crate::sqlite::SqliteDatabase;
-use crate::sqlite_capnp::root::ServerDispatch;
 use crate::storage_capnp::cell;
 use capnp::any_pointer::Owned as any_pointer;
 use capnp_macros::capnproto_rpc;

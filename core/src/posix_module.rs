@@ -12,7 +12,6 @@ use crate::spawn_capnp::process;
 use crate::spawn_capnp::program;
 use capnp::any_pointer::Owned as any_pointer;
 use capnp::any_pointer::Owned as cap_pointer;
-use capnp::capability::FromServer;
 use capnp::capability::RemotePromise;
 use capnp_macros::capnproto_rpc;
 use capnp_rpc::CapabilityServerSet;

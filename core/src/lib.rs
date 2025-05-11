@@ -1,8 +1,8 @@
 #![warn(clippy::large_futures)]
 
-mod binary_embed;
+pub mod binary_embed;
 mod buffer_allocator;
-mod byte_stream;
+pub mod byte_stream;
 mod cap_replacement;
 mod cap_std_capnproto;
 mod cell;
@@ -11,11 +11,11 @@ mod database;
 pub mod host;
 pub mod http;
 mod keystone;
-mod module;
+pub mod module;
 mod posix_module;
 mod posix_process;
 mod posix_spawn;
-mod proxy;
+pub mod proxy;
 pub mod scheduler;
 pub mod sqlite;
 mod sturdyref;

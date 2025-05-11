@@ -1,29 +1,4 @@
-mod binary_embed;
-mod buffer_allocator;
-mod byte_stream;
-mod cap_replacement;
-mod cap_std_capnproto;
-mod cell;
-mod config;
-mod database;
-pub mod host;
-pub mod http;
-mod keystone;
-mod module;
-mod posix_module;
-mod posix_process;
-mod posix_spawn;
-mod proxy;
-pub mod scheduler;
-pub mod sqlite;
-mod sturdyref;
-mod util;
-
-use crate::byte_stream::ByteStreamBufferImpl;
-use crate::keystone_capnp::keystone_config;
-use cap_std_capnp::metadata::len_results;
 use capnp::any_pointer::Owned as any_pointer;
-use capnp::introspect::Introspect;
 use capnp::{dynamic_struct, dynamic_value};
 use circular_buffer::CircularBuffer;
 use clap::{Parser, Subcommand, ValueEnum};
@@ -31,8 +6,15 @@ use crossterm::event::KeyCode::Char;
 use crossterm::event::{Event, KeyEvent};
 use eyre::Result;
 use futures_util::{FutureExt, StreamExt};
-pub use keystone::*;
-pub use module::*;
+use keystone::CapnpType;
+use keystone::Keystone;
+use keystone::LogCapture;
+use keystone::ModuleState;
+use keystone::RpcSystemSet;
+use keystone::byte_stream::ByteStreamBufferImpl;
+use keystone::config;
+use keystone::keystone_capnp::keystone_config;
+use keystone::module::*;
 use ratatui::widgets::{ListState, TableState};
 use std::collections::BTreeMap;
 use std::future::Future;
@@ -530,7 +512,7 @@ impl ratatui::widgets::Widget for &mut Tui<'_> {
                     .height(1)
                 });
 
-                let table = StatefulWidget::render(
+                let _table = StatefulWidget::render(
                     Table::new(rows, HEADER.map(|_| Constraint::Min(1)))
                         .column_spacing(0)
                         // It has an optional header, which is simply a Row always visible at the top.
@@ -861,7 +843,6 @@ impl ratatui::widgets::Widget for &mut Tui<'_> {
                     }
                     inner.push(Cell::from(") -> ("));
                     widths.push(Constraint::Max(6));
-                    let mut results = String::new();
                     for result in desc.results.iter_mut() {
                         if let CapnpType::Struct(st) = &mut result.capnp_type {
                             st.init();
@@ -912,7 +893,7 @@ impl ratatui::widgets::Widget for &mut Tui<'_> {
                     widths.push(Constraint::Percentage(20));
                 }
                 widths.push(Constraint::Percentage(1));
-                let table = StatefulWidget::render(
+                let _table = StatefulWidget::render(
                     Table::new(rows, widths)
                         .column_spacing(1)
                         .cell_highlight_style(Style::new().reversed()),
@@ -949,7 +930,7 @@ impl ratatui::widgets::Widget for &mut Tui<'_> {
                     .split(tabarea[1]);
                 let mut fields = Vec::new();
                 if self.input.col != 0 {
-                    let mut desc = &mut self.instance.cap_functions[self.input.row];
+                    let desc = &mut self.instance.cap_functions[self.input.row];
                     let param = &desc.params[self.input.col - 1];
                     match &param.capnp_type {
                         CapnpType::Data(items) => {
@@ -1021,7 +1002,7 @@ impl Tui<'_> {
             }
         }
 
-        Err(Error::ModuleNotFound(id).into())
+        Err(keystone::Error::ModuleNotFound(id).into())
     }
 
     async fn key(
@@ -1234,7 +1215,7 @@ impl Tui<'_> {
                 }
                 TabPage::Interface => {
                     if let Some(row) = self.keystone.table_state.selected() {
-                        let mut desc = &mut self.instance.cap_functions[row as usize];
+                        let desc = &mut self.instance.cap_functions[row as usize];
 
                         if let Some(col) = self.keystone.table_state.selected_column() {
                             if col == 0 {
@@ -1297,7 +1278,7 @@ impl Tui<'_> {
                                         else {
                                             todo!()
                                         };
-                                        let get: crate::proxy::GetPointerReader =
+                                        let get: keystone::proxy::GetPointerReader =
                                             response.get().unwrap().get_as().unwrap();
                                         let res_struct = get.reader.get_struct(None).unwrap();
                                         let dyn_reader = dynamic_struct::Reader::new(
@@ -1379,7 +1360,7 @@ impl Tui<'_> {
                                                         .dyn_schema
                                                         .as_ref()
                                                         .unwrap();
-                                                    fill_function_descriptions(
+                                                    keystone::fill_function_descriptions(
                                                         &mut self.instance.cap_functions,
                                                         dyn_schema,
                                                         interface,
@@ -1401,8 +1382,8 @@ impl Tui<'_> {
                     if let Some(index) = self.list_state.selected() {
                         let mut index = index as usize;
                         if self.input.col != 0 {
-                            let mut desc = &mut self.instance.cap_functions[self.input.row];
-                            let mut param = &mut desc.params[self.input.col - 1];
+                            let desc = &mut self.instance.cap_functions[self.input.row];
+                            let param = &mut desc.params[self.input.col - 1];
                             match &mut param.capnp_type {
                                 CapnpType::Data(items) => {
                                     if index == 0 {
@@ -1419,7 +1400,7 @@ impl Tui<'_> {
                                         capnp_types,
                                         &mut index,
                                         true,
-                                    );
+                                    )?;
                                 }
                                 _ => (),
                             }
@@ -1544,7 +1525,7 @@ impl Tui<'_> {
             KeyCode::Char('=') if key.kind != KeyEventKind::Release => match self.tab {
                 TabPage::Interface => {
                     if let Some(row) = self.keystone.table_state.selected() {
-                        let mut desc = &mut self.instance.cap_functions[row];
+                        let desc = &mut self.instance.cap_functions[row];
                         if let Some(col) = self.keystone.table_state.selected_column() {
                             if col != 0 && col <= desc.params.len() {
                                 if let Some(p) = self.holding.pop() {
@@ -1559,7 +1540,7 @@ impl Tui<'_> {
             KeyCode::Char(c) if key.kind != KeyEventKind::Release => match self.tab {
                 TabPage::Interface => {
                     if let Some(row) = self.keystone.table_state.selected() {
-                        let mut desc = &mut self.instance.cap_functions[row];
+                        let desc = &mut self.instance.cap_functions[row];
                         if let Some(col) = self.keystone.table_state.selected_column() {
                             if col != 0 && col <= desc.params.len() {
                                 self.buffer.push(c);
@@ -1574,8 +1555,8 @@ impl Tui<'_> {
                     if let Some(index) = self.list_state.selected() {
                         let mut index = index as usize;
                         if self.input.col != 0 {
-                            let mut desc = &mut self.instance.cap_functions[self.input.row];
-                            let mut param = &mut desc.params[self.input.col - 1];
+                            let desc = &mut self.instance.cap_functions[self.input.row];
+                            let param = &mut desc.params[self.input.col - 1];
                             self.buffer.push(c);
                             match &mut param.capnp_type {
                                 CapnpType::Data(items) => {
@@ -1687,7 +1668,7 @@ fn set_dyn_field(
             }
         }
         CapnpType::Capability(capnp_cap) => {
-            if let Some(hook) = capnp_cap.hook {
+            if let Some(_hook) = capnp_cap.hook {
                 //TODO idk how to set this
             }
         }
@@ -1763,10 +1744,10 @@ fn set_dyn_list(
                     }
                 }
             }
-            CapnpType::AnyPointer(capnp_type) => {
+            CapnpType::AnyPointer(_capnp_type) => {
                 //TODO
             }
-            CapnpType::Capability(capnp_cap) => {
+            CapnpType::Capability(_capnp_cap) => {
                 //TODO
             }
             CapnpType::None => (),
@@ -1942,7 +1923,7 @@ async fn event_loop<B: ratatui::prelude::Backend>(
         match evt {
             TerminalEvent::Evt(e) => match e {
                 Event::Key(key) => app.key(key, rpc_tx.clone(), &cancellation_token).await?,
-                Event::Mouse(mouse) => (),
+                Event::Mouse(_) => (),
                 Event::FocusGained => (),
                 Event::FocusLost => (),
                 Event::Paste(_) => (),
@@ -2184,7 +2165,7 @@ fn main() -> Result<()> {
                 let file_contents = fs::read(path)?;
 
                 let binary =
-                    if let Ok(b) = crate::binary_embed::load_deps_from_binary(&file_contents) {
+                    if let Ok(b) = keystone::binary_embed::load_deps_from_binary(&file_contents) {
                         b
                     } else {
                         file_contents.as_slice()
@@ -2227,14 +2208,14 @@ fn main() -> Result<()> {
                 let path = Path::new(&p);
                 keystone_startup(
                     path.parent().unwrap_or(Path::new("")),
-                    crate::config::message_from_file(path)?
+                    keystone::config::message_from_file(path)?
                         .get_root::<keystone_config::Reader>()?,
                     interactive,
                 )
             } else {
                 keystone_startup(
                     &std::env::current_dir()?,
-                    crate::config::message_from_file(Path::new("./keystone.config"))?
+                    keystone::config::message_from_file(Path::new("./keystone.config"))?
                         .get_root::<keystone_config::Reader>()?,
                     interactive,
                 )

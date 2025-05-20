@@ -1433,6 +1433,7 @@ impl Tui<'_> {
                     TabPage::Module => TabPage::Keystone,
                     TabPage::Interface => TabPage::Module,
                     TabPage::Network => TabPage::Keystone,
+                    TabPage::Input => TabPage::Interface,
                     _ => self.tab,
                 };
             }

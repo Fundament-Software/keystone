@@ -21,6 +21,9 @@ fn test_hello_world_proxy() -> eyre::Result<()> {
                     instance.proxy_set.clone(),
                     instance.log.clone(),
                     instance.snowflake.clone(),
+                    instance.db.clone(),
+                    instance.root.clone(),
+                    instance.scheduler.clone()
                 ))
                 .hook;
 

@@ -23,7 +23,7 @@ fn test_hello_world_proxy() -> eyre::Result<()> {
                     instance.snowflake.clone(),
                     instance.db.clone(),
                     instance.root.clone(),
-                    instance.scheduler.clone()
+                    instance.scheduler.clone(),
                 ))
                 .hook;
 

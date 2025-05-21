@@ -1,7 +1,11 @@
+use crate::KeystoneRoot;
+use crate::scheduler::Scheduler;
+use crate::sqlite::SqliteDatabase;
 use crate::util::SnowflakeSource;
 use caplog::{CapLog, MAX_BUFFER_SIZE};
 use capnp::MessageSize;
 use capnp::capability::Client;
+use capnp::capability::FromServer;
 use capnp::capability::Params;
 use capnp::capability::Request;
 use capnp::capability::Results;
@@ -34,6 +38,9 @@ pub struct ProxyServer {
     pub set: Rc<RefCell<CapSet>>,
     pub log: Rc<RefCell<CapLog<MAX_BUFFER_SIZE>>>,
     snowflake: Rc<SnowflakeSource>,
+    db: Rc<SqliteDatabase>,
+    root: Rc<KeystoneRoot>,
+    scheduler: Rc<Scheduler>,
 }
 
 impl ProxyServer {
@@ -42,12 +49,18 @@ impl ProxyServer {
         set: Rc<RefCell<CapSet>>,
         log: Rc<RefCell<CapLog<MAX_BUFFER_SIZE>>>,
         snowflake: Rc<SnowflakeSource>,
+        db: Rc<SqliteDatabase>,
+        root: Rc<KeystoneRoot>,
+        scheduler: Rc<Scheduler>,
     ) -> Self {
         Self {
             target: Client::new(hook),
             set,
             log,
             snowflake,
+            db,
+            root,
+            scheduler,
         }
     }
 }
@@ -103,6 +116,20 @@ impl Server for ProxyServer {
                             // Proxy for an internal keystone module from another RPC connection, so we
                             // simply create a new cap from our internal server for it.
                             cap
+                        } else if cap.get_ptr() == Rc::as_ptr(&self.db) as usize {
+                            Box::new(capnp_rpc::local::Client::new(
+                                crate::sqlite_capnp::root::Client::from_rc(self.db.clone()),
+                            ))
+                        } else if cap.get_ptr() == Rc::as_ptr(&self.root) as usize {
+                            Box::new(capnp_rpc::local::Client::new(
+                                crate::keystone_capnp::root::Client::from_rc(self.root.clone()),
+                            ))
+                        } else if cap.get_ptr() == Rc::as_ptr(&self.scheduler) as usize {
+                            Box::new(capnp_rpc::local::Client::new(
+                                crate::scheduler_capnp::root::Client::from_rc(
+                                    self.scheduler.clone(),
+                                ),
+                            ))
                         } else {
                             //  Proxy that should stay a proxy.
                             cap
@@ -119,6 +146,9 @@ impl Server for ProxyServer {
                                 self.set.clone(),
                                 self.log.clone(),
                                 self.snowflake.clone(),
+                                self.db.clone(),
+                                self.root.clone(),
+                                self.scheduler.clone(),
                             ))
                             .hook
                     },

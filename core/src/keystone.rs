@@ -524,18 +524,7 @@ impl Keystone {
                             .namemap
                             .get(&k)
                             .ok_or(capnp::Error::failed("couldn't find module!".into()))?;
-                        self.proxy_set
-                            .borrow_mut()
-                            .new_client(ProxyServer::new(
-                                self.modules[id].queue.add_ref(),
-                                self.proxy_set.clone(),
-                                self.log.clone(),
-                                self.snowflake.clone(),
-                                self.db.clone(),
-                                self.root.clone(),
-                                self.scheduler.clone(),
-                            ))
-                            .hook
+                        self.create_proxy(self.modules[id].queue.add_ref()).hook
                     },
                 )))
             }
@@ -900,6 +889,17 @@ impl Keystone {
             .as_cap();
 
         Ok(capnp::capability::FromClientHook::new(pipe))
+    }
+    pub fn create_proxy(&self, hook: Box<dyn ClientHook>) -> capnp::capability::Client {
+        self.proxy_set.borrow_mut().new_client(ProxyServer::new(
+            hook,
+            self.proxy_set.clone(),
+            self.log.clone(),
+            self.snowflake.clone(),
+            self.db.clone(),
+            self.root.clone(),
+            self.scheduler.clone(),
+        ))
     }
 }
 

@@ -138,19 +138,23 @@ impl Server for ProxyServer {
                         // Not a proxy, belongs to either side of the RPC connection, so doesn't need a proxy
                         cap
                     } else {
-                        // Not a proxy, belongs to some other RPC connection, needs a proxy
-                        self.set
-                            .borrow_mut()
-                            .new_client(ProxyServer::new(
-                                cap,
-                                self.set.clone(),
-                                self.log.clone(),
-                                self.snowflake.clone(),
-                                self.db.clone(),
-                                self.root.clone(),
-                                self.scheduler.clone(),
-                            ))
-                            .hook
+                        if client.hook.is_local_client() == true {
+                            client.hook
+                        } else {
+                            // Not a proxy, belongs to some other RPC connection, needs a proxy
+                            self.set
+                                .borrow_mut()
+                                .new_client(ProxyServer::new(
+                                    cap,
+                                    self.set.clone(),
+                                    self.log.clone(),
+                                    self.snowflake.clone(),
+                                    self.db.clone(),
+                                    self.root.clone(),
+                                    self.scheduler.clone(),
+                                ))
+                                .hook
+                        }
                     },
                 )
             } else {

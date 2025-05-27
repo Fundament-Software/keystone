@@ -38,9 +38,6 @@ pub struct ProxyServer {
     pub set: Rc<RefCell<CapSet>>,
     pub log: Rc<RefCell<CapLog<MAX_BUFFER_SIZE>>>,
     snowflake: Rc<SnowflakeSource>,
-    db: Rc<SqliteDatabase>,
-    root: Rc<KeystoneRoot>,
-    scheduler: Rc<Scheduler>,
 }
 
 impl ProxyServer {
@@ -49,18 +46,12 @@ impl ProxyServer {
         set: Rc<RefCell<CapSet>>,
         log: Rc<RefCell<CapLog<MAX_BUFFER_SIZE>>>,
         snowflake: Rc<SnowflakeSource>,
-        db: Rc<SqliteDatabase>,
-        root: Rc<KeystoneRoot>,
-        scheduler: Rc<Scheduler>,
     ) -> Self {
         Self {
             target: Client::new(hook),
             set,
             log,
             snowflake,
-            db,
-            root,
-            scheduler,
         }
     }
 }
@@ -104,59 +95,25 @@ impl Server for ProxyServer {
             table.push(if let Some(cap) = caps.extract_cap(index) {
                 let client = Client::new(cap.add_ref());
                 let client = capnp::capability::get_resolved_cap(client).await;
-                Some(
-                    if let Some(server) =
-                        self.set.borrow_mut().get_local_server_of_resolved(&client)
-                    {
-                        if cap.get_brand() == self.target.hook.get_brand() {
-                            // This is a proxy for a cap that belongs to this connection, so unwrap it
-                            server.as_ref().target.hook.add_ref()
-                        } else if cap.get_brand() == 0 {
-                            // TODO
-                            // Proxy for an internal keystone module from another RPC connection, so we
-                            // simply create a new cap from our internal server for it.
-                            cap
-                        } else if cap.get_ptr() == Rc::as_ptr(&self.db) as usize {
-                            Box::new(capnp_rpc::local::Client::new(
-                                crate::sqlite_capnp::root::Client::from_rc(self.db.clone()),
-                            ))
-                        } else if cap.get_ptr() == Rc::as_ptr(&self.root) as usize {
-                            Box::new(capnp_rpc::local::Client::new(
-                                crate::keystone_capnp::root::Client::from_rc(self.root.clone()),
-                            ))
-                        } else if cap.get_ptr() == Rc::as_ptr(&self.scheduler) as usize {
-                            Box::new(capnp_rpc::local::Client::new(
-                                crate::scheduler_capnp::root::Client::from_rc(
-                                    self.scheduler.clone(),
-                                ),
-                            ))
-                        } else {
-                            //  Proxy that should stay a proxy.
-                            cap
-                        }
-                    } else if cap.get_brand() == self.target.hook.get_brand() {
-                        // Not a proxy, belongs to either side of the RPC connection, so doesn't need a proxy
-                        cap
+                Some(if cap.get_brand() == self.target.hook.get_brand() {
+                    // Not a proxy, belongs to either side of the RPC connection, so doesn't need a proxy
+                    cap
+                } else {
+                    if client.hook.is_local_client() == true {
+                        client.hook
                     } else {
-                        if client.hook.is_local_client() == true {
-                            client.hook
-                        } else {
-                            // Not a proxy, belongs to some other RPC connection, needs a proxy
-                            self.set
-                                .borrow_mut()
-                                .new_client(ProxyServer::new(
-                                    cap,
-                                    self.set.clone(),
-                                    self.log.clone(),
-                                    self.snowflake.clone(),
-                                    self.db.clone(),
-                                    self.root.clone(),
-                                    self.scheduler.clone(),
-                                ))
-                                .hook
-                        }
-                    },
-                )
+                        // Not a proxy, belongs to some other RPC connection, needs a proxy
+                        self.set
+                            .borrow_mut()
+                            .new_client(ProxyServer::new(
+                                cap,
+                                self.set.clone(),
+                                self.log.clone(),
+                                self.snowflake.clone(),
+                            ))
+                            .hook
+                    }
+                })
             } else {
                 None
             });

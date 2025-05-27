@@ -896,9 +896,6 @@ impl Keystone {
             self.proxy_set.clone(),
             self.log.clone(),
             self.snowflake.clone(),
-            self.db.clone(),
-            self.root.clone(),
-            self.scheduler.clone(),
         ))
     }
 }

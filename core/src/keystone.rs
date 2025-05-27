@@ -146,6 +146,7 @@ pub type ModuleJoinSet = Rc<RefCell<tokio::task::JoinSet<Result<()>>>>;
 pub type RpcSystemSet = FuturesUnordered<Pin<Box<dyn Future<Output = Result<()>>>>>;
 
 pub struct Keystone {
+    root: Rc<KeystoneRoot>,
     db: Rc<SqliteDatabase>,
     scheduler: Rc<Scheduler>,
     scheduler_thread: FutureStaging,
@@ -385,17 +386,23 @@ impl Keystone {
             true,
             check_consistency,
         )?;
+        let cells = Rc::new(RefCell::new(CapabilityServerSet::new()));
+        let root = Rc::new(KeystoneRoot {
+            db: db.clone(),
+            cells: cells.clone(),
+        });
 
         Ok((
             Self {
                 db,
                 scheduler,
                 scheduler_thread: FutureStaging::Staged(fut.boxed_local()),
+                root,
                 log: Rc::new(RefCell::new(caplog)),
                 file_server: Default::default(),
                 modules,
                 timeout: Duration::from_millis(config.get_ms_timeout()),
-                cells: Rc::new(RefCell::new(CapabilityServerSet::new())),
+                cells,
                 proxy_set: Rc::new(RefCell::new(crate::proxy::CapSet::new())),
                 module_process_set: Rc::new(RefCell::new(ModuleProcessCapSet::new())),
                 process_set: Rc::new(RefCell::new(crate::posix_process::ProcessCapSet::new())),
@@ -479,32 +486,19 @@ impl Keystone {
     fn internal_cap(
         id: &str,
         db: Rc<SqliteDatabase>,
-        cells: Rc<RefCell<CellCapSet>>,
+        root: Rc<KeystoneRoot>,
         scheduler: Rc<Scheduler>,
     ) -> Option<Box<dyn ClientHook>> {
         match id {
-            BUILTIN_KEYSTONE => Some(
-                capnp_rpc::new_client::<crate::keystone_capnp::root::Client, KeystoneRoot>(
-                    KeystoneRoot {
-                        db: db.clone(),
-                        cells: cells.clone(),
-                    },
-                )
-                .client
-                .hook,
-            ),
-            BUILTIN_SQLITE => Some(
-                capnp_rpc::local::Client::new(crate::sqlite_capnp::root::Client::from_rc(
-                    db.clone(),
-                ))
-                .add_ref(),
-            ),
-            BUILTIN_SCHEDULER => Some(
-                capnp_rpc::local::Client::new(crate::scheduler_capnp::root::Client::from_rc(
-                    scheduler.clone(),
-                ))
-                .add_ref(),
-            ),
+            BUILTIN_KEYSTONE => Some(Box::new(capnp_rpc::local::Client::new(
+                crate::keystone_capnp::root::Client::from_rc(root.clone()),
+            ))),
+            BUILTIN_SQLITE => Some(Box::new(capnp_rpc::local::Client::new(
+                crate::sqlite_capnp::root::Client::from_rc(db.clone()),
+            ))),
+            BUILTIN_SCHEDULER => Some(Box::new(capnp_rpc::local::Client::new(
+                crate::scheduler_capnp::root::Client::from_rc(scheduler.clone()),
+            ))),
             _ => None,
         }
     }
@@ -521,7 +515,7 @@ impl Keystone {
                     if let Some(hook) = Self::internal_cap(
                         &k,
                         self.db.clone(),
-                        self.cells.clone(),
+                        self.root.clone(),
                         self.scheduler.clone(),
                     ) {
                         hook
@@ -530,15 +524,7 @@ impl Keystone {
                             .namemap
                             .get(&k)
                             .ok_or(capnp::Error::failed("couldn't find module!".into()))?;
-                        self.proxy_set
-                            .borrow_mut()
-                            .new_client(ProxyServer::new(
-                                self.modules[id].queue.add_ref(),
-                                self.proxy_set.clone(),
-                                self.log.clone(),
-                                self.snowflake.clone(),
-                            ))
-                            .hook
+                        self.create_proxy(self.modules[id].queue.add_ref()).hook
                     },
                 )))
             }
@@ -903,6 +889,14 @@ impl Keystone {
             .as_cap();
 
         Ok(capnp::capability::FromClientHook::new(pipe))
+    }
+    pub fn create_proxy(&self, hook: Box<dyn ClientHook>) -> capnp::capability::Client {
+        self.proxy_set.borrow_mut().new_client(ProxyServer::new(
+            hook,
+            self.proxy_set.clone(),
+            self.log.clone(),
+            self.snowflake.clone(),
+        ))
     }
 }
 

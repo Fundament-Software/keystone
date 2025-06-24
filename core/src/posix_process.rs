@@ -43,11 +43,13 @@ pub fn spawn_process_native<'i, I>(
     source: &cap_std::fs::File,
     args: I,
     log_filter: &str,
+    pipe_name: std::ffi::OsString
 ) -> capnp::Result<tokio::process::Child>
 where
     I: IntoIterator<Item = capnp::Result<&'i str>>,
 {
     use cap_std::io_lifetimes::raw::AsRawFilelike;
+    use tokio::net::windows::named_pipe::ClientOptions;
     use std::ffi::OsString;
     use std::os::windows::ffi::OsStringExt;
     use std::process::Stdio;
@@ -55,10 +57,12 @@ where
     use tokio::process::Command;
     use windows_sys::Win32::Storage::FileSystem::GetFinalPathNameByHandleW;
 
-    let argv: Vec<OsString> = args
+    let mut argv: Vec<OsString> = args
         .into_iter()
         .map(|x| x.map(|s| OsString::from_str(s).unwrap()))
         .collect::<capnp::Result<Vec<OsString>>>()?;
+
+    argv.push(pipe_name);
 
     let program = unsafe {
         let mut buf = [0_u16; 2048];
@@ -92,8 +96,10 @@ use cap_std::fs::File;
 use cap_std::io_lifetimes::raw::{FromRawFilelike, RawFilelike};
 use capnp_macros::capnproto_rpc;
 use eyre::Result;
+use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
+use tokio::runtime::Handle;
 use std::rc::Rc;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncWriteExt, WriteHalf};
 use tokio::process::ChildStdin;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
@@ -138,12 +144,42 @@ impl crate::byte_stream_capnp::byte_stream::Server for Mutex<Option<ChildStdin>>
     }
 }
 
+#[capnproto_rpc(crate::byte_stream_capnp::byte_stream)]
+impl crate::byte_stream_capnp::byte_stream::Server for Mutex<Option<WriteHalf<NamedPipeServer>>> {
+    async fn write(self: Rc<Self>, bytes: &[u8]) {
+        // TODO: This holds our borrow_mut across an await point, which may deadlock
+        if let Some(stdin) = self.lock().await.as_mut() {
+            match stdin.write_all(bytes).await {
+                Ok(_) => stdin.flush().await.to_capnp(),
+                Err(e) => Err(capnp::Error::failed(e.to_string())),
+            }
+        } else {
+            Err(capnp::Error::failed(
+                "Write called on byte stream after closed.".into(),
+            ))
+        }
+    }
+
+    async fn end(self: Rc<Self>) {
+        let take = self.lock().await.take();
+        if let Some(mut stdin) = take {
+            stdin.shutdown().await.to_capnp()
+        } else {
+            Ok(())
+        }
+    }
+
+    async fn get_substream(self: Rc<Self>) {
+        Err(capnp::Error::unimplemented("Not implemented".into()))
+    }
+}
+
 pub type ProcessCapSet = CapabilityServerSet<PosixProcessImpl, PosixProcessClient>;
 
 #[allow(clippy::type_complexity)]
 pub struct PosixProcessImpl {
     pub cancellation_token: CancellationToken,
-    pub stdin: Rc<Mutex<Option<ChildStdin>>>,
+    pub stdin: Rc<Mutex<Option<WriteHalf<NamedPipeServer>>>>,
     pub(crate) future: AtomicTake<BoxFuture<'static, Result<ExitStatus>>>,
     pub(crate) exitcode: watch::Receiver<Option<Result<ExitStatus>>>,
     pub(crate) killsender: AtomicTake<tokio::sync::oneshot::Sender<()>>,
@@ -153,7 +189,7 @@ pub struct PosixProcessImpl {
 impl PosixProcessImpl {
     fn new(
         cancellation_token: CancellationToken,
-        stdin: Option<ChildStdin>,
+        stdin: Option<WriteHalf<NamedPipeServer>>,
         future: BoxFuture<'static, Result<ExitStatus>>,
         killsender: tokio::sync::oneshot::Sender<()>,
         exitcode: watch::Receiver<Option<Result<ExitStatus>>>,
@@ -168,7 +204,7 @@ impl PosixProcessImpl {
     }
 
     /// Creates a new instance of `PosixProcessImpl` by spawning a child process.
-    fn spawn_process<'i, I>(
+    async fn spawn_process<'i, I>(
         program: &cap_std::fs::File,
         args_iter: I,
         log_filter: &str,
@@ -178,25 +214,37 @@ impl PosixProcessImpl {
     where
         I: IntoIterator<Item = capnp::Result<&'i str>>,
     {
+        let random = rand::random::<u8>(); //TODO security and better name
+        let mut pipe_name = r"\\.\pipe\".to_string();
+        pipe_name.push(random as char);
+        let server = ServerOptions::new().create(&pipe_name).unwrap();
+        
+
         // Create the child process
-        let mut child = spawn_process_native(program, args_iter, log_filter)?;
+        let mut child = spawn_process_native(program, args_iter, log_filter, pipe_name.into())?;
 
+        
         // Stealing stdin also prevents the `child.wait()` call from closing it.
-        let stdin = child.stdin.take();
-
+        //let stdin = child.stdin.take();
+        
         // Create a cancellation token to allow us to kill ("cancel") the process.
         let cancellation_token = CancellationToken::new();
 
         let (killsender, recv) = oneshot::channel::<()>();
-
+        
         let mut tasks: tokio::task::JoinSet<Result<Option<ExitStatus>>> = JoinSet::new();
-        let mut child_stdout = child.stdout.take().unwrap();
+        //tokio::task::block_in_place(|| {server.connect()});
+        server.connect().await.unwrap();
+        //tasks.spawn_blocking(|| {server.connect()});
+        let (mut read, mut write) = tokio::io::split(server);
+        let stdin = Some(write);
+        //let mut child_stdout = child.stdout.take().unwrap();
         let stdout_token = cancellation_token.child_token();
         // Create the tasks to read stdout and stderr to the byte stream
         tasks.spawn_local(async move {
             let r = tokio::select! {
                 _ = stdout_token.cancelled() => Ok(None),
-                result = stdout_stream.copy(&mut child_stdout) => result.map(|_| None)
+                result = stdout_stream.copy(&mut read) => result.map(|_| None)
             };
             let _ = stdout_stream.end_request().send().promise.await;
             r
@@ -379,7 +427,7 @@ impl program::Server<PosixArgs, ByteStream, PosixError> for PosixProgramImpl {
             &self.log_filter,
             stdout,
             stderr,
-        ) {
+        ).await {
             Err(e) => Err(capnp::Error::failed(e.to_string())),
             Ok(process_impl) => {
                 let process_client: PosixProcessClient =

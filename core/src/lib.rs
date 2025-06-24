@@ -33,6 +33,8 @@ pub use keystone::*;
 use keystone_capnp::keystone_config;
 pub use module::*;
 use module_capnp::module_start;
+use tokio::io::{ReadHalf, WriteHalf};
+use tokio::net::windows::named_pipe::{ClientOptions, NamedPipeClient, ServerOptions};
 use std::cell::RefCell;
 use std::future::Future;
 use std::marker::PhantomData;
@@ -207,7 +209,16 @@ pub async fn main<
             .with_ansi(true)
             .init();
     }
-
+    /*let Ok(named_pipe_client_in) = ClientOptions::new().open(r"\\.\pipe\tokio-named-pipe-create") else {
+        todo!()
+    };
+    let Ok(named_pipe_client_out) = ClientOptions::new().open(r"\\.\pipe\tokio-named-pipe-create") else {
+        todo!()
+    };*/
+    //let server = ServerOptions::new().create(r"\\.\pipe\testnamedpipe").unwrap();
+    let mut pipe = std::env::args().last().unwrap();
+    let cl = ClientOptions::new().open(pipe)?;
+    let (mut read, mut write) = tokio::io::split(cl);
     tokio::task::LocalSet::new()
         .run_until(async move {
             future.await;
@@ -215,9 +226,9 @@ pub async fn main<
                 Config,
                 Impl,
                 API,
-                tokio::io::Stdin,
-                tokio::io::Stdout,
-            >(tokio::io::stdin(), tokio::io::stdout()))
+                ReadHalf<NamedPipeClient>,
+                WriteHalf<NamedPipeClient>,
+            >(read, write))
             .await
         })
         .await??;

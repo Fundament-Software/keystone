@@ -33,13 +33,13 @@ pub use keystone::*;
 use keystone_capnp::keystone_config;
 pub use module::*;
 use module_capnp::module_start;
-use tokio::io::{ReadHalf, WriteHalf};
-use tokio::net::windows::named_pipe::{ClientOptions, NamedPipeClient, ServerOptions};
 use std::cell::RefCell;
 use std::future::Future;
 use std::marker::PhantomData;
 use std::rc::Rc;
 use tempfile::NamedTempFile;
+use tokio::io::{ReadHalf, WriteHalf};
+use tokio::net::windows::named_pipe::{ClientOptions, NamedPipeClient, ServerOptions};
 use tokio::sync::oneshot;
 use tracing_subscriber::filter::LevelFilter;
 

@@ -272,9 +272,8 @@ impl AsyncWrite for ClientWriter {
             }
             std::task::Poll::Ready(Err(e)) => {
                 this.writer = None;
-                std::task::Poll::Ready(Err(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    e.to_string(),
+                std::task::Poll::Ready(Err(std::io::Error::other(
+                    e.to_string()
                 )))
             }
             std::task::Poll::Pending => std::task::Poll::Pending,

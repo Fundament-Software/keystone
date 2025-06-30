@@ -5,6 +5,7 @@ pub fn spawn_process_native<'i, I>(
     source: &cap_std::fs::File,
     args: I,
     log_filter: &str,
+    pipe_name: std::ffi::OsString,
 ) -> capnp::Result<tokio::process::Child>
 where
     I: IntoIterator<Item = capnp::Result<&'i str>>,
@@ -17,11 +18,12 @@ where
 
     let fd = source.as_raw_filelike();
 
-    let argv: Vec<OsString> = args
+    let mut argv: Vec<OsString> = args
         .into_iter()
         .map(|x| x.map(|s| OsString::from_str(s).unwrap()))
         .collect::<capnp::Result<Vec<OsString>>>()?;
 
+    argv.push(pipe_name);
     let path = format!("/proc/{}/fd/{}", std::process::id(), fd);
 
     // We can't called fexecve without reimplementing the entire process handling logic, so we just do this
@@ -39,12 +41,19 @@ where
 }
 
 #[cfg(not(windows))]
-fn create_ipc() -> (UnixStream, String) {
-    let random = rand::random::<u8>(); //TODO security and better name
-    let mut pipe_name = r"/dev/null/".to_string();
-    pipe_name.push(random as char);
-    let server = UnixStream::connect(&pipe_name).unwrap();
-    (server, pipe_name)
+fn create_ipc() -> Result<(UnixListener, String, tempfile::TempDir)> {
+    let random = rand::random::<u8>() as char; //TODO security and better name
+    //let mut pipe_name = "/dev/null/".to_string();
+    //pipe_name.push(random as char);
+    let dir = tempfile::tempdir()?;
+    let pipe_name = dir
+        .path()
+        .join(random.to_string().as_str())
+        .to_str()
+        .unwrap()
+        .to_owned();
+    let server = UnixListener::bind(pipe_name.clone())?;
+    Ok((server, pipe_name, dir))
 }
 
 #[cfg(windows)]
@@ -94,12 +103,12 @@ where
 }
 
 #[cfg(windows)]
-fn create_ipc() -> (NamedPipeServer, String) {
+fn create_ipc() -> Result<(NamedPipeServer, String)> {
     let random = rand::random::<u8>(); //TODO security and better name
     let mut pipe_name = r"\\.\pipe\".to_string();
     pipe_name.push(random as char);
-    let server = ServerOptions::new().create(&pipe_name).unwrap();
-    (server, pipe_name)
+    let server = ServerOptions::new().create(&pipe_name)?;
+    Ok((server, pipe_name))
 }
 
 use crate::byte_stream_capnp::{
@@ -116,7 +125,10 @@ use capnp_macros::capnproto_rpc;
 use eyre::Result;
 use std::rc::Rc;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadHalf, WriteHalf};
+#[cfg(windows)]
 use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
+#[cfg(not(windows))]
+use tokio::net::{UnixListener, UnixStream};
 use tokio::process::ChildStdin;
 use tokio::runtime::Handle;
 use tokio::sync::Mutex;
@@ -162,6 +174,7 @@ impl crate::byte_stream_capnp::byte_stream::Server for Mutex<Option<ChildStdin>>
     }
 }
 
+#[cfg(windows)]
 #[capnproto_rpc(crate::byte_stream_capnp::byte_stream)]
 impl crate::byte_stream_capnp::byte_stream::Server for Mutex<Option<WriteHalf<NamedPipeServer>>> {
     async fn write(self: Rc<Self>, bytes: &[u8]) {
@@ -192,24 +205,48 @@ impl crate::byte_stream_capnp::byte_stream::Server for Mutex<Option<WriteHalf<Na
     }
 }
 
-pub type ProcessCapSet = CapabilityServerSet<PosixProcessImpl, PosixProcessClient>;
+#[cfg(not(windows))]
+#[capnproto_rpc(crate::byte_stream_capnp::byte_stream)]
+impl crate::byte_stream_capnp::byte_stream::Server
+    for Mutex<Option<tokio::net::unix::OwnedWriteHalf>>
+{
+    async fn write(self: Rc<Self>, bytes: &[u8]) {
+        // TODO: This holds our borrow_mut across an await point, which may deadlock
+        if let Some(stdin) = self.lock().await.as_mut() {
+            match stdin.write_all(bytes).await {
+                Ok(_) => stdin.flush().await.to_capnp(),
+                Err(e) => Err(capnp::Error::failed(e.to_string())),
+            }
+        } else {
+            Err(capnp::Error::failed(
+                "Write called on byte stream after closed.".into(),
+            ))
+        }
+    }
 
-#[cfg(windows)]
-#[allow(clippy::type_complexity)]
-pub struct PosixProcessImpl {
-    pub cancellation_token: CancellationToken,
-    pub stdin: Rc<Mutex<Option<WriteHalf<NamedPipeServer>>>>,
-    pub(crate) future: AtomicTake<BoxFuture<'static, Result<ExitStatus>>>,
-    pub(crate) exitcode: watch::Receiver<Option<Result<ExitStatus>>>,
-    pub(crate) killsender: AtomicTake<tokio::sync::oneshot::Sender<()>>,
-    test: Option<ChildStdin>,
+    async fn end(self: Rc<Self>) {
+        let take = self.lock().await.take();
+        if let Some(mut stdin) = take {
+            stdin.shutdown().await.to_capnp()
+        } else {
+            Ok(())
+        }
+    }
+
+    async fn get_substream(self: Rc<Self>) {
+        Err(capnp::Error::unimplemented("Not implemented".into()))
+    }
 }
 
-#[cfg(not(windows))]
+pub type ProcessCapSet = CapabilityServerSet<PosixProcessImpl, PosixProcessClient>;
+
 #[allow(clippy::type_complexity)]
 pub struct PosixProcessImpl {
     pub cancellation_token: CancellationToken,
+    #[cfg(windows)]
     pub stdin: Rc<Mutex<Option<WriteHalf<NamedPipeServer>>>>,
+    #[cfg(not(windows))]
+    pub stdin: Rc<Mutex<Option<tokio::net::unix::OwnedWriteHalf>>>,
     pub(crate) future: AtomicTake<BoxFuture<'static, Result<ExitStatus>>>,
     pub(crate) exitcode: watch::Receiver<Option<Result<ExitStatus>>>,
     pub(crate) killsender: AtomicTake<tokio::sync::oneshot::Sender<()>>,
@@ -219,11 +256,11 @@ pub struct PosixProcessImpl {
 impl PosixProcessImpl {
     fn new(
         cancellation_token: CancellationToken,
-        stdin: Option<WriteHalf<NamedPipeServer>>,
+        #[cfg(windows)] stdin: Option<WriteHalf<NamedPipeServer>>,
+        #[cfg(not(windows))] stdin: Option<tokio::net::unix::OwnedWriteHalf>,
         future: BoxFuture<'static, Result<ExitStatus>>,
         killsender: tokio::sync::oneshot::Sender<()>,
         exitcode: watch::Receiver<Option<Result<ExitStatus>>>,
-        test: Option<ChildStdin>,
     ) -> Self {
         Self {
             cancellation_token,
@@ -231,7 +268,6 @@ impl PosixProcessImpl {
             future: AtomicTake::new(future),
             killsender: AtomicTake::new(killsender),
             exitcode,
-            test,
         }
     }
 
@@ -246,12 +282,14 @@ impl PosixProcessImpl {
     where
         I: IntoIterator<Item = capnp::Result<&'i str>>,
     {
-        let (server, pipe_name) = create_ipc();
+        let (server, pipe_name, dir) = create_ipc()?;
+
         // Create the child process
         let mut child = spawn_process_native(program, args_iter, log_filter, pipe_name.into())?;
-
+        #[cfg(not(windows))]
+        let (mut read, write) = server.accept().await?.0.into_split();
         // Stealing stdin also prevents the `child.wait()` call from closing it.
-        let test = child.stdin.take();
+        //let test = child.stdin.take();
 
         // Create a cancellation token to allow us to kill ("cancel") the process.
         let cancellation_token = CancellationToken::new();
@@ -259,8 +297,10 @@ impl PosixProcessImpl {
         let (killsender, recv) = oneshot::channel::<()>();
 
         let mut tasks: tokio::task::JoinSet<Result<Option<ExitStatus>>> = JoinSet::new();
-        server.connect().await.unwrap();
-        let (mut read, mut write) = tokio::io::split(server);
+        #[cfg(windows)]
+        server.connect().await?;
+        #[cfg(windows)]
+        let (mut read, write) = tokio::io::split(server);
         let stdin = Some(write);
         //let mut child_stdout = child.stdout.take().unwrap();
         let stdout_token = cancellation_token.child_token();
@@ -325,7 +365,6 @@ impl PosixProcessImpl {
             future.boxed(),
             killsender,
             rx,
-            test,
         ))
     }
 }

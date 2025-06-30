@@ -39,7 +39,10 @@ use std::marker::PhantomData;
 use std::rc::Rc;
 use tempfile::NamedTempFile;
 use tokio::io::{ReadHalf, WriteHalf};
+#[cfg(windows)]
 use tokio::net::windows::named_pipe::{ClientOptions, NamedPipeClient, ServerOptions};
+#[cfg(not(windows))]
+use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::oneshot;
 use tracing_subscriber::filter::LevelFilter;
 
@@ -209,16 +212,15 @@ pub async fn main<
             .with_ansi(true)
             .init();
     }
-    /*let Ok(named_pipe_client_in) = ClientOptions::new().open(r"\\.\pipe\tokio-named-pipe-create") else {
-        todo!()
-    };
-    let Ok(named_pipe_client_out) = ClientOptions::new().open(r"\\.\pipe\tokio-named-pipe-create") else {
-        todo!()
-    };*/
-    //let server = ServerOptions::new().create(r"\\.\pipe\testnamedpipe").unwrap();
-    let mut pipe = std::env::args().last().unwrap();
+    let pipe = std::env::args().next_back().unwrap();
+    #[cfg(windows)]
     let cl = ClientOptions::new().open(pipe)?;
-    let (mut read, mut write) = tokio::io::split(cl);
+
+    #[cfg(not(windows))]
+    let cl = UnixStream::connect(pipe).await?;
+    #[cfg(not(windows))]
+    let (read, write) = cl.into_split();
+    #[cfg(windows)]
     tokio::task::LocalSet::new()
         .run_until(async move {
             future.await;
@@ -226,8 +228,22 @@ pub async fn main<
                 Config,
                 Impl,
                 API,
-                ReadHalf<NamedPipeClient>,
-                WriteHalf<NamedPipeClient>,
+                ReadHalf<NamedPipe>,
+                WriteHalf<NamedPipe>,
+            >(read, write))
+            .await
+        })
+        .await??;
+    #[cfg(not(windows))]
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            future.await;
+            tokio::task::spawn_local(start::<
+                Config,
+                Impl,
+                API,
+                tokio::net::unix::OwnedReadHalf,
+                tokio::net::unix::OwnedWriteHalf,
             >(read, write))
             .await
         })

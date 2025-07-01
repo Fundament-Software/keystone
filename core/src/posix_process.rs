@@ -43,8 +43,6 @@ where
 #[cfg(not(windows))]
 fn create_ipc() -> Result<(UnixListener, String, tempfile::TempDir)> {
     let random = rand::random::<u8>() as char; //TODO security and better name
-    //let mut pipe_name = "/dev/null/".to_string();
-    //pipe_name.push(random as char);
     let dir = tempfile::tempdir()?;
     let pipe_name = dir
         .path()
@@ -288,6 +286,7 @@ impl PosixProcessImpl {
         let mut child = spawn_process_native(program, args_iter, log_filter, pipe_name.into())?;
         #[cfg(not(windows))]
         let (mut read, write) = server.accept().await?.0.into_split();
+
         // Stealing stdin also prevents the `child.wait()` call from closing it.
         //let test = child.stdin.take();
 
@@ -358,7 +357,6 @@ impl PosixProcessImpl {
             tasks.shutdown().await;
             r
         };
-
         Result::Ok(Self::new(
             cancellation_token,
             stdin,

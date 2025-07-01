@@ -281,6 +281,8 @@ impl PosixProcessImpl {
     {
         #[cfg(not(windows))]
         let (server, pipe_name, dir) = create_ipc()?;
+        #[cfg(windows)]
+        let (server, pipe_name) = create_ipc()?;
 
         // Create the child process
         let mut child = spawn_process_native(program, args_iter, log_filter, pipe_name.into())?;

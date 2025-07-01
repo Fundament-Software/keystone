@@ -69,7 +69,6 @@ where
     use std::os::windows::ffi::OsStringExt;
     use std::process::Stdio;
     use std::str::FromStr;
-    use tokio::net::windows::named_pipe::ClientOptions;
     use tokio::process::Command;
     use windows_sys::Win32::Storage::FileSystem::GetFinalPathNameByHandleW;
 
@@ -280,6 +279,7 @@ impl PosixProcessImpl {
     where
         I: IntoIterator<Item = capnp::Result<&'i str>>,
     {
+        #[cfg(not(windows))]
         let (server, pipe_name, dir) = create_ipc()?;
 
         // Create the child process

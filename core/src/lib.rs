@@ -221,6 +221,8 @@ pub async fn main<
     #[cfg(not(windows))]
     let (read, write) = cl.into_split();
     #[cfg(windows)]
+    let (read, write) = tokio::io::split(cl);
+    #[cfg(windows)]
     tokio::task::LocalSet::new()
         .run_until(async move {
             future.await;
@@ -228,8 +230,8 @@ pub async fn main<
                 Config,
                 Impl,
                 API,
-                ReadHalf<NamedPipe>,
-                WriteHalf<NamedPipe>,
+                ReadHalf<NamedPipeClient>,
+                WriteHalf<NamedPipeClient>,
             >(read, write))
             .await
         })

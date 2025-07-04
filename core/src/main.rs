@@ -2190,6 +2190,24 @@ fn main() -> Result<()> {
             config,
             interactive,
         } => {
+            unsafe {
+                let fd_a = libc::open(
+                    std::ffi::CString::new("/dev/null").unwrap().as_ptr(),
+                    libc::O_RDONLY,
+                );
+                if fd_a < 0 {
+                    panic!("How did we fail to open /dev/null");
+                } else if fd_a != 4 {
+                    let fd_b = libc::fcntl(fd_a, libc::F_DUPFD, 4);
+                    libc::close(fd_a);
+                    if fd_b < 0 {
+                        panic!("fcntl(fd_a, F_DUPFD, 4) failed");
+                    } else if fd_b != 4 {
+                        libc::close(fd_b);
+                        panic!("fd 4 already in use");
+                    }
+                }
+            }
             if let Some(p) = toml {
                 let path = Path::new(&p);
                 let mut f = std::fs::File::open(path)?;

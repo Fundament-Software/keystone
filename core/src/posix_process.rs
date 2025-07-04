@@ -5,7 +5,6 @@ pub fn spawn_process_native<'i, I>(
     source: &cap_std::fs::File,
     args: I,
     log_filter: &str,
-    pipe_name: std::ffi::OsString,
 ) -> capnp::Result<tokio::process::Child>
 where
     I: IntoIterator<Item = capnp::Result<&'i str>>,
@@ -23,7 +22,6 @@ where
         .map(|x| x.map(|s| OsString::from_str(s).unwrap()))
         .collect::<capnp::Result<Vec<OsString>>>()?;
 
-    argv.push(pipe_name);
     let path = format!("/proc/{}/fd/{}", std::process::id(), fd);
 
     // We can't called fexecve without reimplementing the entire process handling logic, so we just do this
@@ -280,14 +278,40 @@ impl PosixProcessImpl {
         I: IntoIterator<Item = capnp::Result<&'i str>>,
     {
         #[cfg(not(windows))]
-        let (server, pipe_name, dir) = create_ipc()?;
+        let (server, backup_reserve_fd) = unsafe {
+            //TODO Thread unsafe, might need a lock in the future
+            use std::os::fd::FromRawFd;
+
+            let backup_reserve_fd = libc::fcntl(4, libc::F_DUPFD_CLOEXEC, 5);
+            if backup_reserve_fd < 0 {
+                panic!("fcntl(4, F_DUPFD_CLOEXEC, 5) failed");
+            }
+            let mut socks = vec![0 as i32, 0 as i32];
+            if libc::socketpair(
+                libc::AF_UNIX,
+                libc::SOCK_STREAM | libc::SOCK_NONBLOCK | libc::SOCK_CLOEXEC,
+                0,
+                socks.as_mut_ptr(),
+            ) < 0
+            {
+                libc::close(backup_reserve_fd);
+                panic!("socketpair failed");
+            }
+            if libc::dup2(socks[1], 4) != 4 {
+                libc::close(backup_reserve_fd);
+                panic!("dup2(socks[1], 4) failed");
+            }
+            libc::close(socks[1]);
+            let server =
+                UnixStream::from_std(std::os::unix::net::UnixStream::from_raw_fd(socks[0]))
+                    .unwrap();
+            (server, backup_reserve_fd)
+        };
         #[cfg(windows)]
         let (server, pipe_name) = create_ipc()?;
 
         // Create the child process
-        let mut child = spawn_process_native(program, args_iter, log_filter, pipe_name.into())?;
-        #[cfg(not(windows))]
-        let (mut read, write) = server.accept().await?.0.into_split();
+        let mut child = spawn_process_native(program, args_iter, log_filter)?;
 
         // Stealing stdin also prevents the `child.wait()` call from closing it.
         //let test = child.stdin.take();
@@ -302,6 +326,13 @@ impl PosixProcessImpl {
         server.connect().await?;
         #[cfg(windows)]
         let (mut read, write) = tokio::io::split(server);
+        #[cfg(not(windows))]
+        let (mut read, write) = server.into_split();
+        #[cfg(not(windows))]
+        unsafe {
+            libc::dup2(backup_reserve_fd, 4);
+            libc::close(backup_reserve_fd);
+        }
         let stdin = Some(write);
         //let mut child_stdout = child.stdout.take().unwrap();
         let stdout_token = cancellation_token.child_token();

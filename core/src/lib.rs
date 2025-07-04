@@ -36,6 +36,8 @@ use module_capnp::module_start;
 use std::cell::RefCell;
 use std::future::Future;
 use std::marker::PhantomData;
+#[cfg(not(windows))]
+use std::os::fd::FromRawFd;
 use std::rc::Rc;
 use tempfile::NamedTempFile;
 use tokio::io::{ReadHalf, WriteHalf};
@@ -212,12 +214,19 @@ pub async fn main<
             .with_ansi(true)
             .init();
     }
-    let pipe = std::env::args().next_back().unwrap();
+    //let pipe = std::env::args().next_back().unwrap();
     #[cfg(windows)]
     let cl = ClientOptions::new().open(pipe)?;
 
+    //let pipe = "/dev/null/4";
     #[cfg(not(windows))]
-    let cl = UnixStream::connect(pipe).await?;
+    let cl =
+        unsafe { UnixStream::from_std(std::os::unix::net::UnixStream::from_raw_fd(4)).unwrap() };
+    //let cl = unsafe {
+    //libc::open()
+
+    //};
+    //let cl = UnixStream::connect(pipe).await?;
     #[cfg(not(windows))]
     let (read, write) = cl.into_split();
     #[cfg(windows)]

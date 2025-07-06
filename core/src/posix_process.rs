@@ -74,8 +74,7 @@ where
         .into_iter()
         .map(|x| x.map(|s| OsString::from_str(s).unwrap()))
         .collect::<capnp::Result<Vec<OsString>>>()?;
-
-    argv.push(pipe_name);
+    argv.insert(0, pipe_name);
 
     let program = unsafe {
         let mut buf = [0_u16; 2048];
@@ -311,6 +310,9 @@ impl PosixProcessImpl {
         let (server, pipe_name) = create_ipc()?;
 
         // Create the child process
+        #[cfg(windows)]
+        let mut child = spawn_process_native(program, args_iter, log_filter, pipe_name.into())?;
+        #[cfg(not(windows))]
         let mut child = spawn_process_native(program, args_iter, log_filter)?;
 
         // Stealing stdin also prevents the `child.wait()` call from closing it.

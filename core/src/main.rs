@@ -2190,6 +2190,7 @@ fn main() -> Result<()> {
             config,
             interactive,
         } => {
+            #[cfg(not(windows))]
             unsafe {
                 let fd_a = libc::open(
                     std::ffi::CString::new("/dev/null").unwrap().as_ptr(),

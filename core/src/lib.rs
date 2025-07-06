@@ -214,21 +214,10 @@ pub async fn main<
             .with_ansi(true)
             .init();
     }
-    //let pipe = std::env::args().next_back().unwrap();
+
+    //On windows the first arg is the named pipe path
     #[cfg(windows)]
-    let cl = ClientOptions::new().open(pipe)?;
-
-    //let pipe = "/dev/null/4";
-    #[cfg(not(windows))]
-    let cl =
-        unsafe { UnixStream::from_std(std::os::unix::net::UnixStream::from_raw_fd(4)).unwrap() };
-    //let cl = unsafe {
-    //libc::open()
-
-    //};
-    //let cl = UnixStream::connect(pipe).await?;
-    #[cfg(not(windows))]
-    let (read, write) = cl.into_split();
+    let cl = ClientOptions::new().open(std::env::args().nth(1).unwrap())?;
     #[cfg(windows)]
     let (read, write) = tokio::io::split(cl);
     #[cfg(windows)]
@@ -245,6 +234,12 @@ pub async fn main<
             .await
         })
         .await??;
+    #[cfg(not(windows))]
+    let (read, write) = unsafe {
+        UnixStream::from_std(std::os::unix::net::UnixStream::from_raw_fd(4))
+            .unwrap()
+            .into_split()
+    };
     #[cfg(not(windows))]
     tokio::task::LocalSet::new()
         .run_until(async move {

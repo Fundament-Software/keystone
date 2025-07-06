@@ -17,7 +17,7 @@ where
 
     let fd = source.as_raw_filelike();
 
-    let argv: Vec<OsString> = args
+    let mut argv: Vec<OsString> = args
         .into_iter()
         .map(|x| x.map(|s| OsString::from_str(s).unwrap()))
         .collect::<capnp::Result<Vec<OsString>>>()?;
@@ -38,11 +38,26 @@ where
     cmd.spawn().to_capnp()
 }
 
+#[cfg(not(windows))]
+fn create_ipc() -> Result<(UnixListener, String, tempfile::TempDir)> {
+    let random = rand::random::<u8>() as char; //TODO security and better name
+    let dir = tempfile::tempdir()?;
+    let pipe_name = dir
+        .path()
+        .join(random.to_string().as_str())
+        .to_str()
+        .unwrap()
+        .to_owned();
+    let server = UnixListener::bind(pipe_name.clone())?;
+    Ok((server, pipe_name, dir))
+}
+
 #[cfg(windows)]
 pub fn spawn_process_native<'i, I>(
     source: &cap_std::fs::File,
     args: I,
     log_filter: &str,
+    pipe_name: std::ffi::OsString,
 ) -> capnp::Result<tokio::process::Child>
 where
     I: IntoIterator<Item = capnp::Result<&'i str>>,
@@ -55,10 +70,11 @@ where
     use tokio::process::Command;
     use windows_sys::Win32::Storage::FileSystem::GetFinalPathNameByHandleW;
 
-    let argv: Vec<OsString> = args
+    let mut argv: Vec<OsString> = args
         .into_iter()
         .map(|x| x.map(|s| OsString::from_str(s).unwrap()))
         .collect::<capnp::Result<Vec<OsString>>>()?;
+    argv.insert(0, pipe_name);
 
     let program = unsafe {
         let mut buf = [0_u16; 2048];
@@ -80,6 +96,15 @@ where
     cmd.spawn().to_capnp()
 }
 
+#[cfg(windows)]
+fn create_ipc() -> Result<(NamedPipeServer, String)> {
+    let random = rand::random::<u8>(); //TODO security and better name
+    let mut pipe_name = r"\\.\pipe\".to_string();
+    pipe_name.push(random as char);
+    let server = ServerOptions::new().create(&pipe_name)?;
+    Ok((server, pipe_name))
+}
+
 use crate::byte_stream_capnp::{
     byte_stream::Client as ByteStreamClient, byte_stream::Owned as ByteStream,
 };
@@ -93,8 +118,13 @@ use cap_std::io_lifetimes::raw::{FromRawFilelike, RawFilelike};
 use capnp_macros::capnproto_rpc;
 use eyre::Result;
 use std::rc::Rc;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadHalf, WriteHalf};
+#[cfg(windows)]
+use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
+#[cfg(not(windows))]
+use tokio::net::{UnixListener, UnixStream};
 use tokio::process::ChildStdin;
+use tokio::runtime::Handle;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 pub type PosixProgramClient = program::Client<PosixArgs, ByteStream, PosixError>;
@@ -138,12 +168,79 @@ impl crate::byte_stream_capnp::byte_stream::Server for Mutex<Option<ChildStdin>>
     }
 }
 
+#[cfg(windows)]
+#[capnproto_rpc(crate::byte_stream_capnp::byte_stream)]
+impl crate::byte_stream_capnp::byte_stream::Server for Mutex<Option<WriteHalf<NamedPipeServer>>> {
+    async fn write(self: Rc<Self>, bytes: &[u8]) {
+        // TODO: This holds our borrow_mut across an await point, which may deadlock
+        if let Some(stdin) = self.lock().await.as_mut() {
+            match stdin.write_all(bytes).await {
+                Ok(_) => stdin.flush().await.to_capnp(),
+                Err(e) => Err(capnp::Error::failed(e.to_string())),
+            }
+        } else {
+            Err(capnp::Error::failed(
+                "Write called on byte stream after closed.".into(),
+            ))
+        }
+    }
+
+    async fn end(self: Rc<Self>) {
+        let take = self.lock().await.take();
+        if let Some(mut stdin) = take {
+            stdin.shutdown().await.to_capnp()
+        } else {
+            Ok(())
+        }
+    }
+
+    async fn get_substream(self: Rc<Self>) {
+        Err(capnp::Error::unimplemented("Not implemented".into()))
+    }
+}
+
+#[cfg(not(windows))]
+#[capnproto_rpc(crate::byte_stream_capnp::byte_stream)]
+impl crate::byte_stream_capnp::byte_stream::Server
+    for Mutex<Option<tokio::net::unix::OwnedWriteHalf>>
+{
+    async fn write(self: Rc<Self>, bytes: &[u8]) {
+        // TODO: This holds our borrow_mut across an await point, which may deadlock
+        if let Some(stdin) = self.lock().await.as_mut() {
+            match stdin.write_all(bytes).await {
+                Ok(_) => stdin.flush().await.to_capnp(),
+                Err(e) => Err(capnp::Error::failed(e.to_string())),
+            }
+        } else {
+            Err(capnp::Error::failed(
+                "Write called on byte stream after closed.".into(),
+            ))
+        }
+    }
+
+    async fn end(self: Rc<Self>) {
+        let take = self.lock().await.take();
+        if let Some(mut stdin) = take {
+            stdin.shutdown().await.to_capnp()
+        } else {
+            Ok(())
+        }
+    }
+
+    async fn get_substream(self: Rc<Self>) {
+        Err(capnp::Error::unimplemented("Not implemented".into()))
+    }
+}
+
 pub type ProcessCapSet = CapabilityServerSet<PosixProcessImpl, PosixProcessClient>;
 
 #[allow(clippy::type_complexity)]
 pub struct PosixProcessImpl {
     pub cancellation_token: CancellationToken,
-    pub stdin: Rc<Mutex<Option<ChildStdin>>>,
+    #[cfg(windows)]
+    pub stdin: Rc<Mutex<Option<WriteHalf<NamedPipeServer>>>>,
+    #[cfg(not(windows))]
+    pub stdin: Rc<Mutex<Option<tokio::net::unix::OwnedWriteHalf>>>,
     pub(crate) future: AtomicTake<BoxFuture<'static, Result<ExitStatus>>>,
     pub(crate) exitcode: watch::Receiver<Option<Result<ExitStatus>>>,
     pub(crate) killsender: AtomicTake<tokio::sync::oneshot::Sender<()>>,
@@ -153,7 +250,8 @@ pub struct PosixProcessImpl {
 impl PosixProcessImpl {
     fn new(
         cancellation_token: CancellationToken,
-        stdin: Option<ChildStdin>,
+        #[cfg(windows)] stdin: Option<WriteHalf<NamedPipeServer>>,
+        #[cfg(not(windows))] stdin: Option<tokio::net::unix::OwnedWriteHalf>,
         future: BoxFuture<'static, Result<ExitStatus>>,
         killsender: tokio::sync::oneshot::Sender<()>,
         exitcode: watch::Receiver<Option<Result<ExitStatus>>>,
@@ -168,7 +266,7 @@ impl PosixProcessImpl {
     }
 
     /// Creates a new instance of `PosixProcessImpl` by spawning a child process.
-    fn spawn_process<'i, I>(
+    async fn spawn_process<'i, I>(
         program: &cap_std::fs::File,
         args_iter: I,
         log_filter: &str,
@@ -178,11 +276,47 @@ impl PosixProcessImpl {
     where
         I: IntoIterator<Item = capnp::Result<&'i str>>,
     {
+        #[cfg(not(windows))]
+        let (server, backup_reserve_fd) = unsafe {
+            //TODO Thread unsafe, might need a lock in the future
+            use std::os::fd::FromRawFd;
+
+            let backup_reserve_fd = libc::fcntl(4, libc::F_DUPFD_CLOEXEC, 5);
+            if backup_reserve_fd < 0 {
+                panic!("fcntl(4, F_DUPFD_CLOEXEC, 5) failed");
+            }
+            let mut socks = vec![0 as i32, 0 as i32];
+            if libc::socketpair(
+                libc::AF_UNIX,
+                libc::SOCK_STREAM | libc::SOCK_NONBLOCK | libc::SOCK_CLOEXEC,
+                0,
+                socks.as_mut_ptr(),
+            ) < 0
+            {
+                libc::close(backup_reserve_fd);
+                panic!("socketpair failed");
+            }
+            if libc::dup2(socks[1], 4) != 4 {
+                libc::close(backup_reserve_fd);
+                panic!("dup2(socks[1], 4) failed");
+            }
+            libc::close(socks[1]);
+            let server =
+                UnixStream::from_std(std::os::unix::net::UnixStream::from_raw_fd(socks[0]))
+                    .unwrap();
+            (server, backup_reserve_fd)
+        };
+        #[cfg(windows)]
+        let (server, pipe_name) = create_ipc()?;
+
         // Create the child process
+        #[cfg(windows)]
+        let mut child = spawn_process_native(program, args_iter, log_filter, pipe_name.into())?;
+        #[cfg(not(windows))]
         let mut child = spawn_process_native(program, args_iter, log_filter)?;
 
         // Stealing stdin also prevents the `child.wait()` call from closing it.
-        let stdin = child.stdin.take();
+        //let test = child.stdin.take();
 
         // Create a cancellation token to allow us to kill ("cancel") the process.
         let cancellation_token = CancellationToken::new();
@@ -190,13 +324,25 @@ impl PosixProcessImpl {
         let (killsender, recv) = oneshot::channel::<()>();
 
         let mut tasks: tokio::task::JoinSet<Result<Option<ExitStatus>>> = JoinSet::new();
-        let mut child_stdout = child.stdout.take().unwrap();
+        #[cfg(windows)]
+        server.connect().await?;
+        #[cfg(windows)]
+        let (mut read, write) = tokio::io::split(server);
+        #[cfg(not(windows))]
+        let (mut read, write) = server.into_split();
+        #[cfg(not(windows))]
+        unsafe {
+            libc::dup2(backup_reserve_fd, 4);
+            libc::close(backup_reserve_fd);
+        }
+        let stdin = Some(write);
+        //let mut child_stdout = child.stdout.take().unwrap();
         let stdout_token = cancellation_token.child_token();
         // Create the tasks to read stdout and stderr to the byte stream
         tasks.spawn_local(async move {
             let r = tokio::select! {
                 _ = stdout_token.cancelled() => Ok(None),
-                result = stdout_stream.copy(&mut child_stdout) => result.map(|_| None)
+                result = stdout_stream.copy(&mut read) => result.map(|_| None)
             };
             let _ = stdout_stream.end_request().send().promise.await;
             r
@@ -246,7 +392,6 @@ impl PosixProcessImpl {
             tasks.shutdown().await;
             r
         };
-
         Result::Ok(Self::new(
             cancellation_token,
             stdin,
@@ -379,7 +524,9 @@ impl program::Server<PosixArgs, ByteStream, PosixError> for PosixProgramImpl {
             &self.log_filter,
             stdout,
             stderr,
-        ) {
+        )
+        .await
+        {
             Err(e) => Err(capnp::Error::failed(e.to_string())),
             Ok(process_impl) => {
                 let process_client: PosixProcessClient =

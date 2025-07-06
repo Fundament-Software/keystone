@@ -36,8 +36,15 @@ use module_capnp::module_start;
 use std::cell::RefCell;
 use std::future::Future;
 use std::marker::PhantomData;
+#[cfg(not(windows))]
+use std::os::fd::FromRawFd;
 use std::rc::Rc;
 use tempfile::NamedTempFile;
+use tokio::io::{ReadHalf, WriteHalf};
+#[cfg(windows)]
+use tokio::net::windows::named_pipe::{ClientOptions, NamedPipeClient, ServerOptions};
+#[cfg(not(windows))]
+use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::oneshot;
 use tracing_subscriber::filter::LevelFilter;
 
@@ -208,6 +215,12 @@ pub async fn main<
             .init();
     }
 
+    //On windows the first arg is the named pipe path
+    #[cfg(windows)]
+    let cl = ClientOptions::new().open(std::env::args().nth(1).unwrap())?;
+    #[cfg(windows)]
+    let (read, write) = tokio::io::split(cl);
+    #[cfg(windows)]
     tokio::task::LocalSet::new()
         .run_until(async move {
             future.await;
@@ -215,9 +228,29 @@ pub async fn main<
                 Config,
                 Impl,
                 API,
-                tokio::io::Stdin,
-                tokio::io::Stdout,
-            >(tokio::io::stdin(), tokio::io::stdout()))
+                ReadHalf<NamedPipeClient>,
+                WriteHalf<NamedPipeClient>,
+            >(read, write))
+            .await
+        })
+        .await??;
+    #[cfg(not(windows))]
+    let (read, write) = unsafe {
+        UnixStream::from_std(std::os::unix::net::UnixStream::from_raw_fd(4))
+            .unwrap()
+            .into_split()
+    };
+    #[cfg(not(windows))]
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            future.await;
+            tokio::task::spawn_local(start::<
+                Config,
+                Impl,
+                API,
+                tokio::net::unix::OwnedReadHalf,
+                tokio::net::unix::OwnedWriteHalf,
+            >(read, write))
             .await
         })
         .await??;

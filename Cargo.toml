@@ -34,6 +34,7 @@ tokio = { version = "1.40", features = [
   "macros",
   "io-std",
   "time",
+  "io-util",
   "tracing",
   "signal",
   "process",

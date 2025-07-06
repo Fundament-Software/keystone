@@ -1011,7 +1011,7 @@ pub fn get_binary_path(name: &str) -> std::path::PathBuf {
 
     #[cfg(not(windows))]
     {
-        return target_dir.join(name);
+        target_dir.join(name)
     }
 }
 

@@ -2,6 +2,10 @@ use hello_world::hello_world_capnp::root;
 
 #[test]
 fn test_hello_world_init() -> eyre::Result<()> {
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::DEBUG)
+        .with_ansi(true)
+        .init();
     /*
     use std::path::PathBuf;
     use std::str::FromStr;
@@ -39,7 +43,10 @@ fn test_hello_world_init() -> eyre::Result<()> {
                 r = keystone::drive_stream(&mut rpc_systems) => Ok(r?),
                 r = fut => r,
             }?;
-            keystone::test_shutdown(&mut instance, &mut rpc_systems).await
+            keystone::test_shutdown(&mut instance, &mut rpc_systems)
+                .await
+                .unwrap();
+            Ok(())
         },
     )
 }

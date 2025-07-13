@@ -168,6 +168,7 @@ pub async fn start<
             .await
             .is_err()
         {
+            tracing::error!("RPC system never got bootstrap response");
             eprintln!(
                 "The RPC system hasn't received a bootstrap response in 5 seconds! Did you try to start this module directly instead of from inside a keystone instance? It has to be started from inside a keystone configuration!"
             );
@@ -333,7 +334,7 @@ pub fn test_harness<F: Future<Output = eyre::Result<()>> + 'static>(
 
     let runtime = tokio::runtime::Runtime::new()?;
     let result = runtime.block_on(fut);
-    runtime.shutdown_timeout(std::time::Duration::from_millis(1));
+    runtime.shutdown_timeout(std::time::Duration::from_millis(2));
     if result.unwrap().unwrap().is_err() {
         panic!("Test took too long!");
     }

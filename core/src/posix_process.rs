@@ -1,5 +1,3 @@
-use crate::keystone::CapnpResult;
-
 #[cfg(not(windows))]
 pub fn spawn_process_native<'i, I>(
     source: &cap_std::fs::File,
@@ -128,45 +126,19 @@ use tokio::runtime::Handle;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 pub type PosixProgramClient = program::Client<PosixArgs, ByteStream, PosixError>;
+use crate::keystone::CapnpResult;
 use atomic_take::AtomicTake;
 use capnp_rpc::CapabilityServerSet;
 use futures_util::FutureExt;
 use futures_util::future::BoxFuture;
+use futures_util::future::LocalBoxFuture;
 use std::cell::RefCell;
+use std::io::Write;
 use std::process::ExitStatus;
+use tokio::io::AsyncReadExt;
 use tokio::sync::oneshot;
 use tokio::sync::watch;
 use tokio::task::JoinSet;
-
-#[capnproto_rpc(crate::byte_stream_capnp::byte_stream)]
-impl crate::byte_stream_capnp::byte_stream::Server for Mutex<Option<ChildStdin>> {
-    async fn write(self: Rc<Self>, bytes: &[u8]) {
-        // TODO: This holds our borrow_mut across an await point, which may deadlock
-        if let Some(stdin) = self.lock().await.as_mut() {
-            match stdin.write_all(bytes).await {
-                Ok(_) => stdin.flush().await.to_capnp(),
-                Err(e) => Err(capnp::Error::failed(e.to_string())),
-            }
-        } else {
-            Err(capnp::Error::failed(
-                "Write called on byte stream after closed.".into(),
-            ))
-        }
-    }
-
-    async fn end(self: Rc<Self>) {
-        let take = self.lock().await.take();
-        if let Some(mut stdin) = take {
-            stdin.shutdown().await.to_capnp()
-        } else {
-            Ok(())
-        }
-    }
-
-    async fn get_substream(self: Rc<Self>) {
-        Err(capnp::Error::unimplemented("Not implemented".into()))
-    }
-}
 
 #[cfg(windows)]
 #[capnproto_rpc(crate::byte_stream_capnp::byte_stream)]
@@ -188,6 +160,7 @@ impl crate::byte_stream_capnp::byte_stream::Server for Mutex<Option<WriteHalf<Na
     async fn end(self: Rc<Self>) {
         let take = self.lock().await.take();
         if let Some(mut stdin) = take {
+            tracing::debug!("Closing stdin pipe");
             stdin.shutdown().await.to_capnp()
         } else {
             Ok(())
@@ -241,8 +214,10 @@ pub struct PosixProcessImpl {
     pub stdin: Rc<Mutex<Option<WriteHalf<NamedPipeServer>>>>,
     #[cfg(not(windows))]
     pub stdin: Rc<Mutex<Option<tokio::net::unix::OwnedWriteHalf>>>,
-    pub(crate) future: AtomicTake<BoxFuture<'static, Result<ExitStatus>>>,
-    pub(crate) exitcode: watch::Receiver<Option<Result<ExitStatus>>>,
+    pub(crate) process: AtomicTake<BoxFuture<'static, Result<ExitStatus>>>,
+    pub(crate) stdout: AtomicTake<LocalBoxFuture<'static, Result<ReadHalf<NamedPipeServer>>>>,
+    pub(crate) stderr: AtomicTake<LocalBoxFuture<'static, Result<usize>>>,
+    pub(crate) exitcode: watch::Receiver<Option<ExitStatus>>,
     pub(crate) killsender: AtomicTake<tokio::sync::oneshot::Sender<()>>,
 }
 
@@ -252,14 +227,18 @@ impl PosixProcessImpl {
         cancellation_token: CancellationToken,
         #[cfg(windows)] stdin: Option<WriteHalf<NamedPipeServer>>,
         #[cfg(not(windows))] stdin: Option<tokio::net::unix::OwnedWriteHalf>,
-        future: BoxFuture<'static, Result<ExitStatus>>,
+        process: BoxFuture<'static, Result<ExitStatus>>,
+        stdout: LocalBoxFuture<'static, Result<ReadHalf<NamedPipeServer>>>,
+        stderr: LocalBoxFuture<'static, Result<usize>>,
         killsender: tokio::sync::oneshot::Sender<()>,
-        exitcode: watch::Receiver<Option<Result<ExitStatus>>>,
+        exitcode: watch::Receiver<Option<ExitStatus>>,
     ) -> Self {
         Self {
             cancellation_token,
             stdin: Rc::new(Mutex::new(stdin)),
-            future: AtomicTake::new(future),
+            process: AtomicTake::new(process),
+            stdout: AtomicTake::new(stdout),
+            stderr: AtomicTake::new(stderr),
             killsender: AtomicTake::new(killsender),
             exitcode,
         }
@@ -323,9 +302,10 @@ impl PosixProcessImpl {
 
         let (killsender, recv) = oneshot::channel::<()>();
 
-        let mut tasks: tokio::task::JoinSet<Result<Option<ExitStatus>>> = JoinSet::new();
         #[cfg(windows)]
         server.connect().await?;
+        tracing::debug!("connecting to pipe");
+
         #[cfg(windows)]
         let (mut read, write) = tokio::io::split(server);
         #[cfg(not(windows))]
@@ -335,67 +315,67 @@ impl PosixProcessImpl {
             libc::dup2(backup_reserve_fd, 4);
             libc::close(backup_reserve_fd);
         }
-        let stdin = Some(write);
+
         //let mut child_stdout = child.stdout.take().unwrap();
-        let stdout_token = cancellation_token.child_token();
+        let pipe_token = cancellation_token.child_token();
         // Create the tasks to read stdout and stderr to the byte stream
-        tasks.spawn_local(async move {
-            let r = tokio::select! {
-                _ = stdout_token.cancelled() => Ok(None),
-                result = stdout_stream.copy(&mut read) => result.map(|_| None)
-            };
-            let _ = stdout_stream.end_request().send().promise.await;
-            r
-        });
+        let pipe_future = async move {
+            tokio::select! {
+                _ = pipe_token.cancelled() => Ok(0),
+                result = stdout_stream.copy(&mut read) => result
+            }?;
+            Ok(read)
+        };
 
         let stderr_token = cancellation_token.child_token();
         let mut child_stderr = child.stderr.take().unwrap();
-        tasks.spawn_local(async move {
+        /*tasks.spawn_local(async move {
             let r = tokio::select! {
-                _ = stderr_token.cancelled() => Ok(Some(ExitStatus::default())),
-                result = stderr_stream.copy(&mut child_stderr) => result.map(|_| None)
+                _ = stderr_token.cancelled() => Ok(0),
+                result = stderr_stream.copy(&mut child_stderr) => result
             };
             let _ = stderr_stream.end_request().send().promise.await;
             r
-        });
+        });*/
 
-        tasks.spawn_local(async move {
+        let mut stderr = std::io::stderr();
+        let stderr_future = async move {
+            tokio::select! {
+                _ = stderr_token.cancelled() => Ok(0),
+                result = async {
+                    let mut count = 0;
+                    let mut buf = [0u8; 1024];
+                    loop {
+                        let len = child_stderr.read(&mut buf).await?;
+
+                        if len == 0 {
+                            break;
+                        }
+                        stderr.write_all(&buf[..len])?;
+                        count += len;
+                      }
+                      Ok::<usize, eyre::Report>(count)
+                } => result
+            }
+        };
+
+        let (tx, rx) = watch::channel(None);
+        let process_future = async move {
             let r = tokio::select! {
-                result = child.wait() => result.map(Some),
-                Ok(()) = recv => child.kill().await.map(|_| None),
+                result = child.wait() => { tracing::debug!("child {:?} returned {:?}", child.id(), &result); result.map(Some) },
+                Ok(()) = recv => { tracing::warn!("kill signal sent to {:?}", child.id()); child.kill().await.map(|_| None) },
             }?;
 
             tracing::debug!("Process exited with status {:?}", r);
-            Ok(r)
-        });
-
-        let (tx, rx) = watch::channel(None);
-        let future = async move {
-            let mut r = Err(eyre::eyre!("No tasks spawned"));
-            while let Some(result) = tasks.join_next().await {
-                match result {
-                    Ok(Ok(Some(e))) => {
-                        tx.send_replace(Some(Ok(e)));
-                        r = Ok(e);
-                    }
-                    Ok(Ok(None)) => (),
-                    Ok(Err(e)) => {
-                        r = Err(eyre::eyre!(e.to_string())); // We call to_string here because we have to copy the error
-                        tx.send_replace(Some(Err(e)));
-                    }
-                    Err(e) => {
-                        r = Err(eyre::eyre!(e.to_string()));
-                        tx.send_replace(Some(Err(e.into())));
-                    }
-                }
-            }
-            tasks.shutdown().await;
-            r
+            tx.send_replace(r.clone());
+            Ok(r.unwrap_or_default())
         };
         Result::Ok(Self::new(
             cancellation_token,
-            stdin,
-            future.boxed(),
+            Some(write),
+            process_future.boxed(),
+            pipe_future.boxed_local(),
+            stderr_future.boxed_local(),
             killsender,
             rx,
         ))
@@ -412,14 +392,11 @@ impl PosixProcessImpl {
         let status = exitcode.wait_for(|x| x.is_some()).await.to_capnp()?;
 
         if let Some(v) = status.as_ref() {
-            let status = v.as_ref().to_capnp()?;
             #[cfg(not(windows))]
-            return Ok(status
-                .code()
-                .unwrap_or_else(|| status.signal().unwrap_or(i32::MIN)));
+            return Ok(v.code().unwrap_or_else(|| v.signal().unwrap_or(i32::MIN)));
 
             #[cfg(windows)]
-            return Ok(status.code().unwrap_or(i32::MIN));
+            return Ok(v.code().unwrap_or(i32::MIN));
         } else {
             return Ok(i32::MIN);
         }
@@ -434,11 +411,7 @@ impl process::Server<ByteStream, PosixError> for PosixProcessImpl {
         let mut process_error_builder = results_builder.init_result();
 
         if let Some(code) = self.exitcode.borrow().as_ref() {
-            process_error_builder.set_error_code(
-                code.as_ref()
-                    .map(|v| v.code().unwrap_or(i32::MIN) as i64)
-                    .unwrap_or(i64::MIN),
-            );
+            process_error_builder.set_error_code(code.code().unwrap_or(i32::MIN) as i64);
         }
 
         Ok(())

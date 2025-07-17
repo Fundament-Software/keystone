@@ -14,9 +14,9 @@ use crate::sqlite_capnp::{
 };
 use crate::storage_capnp::{saveable, sturdy_ref};
 use crate::sturdyref::SturdyRefImpl;
-use capnp::capability::{FromClientHook, RemotePromise};
+use crate::capnp::capability::{FromClientHook, RemotePromise};
 use capnp_macros::{capnp_let, capnproto_rpc};
-use capnp_rpc::CapabilityServerSet;
+use crate::capnp_rpc::{self, CapabilityServerSet};
 use eyre::eyre;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use rusqlite::{Connection, OpenFlags, Result, params_from_iter};
@@ -2710,8 +2710,8 @@ pub enum ParseError {
 mod tests {
     use crate::sqlite_capnp::insert::source;
     use crate::sqlite_capnp::select_core;
-    use capnp::capability::FromServer;
-    use capnp::private::capability::ClientHook;
+    use crate::capnp::capability::FromServer;
+    use crate::capnp::private::capability::ClientHook;
     use d_b_any::DBAny;
     use tempfile::NamedTempFile;
 

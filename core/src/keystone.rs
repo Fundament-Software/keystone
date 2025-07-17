@@ -1,5 +1,12 @@
 use crate::byte_stream::ByteStreamBufferImpl;
 use crate::cap_replacement::CapReplacement;
+use crate::capnp::any_pointer::Owned as any_pointer;
+use crate::capnp::capability::FromServer;
+use crate::capnp::capability::{FromClientHook, RemotePromise};
+use crate::capnp::private::capability::ClientHook;
+use crate::capnp::traits::SetPointerBuilder;
+use crate::capnp_rpc::twoparty::VatNetwork;
+use crate::capnp_rpc::{self, CapabilityServerSet, RpcSystem, rpc_twoparty_capnp};
 use crate::cell::SimpleCellImpl;
 use crate::database::DatabaseExt;
 use crate::module::*;
@@ -7,13 +14,6 @@ use crate::posix_module::ModuleProcessCapSet;
 pub use crate::proxy::ProxyServer;
 use crate::util::SnowflakeSource;
 use caplog::{CapLog, MAX_BUFFER_SIZE};
-use capnp::any_pointer::Owned as any_pointer;
-use capnp::capability::FromServer;
-use capnp::capability::{FromClientHook, RemotePromise};
-use capnp::private::capability::ClientHook;
-use capnp::traits::SetPointerBuilder;
-use capnp_rpc::twoparty::VatNetwork;
-use capnp_rpc::{CapabilityServerSet, RpcSystem, rpc_twoparty_capnp};
 use eyre::Result;
 use eyre::WrapErr;
 use futures_util::FutureExt;
@@ -843,6 +843,7 @@ impl Keystone {
         loop {
             let len = input.read(&mut buf).await?;
 
+            tracing::debug!("got bytes");
             if len == 0 {
                 break;
             }

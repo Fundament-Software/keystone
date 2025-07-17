@@ -1,4 +1,5 @@
 use hello_world::hello_world_capnp::root;
+use keystone::{capnp, tokio};
 
 #[test]
 fn test_hello_world_init() -> eyre::Result<()> {

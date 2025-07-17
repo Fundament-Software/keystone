@@ -1,5 +1,5 @@
-use capnp::any_pointer::Owned as any_pointer;
-use capnp::{dynamic_struct, dynamic_value};
+use crate::capnp::any_pointer::Owned as any_pointer;
+use crate::capnp::{dynamic_struct, dynamic_value};
 use circular_buffer::CircularBuffer;
 use clap::{Parser, Subcommand, ValueEnum};
 use crossterm::event::KeyCode::Char;

@@ -1,5 +1,9 @@
 use crate::byte_stream::ByteStreamBufferImpl;
 use crate::byte_stream_capnp::byte_stream::Owned as ByteStream;
+use crate::capnp::any_pointer::Owned as any_pointer;
+use crate::capnp::any_pointer::Owned as cap_pointer;
+use crate::capnp::capability::RemotePromise;
+use crate::capnp_rpc::{self, CapabilityServerSet};
 use crate::keystone::CapnpResult;
 use crate::keystone::LogCapture;
 use crate::module_capnp::module_error;
@@ -10,17 +14,12 @@ use crate::posix_spawn_capnp::posix_args::Owned as PosixArgs;
 use crate::posix_spawn_capnp::posix_error::Owned as PosixError;
 use crate::spawn_capnp::process;
 use crate::spawn_capnp::program;
-use capnp::any_pointer::Owned as any_pointer;
-use capnp::any_pointer::Owned as cap_pointer;
-use capnp::capability::RemotePromise;
 use capnp_macros::capnproto_rpc;
-use capnp_rpc::CapabilityServerSet;
 use eyre::Context;
 use futures_util::FutureExt;
 use futures_util::future::LocalBoxFuture;
 use std::process::ExitStatus;
 use std::{cell::RefCell, rc::Rc};
-use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc;
 
 pub struct PosixModuleProcessImpl {
@@ -195,14 +194,14 @@ impl<F: LogCapture>
 
                         let sink = self.module.stderr_sink.call(stderr.clone());
 
-                        let mut process_handle = tokio::task::spawn_local(async move {
-                            tokio::try_join!(process_future, sink).map(|(f, _)| f)
-                        });
+                        //let mut process_handle = tokio::task::spawn_local(async move {
+                        //    tokio::try_join!(process_future, sink).map(|(f, _)| f)
+                        //});
+                        let mut process_handle = tokio::task::spawn_local(process_future);
+                        let sink_handle = tokio::task::spawn_local(sink);
 
                         let (send, mut pause_recv) = mpsc::channel::<bool>(1);
 
-                        let process_clone = process.clone();
-                        let process_set_clone = self.module.process_set.clone();
                         let module_process = Rc::new_cyclic(|this| {
                             let this = this.clone();
                             let bootstrap_hook = bootstrap.client.hook.add_ref();
@@ -269,35 +268,11 @@ impl<F: LogCapture>
                                          }
                                     };
 
-                                    let process_impl = process_set_clone
-                                        .borrow_mut()
-                                        .get_local_server_of_resolved(&process_clone)
-                                        .ok_or(capnp::Error::failed(
-                                            "Couldn't get process implementation!".into(),
-                                        ))
-                                        .unwrap();
-
-                                    let mut write_half =
-                                        process_impl.stdin.lock().await.take().unwrap();
-
-                                    let r = write_half.write_f32(2.0).await;
-                                    tracing::debug!("write f32 gave: {r:?}");
-
                                     // We only await the pipes AFTER the rpc connection has completely closed, otherwise the RPC system
                                     // could try to read from a closed pipe. The pipe future returns a handle to the pipe itself to ensure
                                     // it continues to exist up until the moment we await it.
                                     tracing::debug!("awaiting pipe");
-                                    let mut pipe_result = match pipe_handle.await {
-                                        Ok(Ok(read_half)) => Ok(read_half.unsplit(write_half)),
-                                        _ => Err(capnp::Error::failed("pipe failure".to_string())),
-                                    };
-
-                                    let r = pipe_result.as_mut().unwrap().try_write(&[0]);
-                                    tracing::debug!("write f32 gave: {r:?}");
-                                    let r = pipe_result.as_ref().unwrap().try_read(&mut [0]);
-                                    tracing::debug!("read f32 gave: {r:?}");
-
-                                    if let Err(e) = pipe_result {
+                                    if let Err(e) = pipe_handle.await {
                                         if result.is_ok() {
                                             result = Err(capnp::Error::failed(e.to_string()));
                                         }
@@ -310,6 +285,18 @@ impl<F: LogCapture>
                                         }
                                     }
 
+                                    /*tracing::debug!("awaiting sink handle");
+                                    if let Err(e) = sink_handle.await {
+                                        if result.is_ok() {
+                                            result = Err(capnp::Error::failed(e.to_string()));
+                                        }
+                                    }*/
+
+                                    // TODO: sink_handle deadlocks for some reason, possibly due to waiting on a
+                                    // write forever before it can close?
+                                    sink_handle.abort();
+
+                                    tracing::debug!("returning from module future");
                                     result.map(|_| ()).wrap_err_with(move || {
                                         let name = handle.borrow().debug_name.clone();
                                         if let Some(n) = name {

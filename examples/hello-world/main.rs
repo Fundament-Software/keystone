@@ -1,7 +1,8 @@
-use capnp::any_pointer::Owned as any_pointer;
 use capnp_macros::capnproto_rpc;
 use hello_world::hello_world_capnp;
 use hello_world::hello_world_capnp::root;
+use keystone::capnp::any_pointer::Owned as any_pointer;
+use keystone::{capnp, capnp_rpc, tokio};
 use std::rc::Rc;
 
 pub struct HelloWorldImpl {

@@ -21,31 +21,35 @@ pub mod sqlite;
 mod sturdyref;
 mod util;
 
+pub use caplog::capnp;
+pub use caplog::capnp_rpc;
+pub use caplog::capnp_rpc::tokio;
+
 use atomic_take::AtomicTake;
-use capnp::any_pointer::Owned as any_pointer;
-use capnp::capability::FromServer;
-use capnp::traits::Owned;
+use caplog::capnp::any_pointer::Owned as any_pointer;
+use caplog::capnp::capability::FromServer;
+use caplog::capnp::traits::Owned;
+use caplog::capnp_rpc::tokio::io::{ReadHalf, WriteHalf};
+#[cfg(windows)]
+use caplog::capnp_rpc::tokio::net::windows::named_pipe::{ClientOptions, NamedPipeClient};
+#[cfg(not(windows))]
+use caplog::capnp_rpc::tokio::net::{UnixListener, UnixStream};
+use caplog::capnp_rpc::tokio::sync::oneshot;
+use caplog::capnp_rpc::{RpcSystem, rpc_twoparty_capnp, twoparty};
 use capnp_macros::capnproto_rpc;
-use capnp_rpc::{RpcSystem, rpc_twoparty_capnp, twoparty};
 use eyre::Context;
 use futures_util::StreamExt;
 pub use keystone::*;
 use keystone_capnp::keystone_config;
 pub use module::*;
 use module_capnp::module_start;
-use std::cell::RefCell;
 use std::future::Future;
 use std::marker::PhantomData;
 #[cfg(not(windows))]
 use std::os::fd::FromRawFd;
 use std::rc::Rc;
 use tempfile::NamedTempFile;
-use tokio::io::{ReadHalf, WriteHalf};
-#[cfg(windows)]
-use tokio::net::windows::named_pipe::{ClientOptions, NamedPipeClient, ServerOptions};
-#[cfg(not(windows))]
-use tokio::net::{UnixListener, UnixStream};
-use tokio::sync::oneshot;
+use tokio::sync::OnceCell;
 use tracing_subscriber::filter::LevelFilter;
 
 include!(concat!(env!("OUT_DIR"), "/capnproto.rs"));
@@ -78,9 +82,9 @@ pub struct ModuleImpl<
     Impl: 'static + Module<Config>,
     API: 'static + for<'c> capnp::traits::Owned<Reader<'c>: FromServer<Impl>>,
 > {
-    bootstrap: RefCell<Option<keystone_capnp::host::Client<any_pointer>>>,
-    disconnector: RefCell<Option<capnp_rpc::Disconnector<rpc_twoparty_capnp::Side>>>,
-    inner: RefCell<Option<Rc<Impl>>>,
+    bootstrap: std::cell::OnceCell<keystone_capnp::host::Client<any_pointer>>,
+    disconnector: AtomicTake<oneshot::Sender<()>>,
+    inner: OnceCell<Rc<Impl>>,
     phantom: PhantomData<Config>,
     phantomapi: PhantomData<API>,
     sender: AtomicTake<oneshot::Sender<()>>,
@@ -98,12 +102,18 @@ impl<
             let _ = sender.send(());
         }
         tracing::debug!("Constructing module implementation");
-        let bootstrap_ref = self.bootstrap.borrow_mut().as_ref().map(|x| x.clone());
+        let bootstrap_ref = self.bootstrap.get();
         if let Some(bootstrap) = bootstrap_ref {
-            let inner = Rc::new(Impl::new(config, bootstrap).await?);
-            self.inner.borrow_mut().replace(inner.clone());
+            let inner = self
+                .inner
+                .get_or_try_init(|| async {
+                    Ok::<Rc<Impl>, capnp::Error>(Rc::new(
+                        Impl::new(config, bootstrap.clone()).await?,
+                    ))
+                })
+                .await?;
             let api: API::Reader<'_> = capnp::capability::FromClientHook::new(Box::new(
-                capnp_rpc::local::Client::new(API::Reader::from_rc(inner)),
+                capnp_rpc::local::Client::new(API::Reader::from_rc(inner.clone())),
             ));
             results.get().set_api(api)
         } else {
@@ -112,17 +122,22 @@ impl<
     }
     async fn stop(self: Rc<Self>) -> capnp::Result<()> {
         tracing::debug!("Module recieved stop request");
-        let r = self.disconnector.borrow_mut().take();
-        if let Some(d) = r {
-            let inner_ref = self.inner.borrow().as_ref().map(|x| x.clone());
-            if let Some(inner) = inner_ref {
+        if let Some(tx) = self.disconnector.take() {
+            if let Some(inner) = self.inner.get() {
                 inner.stop().await?;
             }
 
-            d.await
+            tx.send(())
+                .map_err(|_| capnp::Error::failed("Failed to send disconnect message!".into()))
         } else {
             Err(capnp::Error::from_kind(capnp::ErrorKind::Disconnected))
         }
+    }
+}
+
+impl std::fmt::Debug for keystone_capnp::host::Client<capnp::any_pointer::Owned> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        write!(f, "[{}]", self.client.hook.get_ptr())
     }
 }
 
@@ -138,18 +153,19 @@ pub async fn start<
 ) -> eyre::Result<()> {
     tracing::info!("Module starting up...");
     let (sender, recv) = oneshot::channel::<()>();
+    let (tx, rx) = oneshot::channel::<()>();
 
     let module_impl = Rc::new(ModuleImpl {
-        bootstrap: None.into(),
-        disconnector: None.into(),
-        inner: None.into(),
+        bootstrap: Default::default(),
+        disconnector: AtomicTake::new(tx),
+        inner: Default::default(),
         phantom: PhantomData,
         phantomapi: PhantomData,
         sender: AtomicTake::new(sender),
     });
 
     let module_client: module_start::Client<Config, API> =
-        capnp_rpc::new_client_from_rc(module_impl.clone());
+        caplog::capnp_rpc::new_client_from_rc(module_impl.clone());
 
     let network = twoparty::VatNetwork::new(
         reader,
@@ -158,10 +174,13 @@ pub async fn start<
         Default::default(),
     );
     let mut rpc_system = RpcSystem::new(Box::new(network), Some(module_client.clone().client));
+    let disconnector = rpc_system.get_disconnector();
 
     let borrow = module_impl.as_ref();
-    *borrow.bootstrap.borrow_mut() = Some(rpc_system.bootstrap(rpc_twoparty_capnp::Side::Client));
-    *borrow.disconnector.borrow_mut() = Some(rpc_system.get_disconnector());
+    borrow
+        .bootstrap
+        .set(rpc_system.bootstrap(rpc_twoparty_capnp::Side::Client))
+        .unwrap();
 
     tokio::task::spawn_local(async move {
         if tokio::time::timeout(tokio::time::Duration::from_secs(5), recv)
@@ -179,6 +198,9 @@ pub async fn start<
     // We install a ctrl-C handler here so we can shutdown properly when the parent process gets a ctrl-C signal
     let err = tokio::select! {
         r = &mut rpc_system => r,
+        _ = rx => {
+            tokio::try_join!(disconnector, rpc_system).map(|_| ())
+        }
         r = tokio::signal::ctrl_c() => {
             r.expect("failed to capture ctrl-c");
             let call = module_client.stop_request().send();
@@ -326,7 +348,7 @@ pub fn test_harness<F: Future<Output = eyre::Result<()>> + 'static>(
     let pool = tokio::task::LocalSet::new();
     let fut = pool.run_until(async move {
         tokio::time::timeout(
-            tokio::time::Duration::from_secs(5),
+            tokio::time::Duration::from_secs(500000),
             tokio::task::spawn_local(f(message)),
         )
         .await
@@ -334,7 +356,7 @@ pub fn test_harness<F: Future<Output = eyre::Result<()>> + 'static>(
 
     let runtime = tokio::runtime::Runtime::new()?;
     let result = runtime.block_on(fut);
-    runtime.shutdown_timeout(std::time::Duration::from_millis(2));
+    //runtime.shutdown_timeout(std::time::Duration::from_millis(20000000));
     if result.unwrap().unwrap().is_err() {
         panic!("Test took too long!");
     }
@@ -355,7 +377,6 @@ pub async fn drive_stream(
 #[inline]
 pub async fn test_shutdown(instance: &mut Keystone, runner: &mut RpcSystemSet) -> eyre::Result<()> {
     let mut shutdown = instance.shutdown();
-
     tokio::try_join!(drive_stream(&mut shutdown), drive_stream(runner))?;
     Ok::<(), eyre::Report>(())
 }

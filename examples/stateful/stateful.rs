@@ -1,6 +1,7 @@
 use crate::stateful_capnp::my_state;
 use crate::stateful_capnp::root;
 use capnp_macros::capnproto_rpc;
+use keystone::capnp;
 use keystone::storage_capnp::cell;
 use std::rc::Rc;
 

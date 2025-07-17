@@ -1,8 +1,6 @@
-include!(concat!(env!("OUT_DIR"), "/capnproto.rs"));
-
-use capnp::any_pointer::Owned as any_pointer;
 use capnp::capability::FromClientHook;
 use capnp_macros::capnproto_rpc;
+use keystone::capnp::any_pointer::Owned as any_pointer;
 use keystone::sqlite_capnp::add_d_b;
 use keystone::sqlite_capnp::d_b_any;
 use keystone::sqlite_capnp::database;
@@ -20,7 +18,8 @@ use keystone::sqlite_capnp::select_core;
 use keystone::sqlite_capnp::table_field;
 use keystone::sqlite_capnp::table_or_subquery;
 use keystone::storage_capnp::cell;
-use sqlite_usage_capnp::root;
+use keystone::{capnp, tokio};
+use sqlite_usage::sqlite_usage_capnp::root;
 use std::rc::Rc;
 
 pub struct SqliteUsageImpl {
@@ -112,9 +111,11 @@ impl root::Server for SqliteUsageImpl {
     }
 }
 
-impl keystone::Module<sqlite_usage_capnp::config::Owned> for SqliteUsageImpl {
+impl keystone::Module<sqlite_usage::sqlite_usage_capnp::config::Owned> for SqliteUsageImpl {
     async fn new(
-        config: <sqlite_usage_capnp::config::Owned as capnp::traits::Owned>::Reader<'_>,
+        config: <sqlite_usage::sqlite_usage_capnp::config::Owned as capnp::traits::Owned>::Reader<
+            '_,
+        >,
         _: keystone::keystone_capnp::host::Client<any_pointer>,
     ) -> capnp::Result<Self> {
         let sqlite = config.get_sqlite()?;
@@ -157,7 +158,7 @@ impl keystone::Module<sqlite_usage_capnp::config::Owned> for SqliteUsageImpl {
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    keystone::main::<crate::sqlite_usage_capnp::config::Owned, SqliteUsageImpl, root::Owned>(
+    keystone::main::<sqlite_usage::sqlite_usage_capnp::config::Owned, SqliteUsageImpl, root::Owned>(
         async move {
             //let _: Vec<String> = ::std::env::args().collect();
         },
@@ -177,9 +178,9 @@ fn test_sqlite_usage() -> eyre::Result<()> {
         .init();
 
     keystone::test_module_harness::<
-        crate::sqlite_usage_capnp::config::Owned,
+        sqlite_usage::sqlite_usage_capnp::config::Owned,
         SqliteUsageImpl,
-        crate::sqlite_usage_capnp::root::Owned,
+        sqlite_usage::sqlite_usage_capnp::root::Owned,
         _,
     >(
         &keystone::build_module_config(
@@ -189,7 +190,7 @@ fn test_sqlite_usage() -> eyre::Result<()> {
         ),
         "Sqlite Usage",
         |api| async move {
-            let usage_client: crate::sqlite_usage_capnp::root::Client = api;
+            let usage_client: sqlite_usage::sqlite_usage_capnp::root::Client = api;
 
             {
                 let mut echo = usage_client.echo_alphabetical_request();

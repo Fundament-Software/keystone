@@ -51,6 +51,7 @@ pub fn extended(
         .into();
 
     let mut cmd = capnpc::CompilerCommand::new();
+    cmd.capnp_root("::keystone::capnp");
     cmd.output_path(out_dir.join("capnp_output"));
     cmd.omnibus(out_dir.join(rust_out));
 

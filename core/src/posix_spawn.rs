@@ -24,7 +24,7 @@ impl local_native_program::Server for LocalNativeProgramImpl {
             let program =
                 PosixProgramImpl::new(handle, self.process_set.clone(), "warn".to_string());
 
-            let program_client: PosixProcessClient = capnp_rpc::new_client(program);
+            let program_client: PosixProcessClient = crate::capnp_rpc::new_client(program);
             results.get().set_result(program_client);
             Ok(())
         } else {

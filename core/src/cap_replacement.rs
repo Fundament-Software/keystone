@@ -1,10 +1,10 @@
-use capnp::private::capability::ClientHook;
-use capnp::private::layout::ElementSize;
-use capnp::private::layout::PointerBuilder;
-use capnp::private::layout::PointerReader;
-use capnp::private::layout::PointerType;
-use capnp::private::layout::StructBuilder;
-use capnp::private::layout::StructReader;
+use crate::capnp::private::capability::ClientHook;
+use crate::capnp::private::layout::ElementSize;
+use crate::capnp::private::layout::PointerBuilder;
+use crate::capnp::private::layout::PointerReader;
+use crate::capnp::private::layout::PointerType;
+use crate::capnp::private::layout::StructBuilder;
+use crate::capnp::private::layout::StructReader;
 use std::future::Future;
 
 pub struct CapReplacement<'a, F: FnMut(u64, capnp::any_pointer::Builder<'_>) -> capnp::Result<()>> {

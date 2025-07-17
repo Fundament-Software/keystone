@@ -1,6 +1,7 @@
-use capnp::capability::RemotePromise;
-use capnp::{any_pointer::Owned as any_pointer, dynamic_struct};
-use capnp::{dynamic_list, dynamic_value};
+use crate::capnp::capability::RemotePromise;
+use crate::capnp::{any_pointer::Owned as any_pointer, dynamic_struct};
+use crate::capnp::{dynamic_list, dynamic_value};
+use crate::capnp_rpc::queued;
 use eyre::Result;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -419,7 +420,7 @@ pub struct ModuleInstance {
         >,
     >,
     pub state: ModuleState,
-    pub queue: capnp_rpc::queued::Client,
+    pub queue: queued::Client,
     pub dyn_schema: Option<capnp::schema::DynamicSchema>,
 }
 
@@ -468,7 +469,7 @@ impl ModuleInstance {
         self.bootstrap = None;
         self.process = None;
         self.program = None;
-        self.queue = capnp_rpc::queued::Client::new(None);
+        self.queue = queued::Client::new(None);
         let (empty_send, _) = tokio::sync::mpsc::channel(1);
         self.pause = empty_send;
     }
@@ -487,17 +488,23 @@ impl ModuleInstance {
 
         let stop_request = bootstrap.stop_request().send();
 
+        tracing::debug!("Sent a stop_request to {}", &self.name);
+
         // Call the stop method with some timeout
         if (tokio::time::timeout(timeout, stop_request.promise).await).is_err() {
             // Force kill the module.
+            tracing::warn!("{} timed out when requesting stop!", &self.name);
             self.kill().await;
             self.reset();
             Ok(())
         } else {
+            tracing::debug!("Got stop_request reply back from {}", &self.name);
+
             if let Some(p) = self.process.as_ref() {
                 // Now join the process with the same timeout
                 match tokio::time::timeout(timeout, p.join_request().send().promise).await {
                     Ok(result) => {
+                        tracing::debug!("Joined process for {}", &self.name);
                         self.state = match Self::check_error(&self.name, result) {
                             Ok(v) => v,
                             Err(e) => {
@@ -520,6 +527,7 @@ impl ModuleInstance {
 
     pub async fn kill(&mut self) {
         if let Some(p) = self.process.as_ref() {
+            tracing::warn!("Force killing {}", &self.name);
             let _ = p.kill_request().send().promise.await;
         }
 

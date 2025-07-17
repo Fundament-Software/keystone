@@ -1,4 +1,4 @@
-use capnp::introspect::Introspect;
+use crate::capnp::introspect::Introspect;
 use capnp_macros::capnproto_rpc;
 use chrono::DateTime;
 use chrono::Datelike;
@@ -7,13 +7,14 @@ use chrono::Timelike;
 use rusqlite::CachedStatement;
 use rusqlite::OptionalExtension;
 
+use crate::capnp::any_pointer::Owned as any_pointer;
+use crate::capnp::private::capability::ClientHook;
+use crate::capnp_rpc;
 use crate::database::DatabaseExt;
 use crate::keystone::CapnpResult;
 use crate::scheduler_capnp::MissBehavior;
 use crate::sqlite::SqliteDatabase;
 use atomicbox::AtomicOptionBox;
-use capnp::any_pointer::Owned as any_pointer;
-use capnp::private::capability::ClientHook;
 use chrono_tz::Tz;
 use eyre::Result;
 use futures_util::TryFutureExt;
@@ -632,6 +633,11 @@ impl root::Server for Scheduler {
 
 #[cfg(test)]
 mod tests {
+    use crate::capnp::any_pointer::Owned as any_pointer;
+    use crate::capnp::capability::FromClientHook;
+    use crate::capnp::capability::FromServer;
+    use crate::capnp::private::capability::ClientHook;
+    use crate::capnp_rpc;
     use crate::keystone::CapnpResult;
     use crate::scheduler_capnp::MissBehavior;
     use crate::scheduler_capnp::action;
@@ -640,10 +646,6 @@ mod tests {
     use crate::storage_capnp::restore;
     use crate::storage_capnp::saveable;
     use atomic_take::AtomicTake;
-    use capnp::any_pointer::Owned as any_pointer;
-    use capnp::capability::FromClientHook;
-    use capnp::capability::FromServer;
-    use capnp::private::capability::ClientHook;
     use capnp_macros::capnproto_rpc;
     use chrono::Datelike;
     use chrono::TimeZone;

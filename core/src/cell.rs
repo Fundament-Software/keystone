@@ -1,7 +1,7 @@
 use crate::database::DatabaseExt;
 use crate::sqlite::SqliteDatabase;
 use crate::storage_capnp::cell;
-use capnp::any_pointer::Owned as any_pointer;
+use crate::capnp::any_pointer::Owned as any_pointer;
 use capnp_macros::capnproto_rpc;
 use std::rc::Rc;
 

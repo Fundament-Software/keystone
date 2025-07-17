@@ -1,0 +1,876 @@
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+
+running 1 test
+[2m2025-07-16T14:08:05.668648Z[0m [34mDEBUG[0m [1mInitialization[0m[2m:[0m [2mkeystone::keystone[0m[2m:[0m [3mconfig[0m[2m=[0m(database = "C:\\Users\\mcclu\\AppData\\Local\\Temp\\.tmpzny8UX", caplog = (trieFile = "C:\\Users\\mcclu\\AppData\\Local\\Temp\\.tmpEHBNHv", dataPrefix = "C:\\Users\\mcclu\\AppData\\Local\\Temp\\.tmpBC3od5", maxFileSize = 268435456, maxOpenFiles = 10), modules = [(name = "Hello World", config = <opaque pointer>, path = "F:/code/keystone/target/debug/hello-world-module.exe")], defaultLog = none, defaultCall = nameOnly, msTimeout = 30000, capTable = []) [3mcheck_consistency[0m[2m=[0mfalse
+[2m2025-07-16T14:08:05.713961Z[0m [34mDEBUG[0m [1mInitialization[0m[2m:[0m [2mkeystone::keystone[0m[2m:[0m Iterating through 1 modules
+[2m2025-07-16T14:08:05.720540Z[0m [32m INFO[0m [1mInitialization[0m[2m:[0m [2mkeystone::keystone[0m[2m:[0m Found Hello World module with id 4
+[2m2025-07-16T14:08:05.726157Z[0m [34mDEBUG[0m [1mInitializing[0m[1m{[0m[3mname[0m[2m=[0m"Hello World"[1m}[0m[2m:[0m [2mkeystone::keystone[0m[2m:[0m Set Initialized flag
+[2m2025-07-16T14:08:05.726502Z[0m [34mDEBUG[0m [1mInitializing[0m[1m{[0m[3mname[0m[2m=[0m"Hello World"[1m}[0m[2m:[0m [2mkeystone::keystone[0m[2m:[0m Sending spawn request inside F:/code/keystone/target/debug
+[2m2025-07-16T14:08:05.733074Z[0m [34mDEBUG[0m [1mInitializing[0m[1m{[0m[3mname[0m[2m=[0m"Hello World"[1m}[0m[2m:[0m[1mposix_program::spawn[0m[2m:[0m [2mkeystone::posix_process[0m[2m:[0m connecting to pipe
+[2m2025-07-16T14:08:05.733647Z[0m [34mDEBUG[0m [1mInitializing[0m[1m{[0m[3mname[0m[2m=[0m"Hello World"[1m}[0m[2m:[0m [2mkeystone::keystone[0m[2m:[0m Sending API request
+[2m2025-07-16T14:08:06.009716Z[0m [34mDEBUG[0m [2mkeystone::posix_module[0m[2m:[0m rpc_handle returned error: Failed: Failed:    0: std::backtrace_rs::backtrace::win64::trace
+             at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\std\src\..\..\backtrace\src\backtrace\win64.rs:85
+   1: std::backtrace_rs::backtrace::trace_unsynchronized
+             at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\std\src\..\..\backtrace\src\backtrace\mod.rs:66
+   2: std::backtrace::Backtrace::create
+             at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\std\src\backtrace.rs:331
+   3: std::backtrace::Backtrace::capture
+             at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\std\src\backtrace.rs:296
+   4: capnp::impl$6::from
+             at F:\packages\.cargo\git\checkouts\capstone-rs-632f171ccb653c24\84502ed\capnp\src\lib.rs:534
+   5: core::result::impl$28::from_residual<tuple$<>,std::io::error::Error,capnp::Error>
+             at C:\Users\mcclu\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib\rustlib\src\rust\library\core\src\result.rs:2050
+   6: capnp_futures::serialize::write_message::async_fn$0<ref_mut$<keystone::byte_stream::ClientWriter>,ref$<alloc::rc::Rc<capnp::message::Builder<capnp::message::HeapAllocator>,alloc::alloc::Global> > >
+             at F:\packages\.cargo\git\checkouts\capstone-rs-632f171ccb653c24\84502ed\capnp-futures\src\serialize.rs:202
+   7: capnp_futures::write_queue::write_queue::async_block$0<keystone::byte_stream::ClientWriter,alloc::rc::Rc<capnp::message::Builder<capnp::message::HeapAllocator>,alloc::alloc::Global> >
+             at F:\packages\.cargo\git\checkouts\capstone-rs-632f171ccb653c24\84502ed\capnp-futures\src\write_queue.rs:79
+   8: futures_util::future::future::map::impl$2::poll<enum2$<capnp_futures::write_queue::write_queue::async_block_env$0<keystone::byte_stream::ClientWriter,alloc::rc::Rc<capnp::message::Builder<capnp::message::HeapAllocator>,alloc::alloc::Global> > >,capnp_rpc::
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\futures-util-0.3.31\src\future\future\map.rs:55
+   9: futures_util::future::future::impl$14::poll<enum2$<capnp_futures::write_queue::write_queue::async_block_env$0<keystone::byte_stream::ClientWriter,alloc::rc::Rc<capnp::message::Builder<capnp::message::HeapAllocator>,alloc::alloc::Global> > >,capnp_rpc::twop
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\futures-util-0.3.31\src\lib.rs:86
+  10: futures_util::future::future::flatten::impl$2::poll<futures_util::future::future::Map<enum2$<capnp_futures::write_queue::write_queue::async_block_env$0<keystone::byte_stream::ClientWriter,alloc::rc::Rc<capnp::message::Builder<capnp::message::HeapAllocator>
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\futures-util-0.3.31\src\future\future\flatten.rs:50
+  11: futures_util::future::future::impl$29::poll<enum2$<capnp_futures::write_queue::write_queue::async_block_env$0<keystone::byte_stream::ClientWriter,alloc::rc::Rc<capnp::message::Builder<capnp::message::HeapAllocator>,alloc::alloc::Global> > >,futures_util::f
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\futures-util-0.3.31\src\lib.rs:86
+  12: capnp::capability::impl$2::poll<tuple$<>,capnp::Error>
+             at F:\packages\.cargo\git\checkouts\capstone-rs-632f171ccb653c24\84502ed\capnp\src\capability.rs:105
+  13: futures_util::future::future::shared::impl$11::poll<capnp::capability::Promise<tuple$<>,capnp::Error> >
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\futures-util-0.3.31\src\future\future\shared.rs:322
+  14: capnp::capability::impl$2::poll<tuple$<>,capnp::Error>
+             at F:\packages\.cargo\git\checkouts\capstone-rs-632f171ccb653c24\84502ed\capnp\src\capability.rs:105
+  15: futures_util::future::future::map::impl$2::poll<capnp::capability::Promise<tuple$<>,capnp::Error>,capnp_rpc::impl$0::new::closure_env$0<capnp_rpc::rpc_twoparty_capnp::Side>,capnp::capability::Promise<tuple$<>,capnp::Error> >
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\futures-util-0.3.31\src\future\future\map.rs:55
+  16: futures_util::future::future::impl$14::poll<capnp::capability::Promise<tuple$<>,capnp::Error>,capnp_rpc::impl$0::new::closure_env$0<capnp_rpc::rpc_twoparty_capnp::Side> >
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\futures-util-0.3.31\src\lib.rs:86
+  17: futures_util::future::future::flatten::impl$2::poll<futures_util::future::future::Map<capnp::capability::Promise<tuple$<>,capnp::Error>,capnp_rpc::impl$0::new::closure_env$0<capnp_rpc::rpc_twoparty_capnp::Side> > >
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\futures-util-0.3.31\src\future\future\flatten.rs:50
+  18: futures_util::future::future::impl$29::poll<capnp::capability::Promise<tuple$<>,capnp::Error>,capnp::capability::Promise<tuple$<>,capnp::Error>,capnp_rpc::impl$0::new::closure_env$0<capnp_rpc::rpc_twoparty_capnp::Side> >
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\futures-util-0.3.31\src\lib.rs:86
+  19: core::future::future::impl$1::poll<alloc::boxed::Box<dyn$<core::future::future::Future<assoc$<Output,enum2$<core::result::Result<tuple$<>,capnp::Error> > > > >,alloc::alloc::Global> >
+             at C:\Users\mcclu\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib\rustlib\src\rust\library\core\src\future\future.rs:124
+  20: futures_util::future::future::map::impl$2::poll<core::pin::Pin<alloc::boxed::Box<dyn$<core::future::future::Future<assoc$<Output,enum2$<core::result::Result<tuple$<>,capnp::Error> > > > >,alloc::alloc::Global> >,capnp_rpc::task_set::impl$4::poll::closure_e
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\futures-util-0.3.31\src\future\future\map.rs:55
+  21: futures_util::future::future::impl$14::poll<core::pin::Pin<alloc::boxed::Box<dyn$<core::future::future::Future<assoc$<Output,enum2$<core::result::Result<tuple$<>,capnp::Error> > > > >,alloc::alloc::Global> >,capnp_rpc::task_set::impl$4::poll::closure_env$0
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\futures-util-0.3.31\src\lib.rs:86
+  22: capnp_rpc::task_set::impl$1::poll<capnp::Error>
+             at F:\packages\.cargo\git\checkouts\capstone-rs-632f171ccb653c24\84502ed\capnp-rpc\src\task_set.rs:55
+  23: futures_util::stream::futures_unordered::impl$7::poll_next<enum2$<capnp_rpc::task_set::TaskInProgress<capnp::Error> > >
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\futures-util-0.3.31\src\stream\futures_unordered\mod.rs:528
+  24: capnp_rpc::task_set::impl$4::poll<capnp::Error>
+             at F:\packages\.cargo\git\checkouts\capstone-rs-632f171ccb653c24\84502ed\capnp-rpc\src\task_set.rs:174
+  25: capnp_rpc::impl$1::poll<capnp_rpc::rpc_twoparty_capnp::Side>
+             at F:\packages\.cargo\git\checkouts\capstone-rs-632f171ccb653c24\84502ed\capnp-rpc\src\lib.rs:345
+  26: core::future::future::impl$0::poll<capnp_rpc::RpcSystem<capnp_rpc::rpc_twoparty_capnp::Side> >
+             at C:\Users\mcclu\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib\rustlib\src\rust\library\core\src\future\future.rs:112
+  27: keystone::posix_module::impl$2::spawn::async_fn$0::closure$1::async_block$0::async_block$0::closure$0<enum2$<keystone::keystone::impl$2::passthrough_stderr::async_fn_env$0> (*)(keystone::byte_stream::ByteStreamBufferImpl)>
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\macros\select.rs:708
+  28: core::future::poll_fn::impl$2::poll<enum2$<keystone::posix_module::impl$2::spawn::async_fn$0::closure$1::async_block$0::async_block$0::__tokio_select_util::Out<enum2$<core::result::Result<tuple$<>,capnp::Error> >,enum2$<core::option::Option<bool> > > >,key
+             at C:\Users\mcclu\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib\rustlib\src\rust\library\core\src\future\poll_fn.rs:151
+  29: keystone::posix_module::impl$2::spawn::async_fn$0::closure$1::async_block$0::async_block$0<enum2$<keystone::keystone::impl$2::passthrough_stderr::async_fn_env$0> (*)(keystone::byte_stream::ByteStreamBufferImpl)>
+             at F:\code\keystone\core\src\posix_module.rs:221
+  30: tokio::runtime::task::core::impl$6::poll::closure$0<enum2$<keystone::posix_module::impl$2::spawn::async_fn$0::closure$1::async_block$0::async_block_env$0<enum2$<keystone::keystone::impl$2::passthrough_stderr::async_fn_env$0> (*)(keystone::byte_stream::Byte
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\task\core.rs:331
+  31: tokio::loom::std::unsafe_cell::UnsafeCell<enum2$<tokio::runtime::task::core::Stage<enum2$<keystone::posix_module::impl$2::spawn::async_fn$0::closure$1::async_block$0::async_block_env$0<enum2$<keystone::keystone::impl$2::passthrough_stderr::async_fn_env$0> 
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\loom\std\unsafe_cell.rs:16
+  32: tokio::runtime::task::core::Core<enum2$<keystone::posix_module::impl$2::spawn::async_fn$0::closure$1::async_block$0::async_block_env$0<enum2$<keystone::keystone::impl$2::passthrough_stderr::async_fn_env$0> (*)(keystone::byte_stream::ByteStreamBufferImpl)> 
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\task\core.rs:320
+  33: tokio::runtime::task::harness::poll_future::closure$0<enum2$<keystone::posix_module::impl$2::spawn::async_fn$0::closure$1::async_block$0::async_block_env$0<enum2$<keystone::keystone::impl$2::passthrough_stderr::async_fn_env$0> (*)(keystone::byte_stream::By
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\task\harness.rs:532
+  34: core::panic::unwind_safe::impl$25::call_once<enum2$<core::task::poll::Poll<enum2$<core::result::Result<tuple$<>,capnp::Error> > > >,tokio::runtime::task::harness::poll_future::closure_env$0<enum2$<keystone::posix_module::impl$2::spawn::async_fn$0::closure$
+             at C:\Users\mcclu\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib\rustlib\src\rust\library\core\src\panic\unwind_safe.rs:272
+  35: std::panicking::try::do_call<core::panic::unwind_safe::AssertUnwindSafe<tokio::runtime::task::harness::poll_future::closure_env$0<enum2$<keystone::posix_module::impl$2::spawn::async_fn$0::closure$1::async_block$0::async_block_env$0<enum2$<keystone::keyston
+             at C:\Users\mcclu\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib\rustlib\src\rust\library\std\src\panicking.rs:589
+  36: std::panic::catch_unwind<core::panic::unwind_safe::AssertUnwindSafe<tokio::runtime::task::harness::poll_future::closure_env$0<enum2$<init::test_hello_world_empty::closure$0::async_block_env$0>,alloc::sync::Arc<tokio::task::local::Shared,alloc::alloc::Globa
+  37: std::panicking::try
+             at C:\Users\mcclu\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib\rustlib\src\rust\library\std\src\panicking.rs:552
+  38: std::panic::catch_unwind<core::panic::unwind_safe::AssertUnwindSafe<tokio::runtime::task::harness::poll_future::closure_env$0<enum2$<keystone::posix_module::impl$2::spawn::async_fn$0::closure$1::async_block$0::async_block_env$0<enum2$<keystone::keystone::i
+             at C:\Users\mcclu\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib\rustlib\src\rust\library\std\src\panic.rs:359
+  39: tokio::runtime::task::harness::poll_future<enum2$<keystone::posix_module::impl$2::spawn::async_fn$0::closure$1::async_block$0::async_block_env$0<enum2$<keystone::keystone::impl$2::passthrough_stderr::async_fn_env$0> (*)(keystone::byte_stream::ByteStreamBuf
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\task\harness.rs:520
+  40: tokio::runtime::task::harness::Harness<enum2$<keystone::posix_module::impl$2::spawn::async_fn$0::closure$1::async_block$0::async_block_env$0<enum2$<keystone::keystone::impl$2::passthrough_stderr::async_fn_env$0> (*)(keystone::byte_stream::ByteStreamBufferI
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\task\harness.rs:209
+  41: tokio::runtime::task::harness::Harness<enum2$<keystone::posix_module::impl$2::spawn::async_fn$0::closure$1::async_block$0::async_block_env$0<enum2$<keystone::keystone::impl$2::passthrough_stderr::async_fn_env$0> (*)(keystone::byte_stream::ByteStreamBufferI
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\task\harness.rs:154
+  42: tokio::runtime::task::raw::poll<enum2$<keystone::posix_module::impl$2::spawn::async_fn$0::closure$1::async_block$0::async_block_env$0<enum2$<keystone::keystone::impl$2::passthrough_stderr::async_fn_env$0> (*)(keystone::byte_stream::ByteStreamBufferImpl)> >
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\task\raw.rs:271
+  43: tokio::runtime::task::raw::RawTask::poll
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\task\raw.rs:201
+  44: tokio::runtime::task::LocalNotified<alloc::sync::Arc<tokio::task::local::Shared,alloc::alloc::Global> >::run<alloc::sync::Arc<tokio::task::local::Shared,alloc::alloc::Global> >
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\task\mod.rs:463
+  45: tokio::task::local::impl$4::tick::closure$0
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\task\local.rs:739
+  46: tokio::task::coop::with_budget
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\task\coop\mod.rs:167
+  47: tokio::task::coop::budget
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\task\coop\mod.rs:133
+  48: tokio::task::local::LocalSet::tick
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\task\local.rs:739
+  49: tokio::task::local::impl$10::poll::closure$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hello_world_init::closure_env$0> > >
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\task\local.rs:1045
+  50: tokio::task::local::impl$4::with::closure$0<enum2$<core::task::poll::Poll<enum2$<core::result::Result<enum2$<core::result::Result<enum2$<core::result::Result<tuple$<>,eyre::Report> >,tokio::runtime::task::error::JoinError> >,tokio::time::error::Elapsed> > 
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\task\local.rs:793
+  51: std::thread::local::LocalKey<tokio::task::local::LocalData>::try_with<tokio::task::local::LocalData,tokio::task::local::impl$4::with::closure_env$0<enum2$<core::task::poll::Poll<enum2$<core::result::Result<enum2$<core::result::Result<enum2$<core::result::R
+             at C:\Users\mcclu\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib\rustlib\src\rust\library\std\src\thread\local.rs:315
+  52: std::thread::local::LocalKey<tokio::task::local::LocalData>::with<tokio::task::local::LocalData,tokio::task::local::impl$4::with::closure_env$0<enum2$<core::task::poll::Poll<enum2$<core::result::Result<enum2$<core::result::Result<enum2$<core::result::Resul
+             at C:\Users\mcclu\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib\rustlib\src\rust\library\std\src\thread\local.rs:279
+  53: tokio::task::local::LocalSet::with<enum2$<core::task::poll::Poll<enum2$<core::result::Result<enum2$<core::result::Result<enum2$<core::result::Result<tuple$<>,eyre::Report> >,tokio::runtime::task::error::JoinError> >,tokio::time::error::Elapsed> > > >,tokio
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\task\local.rs:791
+  54: tokio::task::local::impl$10::poll<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hello_world_init::closure_env$0> > >
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\task\local.rs:1031
+  55: tokio::task::local::impl$4::run_until::async_fn$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hello_world_init::closure_env$0> > >
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\task\local.rs:689
+  56: tokio::runtime::park::impl$4::block_on::closure$0<enum2$<tokio::task::local::impl$4::run_until::async_fn_env$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hello_world_init::c
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\park.rs:284
+  57: tokio::task::coop::with_budget
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\task\coop\mod.rs:167
+  58: tokio::task::coop::budget
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\task\coop\mod.rs:133
+  59: tokio::runtime::park::CachedParkThread::block_on<enum2$<tokio::task::local::impl$4::run_until::async_fn_env$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hello_world_init::cl
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\park.rs:284
+  60: tokio::runtime::context::blocking::BlockingRegionGuard::block_on<enum2$<tokio::task::local::impl$4::run_until::async_fn_env$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hell
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\context\blocking.rs:66
+  61: tokio::runtime::scheduler::multi_thread::impl$0::block_on::closure$0<enum2$<tokio::task::local::impl$4::run_until::async_fn_env$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\scheduler\multi_thread\mod.rs:87
+  62: tokio::runtime::context::runtime::enter_runtime<tokio::runtime::scheduler::multi_thread::impl$0::block_on::closure_env$0<enum2$<tokio::task::local::impl$4::run_until::async_fn_env$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_w
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\context\runtime.rs:65
+  63: tokio::runtime::scheduler::multi_thread::MultiThread::block_on<enum2$<tokio::task::local::impl$4::run_until::async_fn_env$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hello_
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\scheduler\multi_thread\mod.rs:86
+  64: tokio::runtime::runtime::Runtime::block_on_inner<enum2$<tokio::task::local::impl$4::run_until::async_fn_env$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hello_world_init::cl
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\runtime.rs:358
+  65: tokio::runtime::runtime::Runtime::block_on<enum2$<tokio::task::local::impl$4::run_until::async_fn_env$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hello_world_init::closure_
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\runtime.rs:330
+  66: keystone::test_harness<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hello_world_init::closure_env$0>
+             at F:\code\keystone\core\src\lib.rs:336
+  67: init::test_hello_world_init
+             at .\tests\init.rs:20
+  68: init::test_hello_world_init::closure$0
+             at .\tests\init.rs:4
+  69: core::ops::function::FnOnce::call_once<init::test_hello_world_init::closure_env$0,tuple$<> >
+             at C:\Users\mcclu\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib\rustlib\src\rust\library\core\src\ops\function.rs:250
+  70: core::ops::function::FnOnce::call_once
+             at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\core\src\ops\function.rs:250
+  71: test::__rust_begin_short_backtrace<enum2$<core::result::Result<tuple$<>,alloc::string::String> >,enum2$<core::result::Result<tuple$<>,alloc::string::String> > (*)()>
+             at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\test\src\lib.rs:648
+  72: test::run_test_in_process
+             at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\test\src\lib.rs:671
+  73: test::run_test::closure$0
+             at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\test\src\lib.rs:592
+  74: test::run_test::closure$1
+             at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\test\src\lib.rs:622
+  75: std::sys::backtrace::__rust_begin_short_backtrace<test::run_test::closure_env$1,tuple$<> >
+             at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\std\src\sys\backtrace.rs:152
+  76: core::ops::function::FnOnce::call_once<std::thread::impl$0::spawn_unchecked_::closure_env$1<test::run_test::closure_env$1,tuple$<> >,tuple$<> >
+             at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\core\src\ops\function.rs:250
+  77: alloc::boxed::impl$28::call_once
+             at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\alloc\src\boxed.rs:1966
+  78: alloc::boxed::impl$28::call_once
+             at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\alloc\src\boxed.rs:1966
+  79: std::sys::pal::windows::thread::impl$0::new::thread_start
+             at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\std\src\sys\pal\windows\thread.rs:56
+  80: BaseThreadInitThunk
+  81: RtlUserThreadStart
+ |    0: std::backtrace_rs::backtrace::win64::trace
+             at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\std\src\..\..\backtrace\src\backtrace\win64.rs:85
+   1: std::backtrace_rs::backtrace::trace_unsynchronized
+             at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\std\src\..\..\backtrace\src\backtrace\mod.rs:66
+   2: std::backtrace::Backtrace::create
+             at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\std\src\backtrace.rs:331
+   3: std::backtrace::Backtrace::capture
+             at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\std\src\backtrace.rs:296
+   4: capnp::Error::failed
+             at F:\packages\.cargo\git\checkouts\capstone-rs-632f171ccb653c24\84502ed\capnp\src\lib.rs:459
+   5: keystone::keystone::impl$0::to_capnp::closure$0<tuple$<>,capnp::Error>
+             at F:\code\keystone\core\src\keystone.rs:36
+   6: enum2$<core::result::Result<tuple$<>,capnp::Error> >::map_err<tuple$<>,capnp::Error,capnp::Error,keystone::keystone::impl$0::to_capnp::closure_env$0<tuple$<>,capnp::Error> >
+             at C:\Users\mcclu\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib\rustlib\src\rust\library\core\src\result.rs:884
+   7: keystone::keystone::impl$0::to_capnp<tuple$<>,capnp::Error>
+             at F:\code\keystone\core\src\keystone.rs:36
+   8: keystone::posix_module::flatten_to_capnp<tuple$<>,capnp::Error,tokio::runtime::task::error::JoinError>
+             at F:\code\keystone\core\src\posix_module.rs:118
+   9: keystone::posix_module::impl$2::spawn::async_fn$0::closure$1::async_block$0<enum2$<keystone::keystone::impl$2::passthrough_stderr::async_fn_env$0> (*)(keystone::byte_stream::ByteStreamBufferImpl)>
+             at F:\code\keystone\core\src\posix_module.rs:236
+  10: core::future::future::impl$1::poll<alloc::boxed::Box<dyn$<core::future::future::Future<assoc$<Output,enum2$<core::result::Result<tuple$<>,eyre::Report> > > > >,alloc::alloc::Global> >
+             at C:\Users\mcclu\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib\rustlib\src\rust\library\core\src\future\future.rs:124
+  11: futures_util::stream::futures_unordered::impl$7::poll_next<core::pin::Pin<alloc::boxed::Box<dyn$<core::future::future::Future<assoc$<Output,enum2$<core::result::Result<tuple$<>,eyre::Report> > > > >,alloc::alloc::Global> > >
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\futures-util-0.3.31\src\stream\futures_unordered\mod.rs:528
+  12: futures_util::stream::stream::StreamExt::poll_next_unpin<futures_util::stream::futures_unordered::FuturesUnordered<core::pin::Pin<alloc::boxed::Box<dyn$<core::future::future::Future<assoc$<Output,enum2$<core::result::Result<tuple$<>,eyre::Report> > > > >,a
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\futures-util-0.3.31\src\stream\stream\mod.rs:1638
+  13: futures_util::stream::stream::next::impl$3::poll<futures_util::stream::futures_unordered::FuturesUnordered<core::pin::Pin<alloc::boxed::Box<dyn$<core::future::future::Future<assoc$<Output,enum2$<core::result::Result<tuple$<>,eyre::Report> > > > >,alloc::al
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\futures-util-0.3.31\src\stream\stream\next.rs:32
+  14: keystone::drive_stream::async_fn$0<core::pin::Pin<alloc::boxed::Box<dyn$<core::future::future::Future<assoc$<Output,enum2$<core::result::Result<tuple$<>,eyre::Report> > > > >,alloc::alloc::Global> > >
+             at F:\code\keystone\core\src\lib.rs:349
+  15: tokio::future::maybe_done::impl$1::poll<enum2$<keystone::drive_stream::async_fn_env$0<core::pin::Pin<alloc::boxed::Box<dyn$<core::future::future::Future<assoc$<Output,enum2$<core::result::Result<tuple$<>,eyre::Report> > > > >,alloc::alloc::Global> > > > >
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\future\maybe_done.rs:65
+  16: keystone::test_shutdown::async_fn$0::closure$0
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\macros\try_join.rs:184
+  17: core::future::poll_fn::impl$2::poll<enum2$<core::result::Result<tuple$<tuple$<>,tuple$<> >,eyre::Report> >,keystone::test_shutdown::async_fn$0::closure_env$0>
+             at C:\Users\mcclu\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib\rustlib\src\rust\library\core\src\future\poll_fn.rs:151
+  18: keystone::test_shutdown::async_fn$0
+             at F:\code\keystone\core\src\lib.rs:359
+  19: init::test_hello_world_init::closure$0::async_block$0
+             at .\tests\init.rs:47
+  20: core::future::future::impl$1::poll<alloc::boxed::Box<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,alloc::alloc::Global> >
+             at C:\Users\mcclu\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib\rustlib\src\rust\library\core\src\future\future.rs:124
+  21: tokio::runtime::task::core::impl$6::poll::closure$0<core::pin::Pin<alloc::boxed::Box<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,alloc::alloc::Global> >,alloc::sync::Arc<tokio::task::local::Shared,alloc::alloc::Global> >
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\task\core.rs:331
+  22: tokio::loom::std::unsafe_cell::UnsafeCell<enum2$<tokio::runtime::task::core::Stage<core::pin::Pin<alloc::boxed::Box<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,alloc::alloc::Global> > > > >::with_mut
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\loom\std\unsafe_cell.rs:16
+  23: tokio::runtime::task::core::Core<core::pin::Pin<alloc::boxed::Box<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,alloc::alloc::Global> >,alloc::sync::Arc<tokio::task::local::Shared,alloc::alloc::Global> >::poll<core::pin::Pin<alloc::boxe
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\task\core.rs:320
+  24: tokio::runtime::task::harness::poll_future::closure$0<core::pin::Pin<alloc::boxed::Box<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,alloc::alloc::Global> >,alloc::sync::Arc<tokio::task::local::Shared,alloc::alloc::Global> >
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\task\harness.rs:532
+  25: core::panic::unwind_safe::impl$25::call_once<enum2$<core::task::poll::Poll<enum2$<core::result::Result<tuple$<>,eyre::Report> > > >,tokio::runtime::task::harness::poll_future::closure_env$0<core::pin::Pin<alloc::boxed::Box<enum2$<init::test_hello_world_ini
+             at C:\Users\mcclu\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib\rustlib\src\rust\library\core\src\panic\unwind_safe.rs:272
+  26: std::panicking::try::do_call<core::panic::unwind_safe::AssertUnwindSafe<tokio::runtime::task::harness::poll_future::closure_env$0<core::pin::Pin<alloc::boxed::Box<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,alloc::alloc::Global> >,all
+             at C:\Users\mcclu\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib\rustlib\src\rust\library\std\src\panicking.rs:589
+  27: std::panic::catch_unwind<core::panic::unwind_safe::AssertUnwindSafe<tokio::runtime::task::harness::poll_future::closure_env$0<enum2$<init::test_hello_world_empty::closure$0::async_block_env$0>,alloc::sync::Arc<tokio::task::local::Shared,alloc::alloc::Globa
+  28: std::panicking::try
+             at C:\Users\mcclu\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib\rustlib\src\rust\library\std\src\panicking.rs:552
+  29: std::panic::catch_unwind<core::panic::unwind_safe::AssertUnwindSafe<tokio::runtime::task::harness::poll_future::closure_env$0<core::pin::Pin<alloc::boxed::Box<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,alloc::alloc::Global> >,alloc::
+             at C:\Users\mcclu\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib\rustlib\src\rust\library\std\src\panic.rs:359
+  30: tokio::runtime::task::harness::poll_future<core::pin::Pin<alloc::boxed::Box<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,alloc::alloc::Global> >,alloc::sync::Arc<tokio::task::local::Shared,alloc::alloc::Global> >
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\task\harness.rs:520
+  31: tokio::runtime::task::harness::Harness<core::pin::Pin<alloc::boxed::Box<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,alloc::alloc::Global> >,alloc::sync::Arc<tokio::task::local::Shared,alloc::alloc::Global> >::poll_inner<core::pin::Pin
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\task\harness.rs:209
+  32: tokio::runtime::task::harness::Harness<core::pin::Pin<alloc::boxed::Box<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,alloc::alloc::Global> >,alloc::sync::Arc<tokio::task::local::Shared,alloc::alloc::Global> >::poll<core::pin::Pin<alloc
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\task\harness.rs:154
+  33: tokio::runtime::task::raw::poll<core::pin::Pin<alloc::boxed::Box<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,alloc::alloc::Global> >,alloc::sync::Arc<tokio::task::local::Shared,alloc::alloc::Global> >
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\task\raw.rs:271
+  34: tokio::runtime::task::raw::RawTask::poll
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\task\raw.rs:201
+  35: tokio::runtime::task::LocalNotified<alloc::sync::Arc<tokio::task::local::Shared,alloc::alloc::Global> >::run<alloc::sync::Arc<tokio::task::local::Shared,alloc::alloc::Global> >
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\task\mod.rs:463
+  36: tokio::task::local::impl$4::tick::closure$0
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\task\local.rs:739
+  37: tokio::task::coop::with_budget
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\task\coop\mod.rs:167
+  38: tokio::task::coop::budget
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\task\coop\mod.rs:133
+  39: tokio::task::local::LocalSet::tick
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\task\local.rs:739
+  40: tokio::task::local::impl$10::poll::closure$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hello_world_init::closure_env$0> > >
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\task\local.rs:1045
+  41: tokio::task::local::impl$4::with::closure$0<enum2$<core::task::poll::Poll<enum2$<core::result::Result<enum2$<core::result::Result<enum2$<core::result::Result<tuple$<>,eyre::Report> >,tokio::runtime::task::error::JoinError> >,tokio::time::error::Elapsed> > 
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\task\local.rs:793
+  42: std::thread::local::LocalKey<tokio::task::local::LocalData>::try_with<tokio::task::local::LocalData,tokio::task::local::impl$4::with::closure_env$0<enum2$<core::task::poll::Poll<enum2$<core::result::Result<enum2$<core::result::Result<enum2$<core::result::R
+             at C:\Users\mcclu\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib\rustlib\src\rust\library\std\src\thread\local.rs:315
+  43: std::thread::local::LocalKey<tokio::task::local::LocalData>::with<tokio::task::local::LocalData,tokio::task::local::impl$4::with::closure_env$0<enum2$<core::task::poll::Poll<enum2$<core::result::Result<enum2$<core::result::Result<enum2$<core::result::Resul
+             at C:\Users\mcclu\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib\rustlib\src\rust\library\std\src\thread\local.rs:279
+  44: tokio::task::local::LocalSet::with<enum2$<core::task::poll::Poll<enum2$<core::result::Result<enum2$<core::result::Result<enum2$<core::result::Result<tuple$<>,eyre::Report> >,tokio::runtime::task::error::JoinError> >,tokio::time::error::Elapsed> > > >,tokio
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\task\local.rs:791
+  45: tokio::task::local::impl$10::poll<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hello_world_init::closure_env$0> > >
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\task\local.rs:1031
+  46: tokio::task::local::impl$4::run_until::async_fn$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hello_world_init::closure_env$0> > >
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\task\local.rs:689
+  47: tokio::runtime::park::impl$4::block_on::closure$0<enum2$<tokio::task::local::impl$4::run_until::async_fn_env$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hello_world_init::c
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\park.rs:284
+  48: tokio::task::coop::with_budget
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\task\coop\mod.rs:167
+  49: tokio::task::coop::budget
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\task\coop\mod.rs:133
+  50: tokio::runtime::park::CachedParkThread::block_on<enum2$<tokio::task::local::impl$4::run_until::async_fn_env$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hello_world_init::cl
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\park.rs:284
+  51: tokio::runtime::context::blocking::BlockingRegionGuard::block_on<enum2$<tokio::task::local::impl$4::run_until::async_fn_env$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hell
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\context\blocking.rs:66
+  52: tokio::runtime::scheduler::multi_thread::impl$0::block_on::closure$0<enum2$<tokio::task::local::impl$4::run_until::async_fn_env$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\scheduler\multi_thread\mod.rs:87
+  53: tokio::runtime::context::runtime::enter_runtime<tokio::runtime::scheduler::multi_thread::impl$0::block_on::closure_env$0<enum2$<tokio::task::local::impl$4::run_until::async_fn_env$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_w
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\context\runtime.rs:65
+  54: tokio::runtime::scheduler::multi_thread::MultiThread::block_on<enum2$<tokio::task::local::impl$4::run_until::async_fn_env$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hello_
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\scheduler\multi_thread\mod.rs:86
+  55: tokio::runtime::runtime::Runtime::block_on_inner<enum2$<tokio::task::local::impl$4::run_until::async_fn_env$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hello_world_init::cl
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\runtime.rs:358
+  56: tokio::runtime::runtime::Runtime::block_on<enum2$<tokio::task::local::impl$4::run_until::async_fn_env$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hello_world_init::closure_
+             at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\runtime.rs:330
+  57: keystone::test_harness<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hello_world_init::closure_env$0>
+             at F:\code\keystone\core\src\lib.rs:336
+  58: init::test_hello_world_init
+             at .\tests\init.rs:20
+  59: init::test_hello_world_init::closure$0
+             at .\tests\init.rs:4
+  60: core::ops::function::FnOnce::call_once<init::test_hello_world_init::closure_env$0,tuple$<> >
+             at C:\Users\mcclu\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib\rustlib\src\rust\library\core\src\ops\function.rs:250
+  61: core::ops::function::FnOnce::call_once
+             at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\core\src\ops\function.rs:250
+  62: test::__rust_begin_short_backtrace<enum2$<core::result::Result<tuple$<>,alloc::string::String> >,enum2$<core::result::Result<tuple$<>,alloc::string::String> > (*)()>
+             at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\test\src\lib.rs:648
+  63: test::run_test_in_process
+             at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\test\src\lib.rs:671
+  64: test::run_test::closure$0
+             at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\test\src\lib.rs:592
+  65: test::run_test::closure$1
+             at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\test\src\lib.rs:622
+  66: std::sys::backtrace::__rust_begin_short_backtrace<test::run_test::closure_env$1,tuple$<> >
+             at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\std\src\sys\backtrace.rs:152
+  67: core::ops::function::FnOnce::call_once<std::thread::impl$0::spawn_unchecked_::closure_env$1<test::run_test::closure_env$1,tuple$<> >,tuple$<> >
+             at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\core\src\ops\function.rs:250
+  68: alloc::boxed::impl$28::call_once
+             at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\alloc\src\boxed.rs:1966
+  69: alloc::boxed::impl$28::call_once
+             at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\alloc\src\boxed.rs:1966
+  70: std::sys::pal::windows::thread::impl$0::new::thread_start
+             at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\std\src\sys\pal\windows\thread.rs:56
+  71: BaseThreadInitThunk
+  72: RtlUserThreadStart
+
+[2m2025-07-16T14:08:06.013605Z[0m [34mDEBUG[0m [2mkeystone::posix_module[0m[2m:[0m write f32 gave: Err(Os { code: 232, kind: BrokenPipe, message: "The pipe is being closed." })
+[2m2025-07-16T14:08:06.013635Z[0m [34mDEBUG[0m [2mkeystone::posix_module[0m[2m:[0m awaiting pipe
+[2m2025-07-16T14:08:06.013655Z[0m [34mDEBUG[0m [2mkeystone::posix_module[0m[2m:[0m write f32 gave: Err(Os { code: 232, kind: BrokenPipe, message: "The pipe is being closed." })
+[2m2025-07-16T14:08:06.013674Z[0m [34mDEBUG[0m [2mkeystone::posix_module[0m[2m:[0m read f32 gave: Ok(0)
+[2m2025-07-16T14:08:06.013683Z[0m [34mDEBUG[0m [2mkeystone::posix_module[0m[2m:[0m awaiting stderr stream
+[2m2025-07-16T14:08:06.013915Z[0m [34mDEBUG[0m [2mkeystone::posix_process[0m[2m:[0m child None returned Ok(ExitStatus(ExitStatus(0)))
+[2m2025-07-16T14:08:06.013938Z[0m [34mDEBUG[0m [2mkeystone::posix_process[0m[2m:[0m Process exited with status Some(ExitStatus(ExitStatus(0)))
+test test_hello_world_init ... FAILED
+
+failures:
+
+---- test_hello_world_init stdout ----
+
+thread 'test_hello_world_init' panicked at examples\hello-world\tests\init.rs:48:18:
+called `Result::unwrap()` on an `Err` value: Error from Hello World
+
+Caused by:
+    Failed: Failed:    0: std::backtrace_rs::backtrace::win64::trace
+                 at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\std\src\..\..\backtrace\src\backtrace\win64.rs:85
+       1: std::backtrace_rs::backtrace::trace_unsynchronized
+                 at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\std\src\..\..\backtrace\src\backtrace\mod.rs:66
+       2: std::backtrace::Backtrace::create
+                 at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\std\src\backtrace.rs:331
+       3: std::backtrace::Backtrace::capture
+                 at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\std\src\backtrace.rs:296
+       4: capnp::impl$6::from
+                 at F:\packages\.cargo\git\checkouts\capstone-rs-632f171ccb653c24\84502ed\capnp\src\lib.rs:534
+       5: core::result::impl$28::from_residual<tuple$<>,std::io::error::Error,capnp::Error>
+                 at C:\Users\mcclu\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib\rustlib\src\rust\library\core\src\result.rs:2050
+       6: capnp_futures::serialize::write_message::async_fn$0<ref_mut$<keystone::byte_stream::ClientWriter>,ref$<alloc::rc::Rc<capnp::message::Builder<capnp::message::HeapAllocator>,alloc::alloc::Global> > >
+                 at F:\packages\.cargo\git\checkouts\capstone-rs-632f171ccb653c24\84502ed\capnp-futures\src\serialize.rs:202
+       7: capnp_futures::write_queue::write_queue::async_block$0<keystone::byte_stream::ClientWriter,alloc::rc::Rc<capnp::message::Builder<capnp::message::HeapAllocator>,alloc::alloc::Global> >
+                 at F:\packages\.cargo\git\checkouts\capstone-rs-632f171ccb653c24\84502ed\capnp-futures\src\write_queue.rs:79
+       8: futures_util::future::future::map::impl$2::poll<enum2$<capnp_futures::write_queue::write_queue::async_block_env$0<keystone::byte_stream::ClientWriter,alloc::rc::Rc<capnp::message::Builder<capnp::message::HeapAllocator>,alloc::alloc::Global> > >,capnp_rpc::
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\futures-util-0.3.31\src\future\future\map.rs:55
+       9: futures_util::future::future::impl$14::poll<enum2$<capnp_futures::write_queue::write_queue::async_block_env$0<keystone::byte_stream::ClientWriter,alloc::rc::Rc<capnp::message::Builder<capnp::message::HeapAllocator>,alloc::alloc::Global> > >,capnp_rpc::twop
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\futures-util-0.3.31\src\lib.rs:86
+      10: futures_util::future::future::flatten::impl$2::poll<futures_util::future::future::Map<enum2$<capnp_futures::write_queue::write_queue::async_block_env$0<keystone::byte_stream::ClientWriter,alloc::rc::Rc<capnp::message::Builder<capnp::message::HeapAllocator>
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\futures-util-0.3.31\src\future\future\flatten.rs:50
+      11: futures_util::future::future::impl$29::poll<enum2$<capnp_futures::write_queue::write_queue::async_block_env$0<keystone::byte_stream::ClientWriter,alloc::rc::Rc<capnp::message::Builder<capnp::message::HeapAllocator>,alloc::alloc::Global> > >,futures_util::f
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\futures-util-0.3.31\src\lib.rs:86
+      12: capnp::capability::impl$2::poll<tuple$<>,capnp::Error>
+                 at F:\packages\.cargo\git\checkouts\capstone-rs-632f171ccb653c24\84502ed\capnp\src\capability.rs:105
+      13: futures_util::future::future::shared::impl$11::poll<capnp::capability::Promise<tuple$<>,capnp::Error> >
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\futures-util-0.3.31\src\future\future\shared.rs:322
+      14: capnp::capability::impl$2::poll<tuple$<>,capnp::Error>
+                 at F:\packages\.cargo\git\checkouts\capstone-rs-632f171ccb653c24\84502ed\capnp\src\capability.rs:105
+      15: futures_util::future::future::map::impl$2::poll<capnp::capability::Promise<tuple$<>,capnp::Error>,capnp_rpc::impl$0::new::closure_env$0<capnp_rpc::rpc_twoparty_capnp::Side>,capnp::capability::Promise<tuple$<>,capnp::Error> >
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\futures-util-0.3.31\src\future\future\map.rs:55
+      16: futures_util::future::future::impl$14::poll<capnp::capability::Promise<tuple$<>,capnp::Error>,capnp_rpc::impl$0::new::closure_env$0<capnp_rpc::rpc_twoparty_capnp::Side> >
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\futures-util-0.3.31\src\lib.rs:86
+      17: futures_util::future::future::flatten::impl$2::poll<futures_util::future::future::Map<capnp::capability::Promise<tuple$<>,capnp::Error>,capnp_rpc::impl$0::new::closure_env$0<capnp_rpc::rpc_twoparty_capnp::Side> > >
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\futures-util-0.3.31\src\future\future\flatten.rs:50
+      18: futures_util::future::future::impl$29::poll<capnp::capability::Promise<tuple$<>,capnp::Error>,capnp::capability::Promise<tuple$<>,capnp::Error>,capnp_rpc::impl$0::new::closure_env$0<capnp_rpc::rpc_twoparty_capnp::Side> >
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\futures-util-0.3.31\src\lib.rs:86
+      19: core::future::future::impl$1::poll<alloc::boxed::Box<dyn$<core::future::future::Future<assoc$<Output,enum2$<core::result::Result<tuple$<>,capnp::Error> > > > >,alloc::alloc::Global> >
+                 at C:\Users\mcclu\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib\rustlib\src\rust\library\core\src\future\future.rs:124
+      20: futures_util::future::future::map::impl$2::poll<core::pin::Pin<alloc::boxed::Box<dyn$<core::future::future::Future<assoc$<Output,enum2$<core::result::Result<tuple$<>,capnp::Error> > > > >,alloc::alloc::Global> >,capnp_rpc::task_set::impl$4::poll::closure_e
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\futures-util-0.3.31\src\future\future\map.rs:55
+      21: futures_util::future::future::impl$14::poll<core::pin::Pin<alloc::boxed::Box<dyn$<core::future::future::Future<assoc$<Output,enum2$<core::result::Result<tuple$<>,capnp::Error> > > > >,alloc::alloc::Global> >,capnp_rpc::task_set::impl$4::poll::closure_env$0
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\futures-util-0.3.31\src\lib.rs:86
+      22: capnp_rpc::task_set::impl$1::poll<capnp::Error>
+                 at F:\packages\.cargo\git\checkouts\capstone-rs-632f171ccb653c24\84502ed\capnp-rpc\src\task_set.rs:55
+      23: futures_util::stream::futures_unordered::impl$7::poll_next<enum2$<capnp_rpc::task_set::TaskInProgress<capnp::Error> > >
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\futures-util-0.3.31\src\stream\futures_unordered\mod.rs:528
+      24: capnp_rpc::task_set::impl$4::poll<capnp::Error>
+                 at F:\packages\.cargo\git\checkouts\capstone-rs-632f171ccb653c24\84502ed\capnp-rpc\src\task_set.rs:174
+      25: capnp_rpc::impl$1::poll<capnp_rpc::rpc_twoparty_capnp::Side>
+                 at F:\packages\.cargo\git\checkouts\capstone-rs-632f171ccb653c24\84502ed\capnp-rpc\src\lib.rs:345
+      26: core::future::future::impl$0::poll<capnp_rpc::RpcSystem<capnp_rpc::rpc_twoparty_capnp::Side> >
+                 at C:\Users\mcclu\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib\rustlib\src\rust\library\core\src\future\future.rs:112
+      27: keystone::posix_module::impl$2::spawn::async_fn$0::closure$1::async_block$0::async_block$0::closure$0<enum2$<keystone::keystone::impl$2::passthrough_stderr::async_fn_env$0> (*)(keystone::byte_stream::ByteStreamBufferImpl)>
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\macros\select.rs:708
+      28: core::future::poll_fn::impl$2::poll<enum2$<keystone::posix_module::impl$2::spawn::async_fn$0::closure$1::async_block$0::async_block$0::__tokio_select_util::Out<enum2$<core::result::Result<tuple$<>,capnp::Error> >,enum2$<core::option::Option<bool> > > >,key
+                 at C:\Users\mcclu\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib\rustlib\src\rust\library\core\src\future\poll_fn.rs:151
+      29: keystone::posix_module::impl$2::spawn::async_fn$0::closure$1::async_block$0::async_block$0<enum2$<keystone::keystone::impl$2::passthrough_stderr::async_fn_env$0> (*)(keystone::byte_stream::ByteStreamBufferImpl)>
+                 at F:\code\keystone\core\src\posix_module.rs:221
+      30: tokio::runtime::task::core::impl$6::poll::closure$0<enum2$<keystone::posix_module::impl$2::spawn::async_fn$0::closure$1::async_block$0::async_block_env$0<enum2$<keystone::keystone::impl$2::passthrough_stderr::async_fn_env$0> (*)(keystone::byte_stream::Byte
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\task\core.rs:331
+      31: tokio::loom::std::unsafe_cell::UnsafeCell<enum2$<tokio::runtime::task::core::Stage<enum2$<keystone::posix_module::impl$2::spawn::async_fn$0::closure$1::async_block$0::async_block_env$0<enum2$<keystone::keystone::impl$2::passthrough_stderr::async_fn_env$0> 
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\loom\std\unsafe_cell.rs:16
+      32: tokio::runtime::task::core::Core<enum2$<keystone::posix_module::impl$2::spawn::async_fn$0::closure$1::async_block$0::async_block_env$0<enum2$<keystone::keystone::impl$2::passthrough_stderr::async_fn_env$0> (*)(keystone::byte_stream::ByteStreamBufferImpl)> 
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\task\core.rs:320
+      33: tokio::runtime::task::harness::poll_future::closure$0<enum2$<keystone::posix_module::impl$2::spawn::async_fn$0::closure$1::async_block$0::async_block_env$0<enum2$<keystone::keystone::impl$2::passthrough_stderr::async_fn_env$0> (*)(keystone::byte_stream::By
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\task\harness.rs:532
+      34: core::panic::unwind_safe::impl$25::call_once<enum2$<core::task::poll::Poll<enum2$<core::result::Result<tuple$<>,capnp::Error> > > >,tokio::runtime::task::harness::poll_future::closure_env$0<enum2$<keystone::posix_module::impl$2::spawn::async_fn$0::closure$
+                 at C:\Users\mcclu\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib\rustlib\src\rust\library\core\src\panic\unwind_safe.rs:272
+      35: std::panicking::try::do_call<core::panic::unwind_safe::AssertUnwindSafe<tokio::runtime::task::harness::poll_future::closure_env$0<enum2$<keystone::posix_module::impl$2::spawn::async_fn$0::closure$1::async_block$0::async_block_env$0<enum2$<keystone::keyston
+                 at C:\Users\mcclu\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib\rustlib\src\rust\library\std\src\panicking.rs:589
+      36: std::panic::catch_unwind<core::panic::unwind_safe::AssertUnwindSafe<tokio::runtime::task::harness::poll_future::closure_env$0<enum2$<init::test_hello_world_empty::closure$0::async_block_env$0>,alloc::sync::Arc<tokio::task::local::Shared,alloc::alloc::Globa
+      37: std::panicking::try
+                 at C:\Users\mcclu\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib\rustlib\src\rust\library\std\src\panicking.rs:552
+      38: std::panic::catch_unwind<core::panic::unwind_safe::AssertUnwindSafe<tokio::runtime::task::harness::poll_future::closure_env$0<enum2$<keystone::posix_module::impl$2::spawn::async_fn$0::closure$1::async_block$0::async_block_env$0<enum2$<keystone::keystone::i
+                 at C:\Users\mcclu\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib\rustlib\src\rust\library\std\src\panic.rs:359
+      39: tokio::runtime::task::harness::poll_future<enum2$<keystone::posix_module::impl$2::spawn::async_fn$0::closure$1::async_block$0::async_block_env$0<enum2$<keystone::keystone::impl$2::passthrough_stderr::async_fn_env$0> (*)(keystone::byte_stream::ByteStreamBuf
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\task\harness.rs:520
+      40: tokio::runtime::task::harness::Harness<enum2$<keystone::posix_module::impl$2::spawn::async_fn$0::closure$1::async_block$0::async_block_env$0<enum2$<keystone::keystone::impl$2::passthrough_stderr::async_fn_env$0> (*)(keystone::byte_stream::ByteStreamBufferI
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\task\harness.rs:209
+      41: tokio::runtime::task::harness::Harness<enum2$<keystone::posix_module::impl$2::spawn::async_fn$0::closure$1::async_block$0::async_block_env$0<enum2$<keystone::keystone::impl$2::passthrough_stderr::async_fn_env$0> (*)(keystone::byte_stream::ByteStreamBufferI
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\task\harness.rs:154
+      42: tokio::runtime::task::raw::poll<enum2$<keystone::posix_module::impl$2::spawn::async_fn$0::closure$1::async_block$0::async_block_env$0<enum2$<keystone::keystone::impl$2::passthrough_stderr::async_fn_env$0> (*)(keystone::byte_stream::ByteStreamBufferImpl)> >
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\task\raw.rs:271
+      43: tokio::runtime::task::raw::RawTask::poll
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\task\raw.rs:201
+      44: tokio::runtime::task::LocalNotified<alloc::sync::Arc<tokio::task::local::Shared,alloc::alloc::Global> >::run<alloc::sync::Arc<tokio::task::local::Shared,alloc::alloc::Global> >
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\task\mod.rs:463
+      45: tokio::task::local::impl$4::tick::closure$0
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\task\local.rs:739
+      46: tokio::task::coop::with_budget
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\task\coop\mod.rs:167
+      47: tokio::task::coop::budget
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\task\coop\mod.rs:133
+      48: tokio::task::local::LocalSet::tick
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\task\local.rs:739
+      49: tokio::task::local::impl$10::poll::closure$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hello_world_init::closure_env$0> > >
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\task\local.rs:1045
+      50: tokio::task::local::impl$4::with::closure$0<enum2$<core::task::poll::Poll<enum2$<core::result::Result<enum2$<core::result::Result<enum2$<core::result::Result<tuple$<>,eyre::Report> >,tokio::runtime::task::error::JoinError> >,tokio::time::error::Elapsed> > 
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\task\local.rs:793
+      51: std::thread::local::LocalKey<tokio::task::local::LocalData>::try_with<tokio::task::local::LocalData,tokio::task::local::impl$4::with::closure_env$0<enum2$<core::task::poll::Poll<enum2$<core::result::Result<enum2$<core::result::Result<enum2$<core::result::R
+                 at C:\Users\mcclu\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib\rustlib\src\rust\library\std\src\thread\local.rs:315
+      52: std::thread::local::LocalKey<tokio::task::local::LocalData>::with<tokio::task::local::LocalData,tokio::task::local::impl$4::with::closure_env$0<enum2$<core::task::poll::Poll<enum2$<core::result::Result<enum2$<core::result::Result<enum2$<core::result::Resul
+                 at C:\Users\mcclu\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib\rustlib\src\rust\library\std\src\thread\local.rs:279
+      53: tokio::task::local::LocalSet::with<enum2$<core::task::poll::Poll<enum2$<core::result::Result<enum2$<core::result::Result<enum2$<core::result::Result<tuple$<>,eyre::Report> >,tokio::runtime::task::error::JoinError> >,tokio::time::error::Elapsed> > > >,tokio
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\task\local.rs:791
+      54: tokio::task::local::impl$10::poll<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hello_world_init::closure_env$0> > >
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\task\local.rs:1031
+      55: tokio::task::local::impl$4::run_until::async_fn$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hello_world_init::closure_env$0> > >
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\task\local.rs:689
+      56: tokio::runtime::park::impl$4::block_on::closure$0<enum2$<tokio::task::local::impl$4::run_until::async_fn_env$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hello_world_init::c
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\park.rs:284
+      57: tokio::task::coop::with_budget
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\task\coop\mod.rs:167
+      58: tokio::task::coop::budget
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\task\coop\mod.rs:133
+      59: tokio::runtime::park::CachedParkThread::block_on<enum2$<tokio::task::local::impl$4::run_until::async_fn_env$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hello_world_init::cl
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\park.rs:284
+      60: tokio::runtime::context::blocking::BlockingRegionGuard::block_on<enum2$<tokio::task::local::impl$4::run_until::async_fn_env$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hell
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\context\blocking.rs:66
+      61: tokio::runtime::scheduler::multi_thread::impl$0::block_on::closure$0<enum2$<tokio::task::local::impl$4::run_until::async_fn_env$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\scheduler\multi_thread\mod.rs:87
+      62: tokio::runtime::context::runtime::enter_runtime<tokio::runtime::scheduler::multi_thread::impl$0::block_on::closure_env$0<enum2$<tokio::task::local::impl$4::run_until::async_fn_env$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_w
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\context\runtime.rs:65
+      63: tokio::runtime::scheduler::multi_thread::MultiThread::block_on<enum2$<tokio::task::local::impl$4::run_until::async_fn_env$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hello_
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\scheduler\multi_thread\mod.rs:86
+      64: tokio::runtime::runtime::Runtime::block_on_inner<enum2$<tokio::task::local::impl$4::run_until::async_fn_env$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hello_world_init::cl
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\runtime.rs:358
+      65: tokio::runtime::runtime::Runtime::block_on<enum2$<tokio::task::local::impl$4::run_until::async_fn_env$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hello_world_init::closure_
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\runtime.rs:330
+      66: keystone::test_harness<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hello_world_init::closure_env$0>
+                 at F:\code\keystone\core\src\lib.rs:336
+      67: init::test_hello_world_init
+                 at .\tests\init.rs:20
+      68: init::test_hello_world_init::closure$0
+                 at .\tests\init.rs:4
+      69: core::ops::function::FnOnce::call_once<init::test_hello_world_init::closure_env$0,tuple$<> >
+                 at C:\Users\mcclu\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib\rustlib\src\rust\library\core\src\ops\function.rs:250
+      70: core::ops::function::FnOnce::call_once
+                 at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\core\src\ops\function.rs:250
+      71: test::__rust_begin_short_backtrace<enum2$<core::result::Result<tuple$<>,alloc::string::String> >,enum2$<core::result::Result<tuple$<>,alloc::string::String> > (*)()>
+                 at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\test\src\lib.rs:648
+      72: test::run_test_in_process
+                 at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\test\src\lib.rs:671
+      73: test::run_test::closure$0
+                 at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\test\src\lib.rs:592
+      74: test::run_test::closure$1
+                 at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\test\src\lib.rs:622
+      75: std::sys::backtrace::__rust_begin_short_backtrace<test::run_test::closure_env$1,tuple$<> >
+                 at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\std\src\sys\backtrace.rs:152
+      76: core::ops::function::FnOnce::call_once<std::thread::impl$0::spawn_unchecked_::closure_env$1<test::run_test::closure_env$1,tuple$<> >,tuple$<> >
+                 at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\core\src\ops\function.rs:250
+      77: alloc::boxed::impl$28::call_once
+                 at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\alloc\src\boxed.rs:1966
+      78: alloc::boxed::impl$28::call_once
+                 at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\alloc\src\boxed.rs:1966
+      79: std::sys::pal::windows::thread::impl$0::new::thread_start
+                 at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\std\src\sys\pal\windows\thread.rs:56
+      80: BaseThreadInitThunk
+      81: RtlUserThreadStart
+     |    0: std::backtrace_rs::backtrace::win64::trace
+                 at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\std\src\..\..\backtrace\src\backtrace\win64.rs:85
+       1: std::backtrace_rs::backtrace::trace_unsynchronized
+                 at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\std\src\..\..\backtrace\src\backtrace\mod.rs:66
+       2: std::backtrace::Backtrace::create
+                 at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\std\src\backtrace.rs:331
+       3: std::backtrace::Backtrace::capture
+                 at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\std\src\backtrace.rs:296
+       4: capnp::Error::failed
+                 at F:\packages\.cargo\git\checkouts\capstone-rs-632f171ccb653c24\84502ed\capnp\src\lib.rs:459
+       5: keystone::keystone::impl$0::to_capnp::closure$0<tuple$<>,capnp::Error>
+                 at F:\code\keystone\core\src\keystone.rs:36
+       6: enum2$<core::result::Result<tuple$<>,capnp::Error> >::map_err<tuple$<>,capnp::Error,capnp::Error,keystone::keystone::impl$0::to_capnp::closure_env$0<tuple$<>,capnp::Error> >
+                 at C:\Users\mcclu\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib\rustlib\src\rust\library\core\src\result.rs:884
+       7: keystone::keystone::impl$0::to_capnp<tuple$<>,capnp::Error>
+                 at F:\code\keystone\core\src\keystone.rs:36
+       8: keystone::posix_module::flatten_to_capnp<tuple$<>,capnp::Error,tokio::runtime::task::error::JoinError>
+                 at F:\code\keystone\core\src\posix_module.rs:118
+       9: keystone::posix_module::impl$2::spawn::async_fn$0::closure$1::async_block$0<enum2$<keystone::keystone::impl$2::passthrough_stderr::async_fn_env$0> (*)(keystone::byte_stream::ByteStreamBufferImpl)>
+                 at F:\code\keystone\core\src\posix_module.rs:236
+      10: core::future::future::impl$1::poll<alloc::boxed::Box<dyn$<core::future::future::Future<assoc$<Output,enum2$<core::result::Result<tuple$<>,eyre::Report> > > > >,alloc::alloc::Global> >
+                 at C:\Users\mcclu\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib\rustlib\src\rust\library\core\src\future\future.rs:124
+      11: futures_util::stream::futures_unordered::impl$7::poll_next<core::pin::Pin<alloc::boxed::Box<dyn$<core::future::future::Future<assoc$<Output,enum2$<core::result::Result<tuple$<>,eyre::Report> > > > >,alloc::alloc::Global> > >
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\futures-util-0.3.31\src\stream\futures_unordered\mod.rs:528
+      12: futures_util::stream::stream::StreamExt::poll_next_unpin<futures_util::stream::futures_unordered::FuturesUnordered<core::pin::Pin<alloc::boxed::Box<dyn$<core::future::future::Future<assoc$<Output,enum2$<core::result::Result<tuple$<>,eyre::Report> > > > >,a
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\futures-util-0.3.31\src\stream\stream\mod.rs:1638
+      13: futures_util::stream::stream::next::impl$3::poll<futures_util::stream::futures_unordered::FuturesUnordered<core::pin::Pin<alloc::boxed::Box<dyn$<core::future::future::Future<assoc$<Output,enum2$<core::result::Result<tuple$<>,eyre::Report> > > > >,alloc::al
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\futures-util-0.3.31\src\stream\stream\next.rs:32
+      14: keystone::drive_stream::async_fn$0<core::pin::Pin<alloc::boxed::Box<dyn$<core::future::future::Future<assoc$<Output,enum2$<core::result::Result<tuple$<>,eyre::Report> > > > >,alloc::alloc::Global> > >
+                 at F:\code\keystone\core\src\lib.rs:349
+      15: tokio::future::maybe_done::impl$1::poll<enum2$<keystone::drive_stream::async_fn_env$0<core::pin::Pin<alloc::boxed::Box<dyn$<core::future::future::Future<assoc$<Output,enum2$<core::result::Result<tuple$<>,eyre::Report> > > > >,alloc::alloc::Global> > > > >
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\future\maybe_done.rs:65
+      16: keystone::test_shutdown::async_fn$0::closure$0
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\macros\try_join.rs:184
+      17: core::future::poll_fn::impl$2::poll<enum2$<core::result::Result<tuple$<tuple$<>,tuple$<> >,eyre::Report> >,keystone::test_shutdown::async_fn$0::closure_env$0>
+                 at C:\Users\mcclu\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib\rustlib\src\rust\library\core\src\future\poll_fn.rs:151
+      18: keystone::test_shutdown::async_fn$0
+                 at F:\code\keystone\core\src\lib.rs:359
+      19: init::test_hello_world_init::closure$0::async_block$0
+                 at .\tests\init.rs:47
+      20: core::future::future::impl$1::poll<alloc::boxed::Box<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,alloc::alloc::Global> >
+                 at C:\Users\mcclu\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib\rustlib\src\rust\library\core\src\future\future.rs:124
+      21: tokio::runtime::task::core::impl$6::poll::closure$0<core::pin::Pin<alloc::boxed::Box<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,alloc::alloc::Global> >,alloc::sync::Arc<tokio::task::local::Shared,alloc::alloc::Global> >
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\task\core.rs:331
+      22: tokio::loom::std::unsafe_cell::UnsafeCell<enum2$<tokio::runtime::task::core::Stage<core::pin::Pin<alloc::boxed::Box<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,alloc::alloc::Global> > > > >::with_mut
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\loom\std\unsafe_cell.rs:16
+      23: tokio::runtime::task::core::Core<core::pin::Pin<alloc::boxed::Box<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,alloc::alloc::Global> >,alloc::sync::Arc<tokio::task::local::Shared,alloc::alloc::Global> >::poll<core::pin::Pin<alloc::boxe
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\task\core.rs:320
+      24: tokio::runtime::task::harness::poll_future::closure$0<core::pin::Pin<alloc::boxed::Box<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,alloc::alloc::Global> >,alloc::sync::Arc<tokio::task::local::Shared,alloc::alloc::Global> >
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\task\harness.rs:532
+      25: core::panic::unwind_safe::impl$25::call_once<enum2$<core::task::poll::Poll<enum2$<core::result::Result<tuple$<>,eyre::Report> > > >,tokio::runtime::task::harness::poll_future::closure_env$0<core::pin::Pin<alloc::boxed::Box<enum2$<init::test_hello_world_ini
+                 at C:\Users\mcclu\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib\rustlib\src\rust\library\core\src\panic\unwind_safe.rs:272
+      26: std::panicking::try::do_call<core::panic::unwind_safe::AssertUnwindSafe<tokio::runtime::task::harness::poll_future::closure_env$0<core::pin::Pin<alloc::boxed::Box<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,alloc::alloc::Global> >,all
+                 at C:\Users\mcclu\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib\rustlib\src\rust\library\std\src\panicking.rs:589
+      27: std::panic::catch_unwind<core::panic::unwind_safe::AssertUnwindSafe<tokio::runtime::task::harness::poll_future::closure_env$0<enum2$<init::test_hello_world_empty::closure$0::async_block_env$0>,alloc::sync::Arc<tokio::task::local::Shared,alloc::alloc::Globa
+      28: std::panicking::try
+                 at C:\Users\mcclu\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib\rustlib\src\rust\library\std\src\panicking.rs:552
+      29: std::panic::catch_unwind<core::panic::unwind_safe::AssertUnwindSafe<tokio::runtime::task::harness::poll_future::closure_env$0<core::pin::Pin<alloc::boxed::Box<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,alloc::alloc::Global> >,alloc::
+                 at C:\Users\mcclu\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib\rustlib\src\rust\library\std\src\panic.rs:359
+      30: tokio::runtime::task::harness::poll_future<core::pin::Pin<alloc::boxed::Box<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,alloc::alloc::Global> >,alloc::sync::Arc<tokio::task::local::Shared,alloc::alloc::Global> >
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\task\harness.rs:520
+      31: tokio::runtime::task::harness::Harness<core::pin::Pin<alloc::boxed::Box<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,alloc::alloc::Global> >,alloc::sync::Arc<tokio::task::local::Shared,alloc::alloc::Global> >::poll_inner<core::pin::Pin
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\task\harness.rs:209
+      32: tokio::runtime::task::harness::Harness<core::pin::Pin<alloc::boxed::Box<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,alloc::alloc::Global> >,alloc::sync::Arc<tokio::task::local::Shared,alloc::alloc::Global> >::poll<core::pin::Pin<alloc
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\task\harness.rs:154
+      33: tokio::runtime::task::raw::poll<core::pin::Pin<alloc::boxed::Box<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,alloc::alloc::Global> >,alloc::sync::Arc<tokio::task::local::Shared,alloc::alloc::Global> >
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\task\raw.rs:271
+      34: tokio::runtime::task::raw::RawTask::poll
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\task\raw.rs:201
+      35: tokio::runtime::task::LocalNotified<alloc::sync::Arc<tokio::task::local::Shared,alloc::alloc::Global> >::run<alloc::sync::Arc<tokio::task::local::Shared,alloc::alloc::Global> >
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\task\mod.rs:463
+      36: tokio::task::local::impl$4::tick::closure$0
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\task\local.rs:739
+      37: tokio::task::coop::with_budget
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\task\coop\mod.rs:167
+      38: tokio::task::coop::budget
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\task\coop\mod.rs:133
+      39: tokio::task::local::LocalSet::tick
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\task\local.rs:739
+      40: tokio::task::local::impl$10::poll::closure$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hello_world_init::closure_env$0> > >
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\task\local.rs:1045
+      41: tokio::task::local::impl$4::with::closure$0<enum2$<core::task::poll::Poll<enum2$<core::result::Result<enum2$<core::result::Result<enum2$<core::result::Result<tuple$<>,eyre::Report> >,tokio::runtime::task::error::JoinError> >,tokio::time::error::Elapsed> > 
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\task\local.rs:793
+      42: std::thread::local::LocalKey<tokio::task::local::LocalData>::try_with<tokio::task::local::LocalData,tokio::task::local::impl$4::with::closure_env$0<enum2$<core::task::poll::Poll<enum2$<core::result::Result<enum2$<core::result::Result<enum2$<core::result::R
+                 at C:\Users\mcclu\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib\rustlib\src\rust\library\std\src\thread\local.rs:315
+      43: std::thread::local::LocalKey<tokio::task::local::LocalData>::with<tokio::task::local::LocalData,tokio::task::local::impl$4::with::closure_env$0<enum2$<core::task::poll::Poll<enum2$<core::result::Result<enum2$<core::result::Result<enum2$<core::result::Resul
+                 at C:\Users\mcclu\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib\rustlib\src\rust\library\std\src\thread\local.rs:279
+      44: tokio::task::local::LocalSet::with<enum2$<core::task::poll::Poll<enum2$<core::result::Result<enum2$<core::result::Result<enum2$<core::result::Result<tuple$<>,eyre::Report> >,tokio::runtime::task::error::JoinError> >,tokio::time::error::Elapsed> > > >,tokio
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\task\local.rs:791
+      45: tokio::task::local::impl$10::poll<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hello_world_init::closure_env$0> > >
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\task\local.rs:1031
+      46: tokio::task::local::impl$4::run_until::async_fn$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hello_world_init::closure_env$0> > >
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\task\local.rs:689
+      47: tokio::runtime::park::impl$4::block_on::closure$0<enum2$<tokio::task::local::impl$4::run_until::async_fn_env$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hello_world_init::c
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\park.rs:284
+      48: tokio::task::coop::with_budget
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\task\coop\mod.rs:167
+      49: tokio::task::coop::budget
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\task\coop\mod.rs:133
+      50: tokio::runtime::park::CachedParkThread::block_on<enum2$<tokio::task::local::impl$4::run_until::async_fn_env$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hello_world_init::cl
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\park.rs:284
+      51: tokio::runtime::context::blocking::BlockingRegionGuard::block_on<enum2$<tokio::task::local::impl$4::run_until::async_fn_env$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hell
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\context\blocking.rs:66
+      52: tokio::runtime::scheduler::multi_thread::impl$0::block_on::closure$0<enum2$<tokio::task::local::impl$4::run_until::async_fn_env$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\scheduler\multi_thread\mod.rs:87
+      53: tokio::runtime::context::runtime::enter_runtime<tokio::runtime::scheduler::multi_thread::impl$0::block_on::closure_env$0<enum2$<tokio::task::local::impl$4::run_until::async_fn_env$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_w
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\context\runtime.rs:65
+      54: tokio::runtime::scheduler::multi_thread::MultiThread::block_on<enum2$<tokio::task::local::impl$4::run_until::async_fn_env$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hello_
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\scheduler\multi_thread\mod.rs:86
+      55: tokio::runtime::runtime::Runtime::block_on_inner<enum2$<tokio::task::local::impl$4::run_until::async_fn_env$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hello_world_init::cl
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\runtime.rs:358
+      56: tokio::runtime::runtime::Runtime::block_on<enum2$<tokio::task::local::impl$4::run_until::async_fn_env$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hello_world_init::closure_
+                 at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\runtime.rs:330
+      57: keystone::test_harness<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hello_world_init::closure_env$0>
+                 at F:\code\keystone\core\src\lib.rs:336
+      58: init::test_hello_world_init
+                 at .\tests\init.rs:20
+      59: init::test_hello_world_init::closure$0
+                 at .\tests\init.rs:4
+      60: core::ops::function::FnOnce::call_once<init::test_hello_world_init::closure_env$0,tuple$<> >
+                 at C:\Users\mcclu\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib\rustlib\src\rust\library\core\src\ops\function.rs:250
+      61: core::ops::function::FnOnce::call_once
+                 at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\core\src\ops\function.rs:250
+      62: test::__rust_begin_short_backtrace<enum2$<core::result::Result<tuple$<>,alloc::string::String> >,enum2$<core::result::Result<tuple$<>,alloc::string::String> > (*)()>
+                 at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\test\src\lib.rs:648
+      63: test::run_test_in_process
+                 at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\test\src\lib.rs:671
+      64: test::run_test::closure$0
+                 at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\test\src\lib.rs:592
+      65: test::run_test::closure$1
+                 at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\test\src\lib.rs:622
+      66: std::sys::backtrace::__rust_begin_short_backtrace<test::run_test::closure_env$1,tuple$<> >
+                 at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\std\src\sys\backtrace.rs:152
+      67: core::ops::function::FnOnce::call_once<std::thread::impl$0::spawn_unchecked_::closure_env$1<test::run_test::closure_env$1,tuple$<> >,tuple$<> >
+                 at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\core\src\ops\function.rs:250
+      68: alloc::boxed::impl$28::call_once
+                 at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\alloc\src\boxed.rs:1966
+      69: alloc::boxed::impl$28::call_once
+                 at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\alloc\src\boxed.rs:1966
+      70: std::sys::pal::windows::thread::impl$0::new::thread_start
+                 at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\std\src\sys\pal\windows\thread.rs:56
+      71: BaseThreadInitThunk
+      72: RtlUserThreadStart
+
+
+Location:
+    F:\code\keystone\core\src\posix_module.rs:313:56
+stack backtrace:
+   0:     0x7ff776cf4492 - std::backtrace_rs::backtrace::win64::trace
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\std\src\..\..\backtrace\src\backtrace\win64.rs:85
+   1:     0x7ff776cf4492 - std::backtrace_rs::backtrace::trace_unsynchronized
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\std\src\..\..\backtrace\src\backtrace\mod.rs:66
+   2:     0x7ff776cf4492 - std::sys::backtrace::_print_fmt
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\std\src\sys\backtrace.rs:66
+   3:     0x7ff776cf4492 - std::sys::backtrace::impl$0::print::impl$0::fmt
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\std\src\sys\backtrace.rs:39
+   4:     0x7ff776d17eeb - core::fmt::rt::Argument::fmt
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\core\src\fmt\rt.rs:181
+   5:     0x7ff776d17eeb - core::fmt::write
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\core\src\fmt\mod.rs:1446
+   6:     0x7ff776cefa97 - std::io::default_write_fmt
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\std\src\io\mod.rs:639
+   7:     0x7ff776cefa97 - std::io::Write::write_fmt<alloc::vec::Vec<u8,alloc::alloc::Global> >
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\std\src\io\mod.rs:1914
+   8:     0x7ff776cf42d5 - std::sys::backtrace::BacktraceLock::print
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\std\src\sys\backtrace.rs:42
+   9:     0x7ff776cf931a - std::panicking::default_hook::closure$0
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\std\src\panicking.rs:300
+  10:     0x7ff776cf910b - std::panicking::default_hook
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\std\src\panicking.rs:324
+  11:     0x7ff776c37852 - alloc::boxed::impl$30::call
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\alloc\src\boxed.rs:1980
+  12:     0x7ff776c37852 - test::test_main_with_exit_callback::closure$0<test::test_main::closure_env$0>
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\test\src\lib.rs:145
+  13:     0x7ff776cf9f3e - std::panicking::rust_panic_with_hook
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\std\src\panicking.rs:841
+  14:     0x7ff776cf9c99 - std::panicking::begin_panic_handler::closure$0
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\std\src\panicking.rs:706
+  15:     0x7ff776cf525f - std::sys::backtrace::__rust_end_short_backtrace<std::panicking::begin_panic_handler::closure_env$0,never$>
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\std\src\sys\backtrace.rs:168
+  16:     0x7ff776cf989e - std::panicking::begin_panic_handler
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\std\src\panicking.rs:697
+  17:     0x7ff776ef8ff1 - core::panicking::panic_fmt
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\core\src\panicking.rs:75
+  18:     0x7ff776ef94c0 - core::result::unwrap_failed
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\core\src\result.rs:1732
+  19:     0x7ff776578a50 - enum2$<core::result::Result<tuple$<>,eyre::Report> >::unwrap
+                               at C:\Users\mcclu\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib\rustlib\src\rust\library\core\src\result.rs:1137
+  20:     0x7ff776578a50 - init::test_hello_world_init::closure$0::async_block$0
+                               at F:\code\keystone\examples\hello-world\tests\init.rs:46
+  21:     0x7ff7766975af - core::future::future::impl$1::poll<alloc::boxed::Box<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,alloc::alloc::Global> >
+                               at C:\Users\mcclu\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib\rustlib\src\rust\library\core\src\future\future.rs:124
+  22:     0x7ff7765e33f2 - tokio::runtime::task::core::impl$6::poll::closure$0<core::pin::Pin<alloc::boxed::Box<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,alloc::alloc::Global> >,alloc::sync::Arc<tokio::task::local::Shared,alloc::alloc::Global> >
+                               at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\task\core.rs:331
+  23:     0x7ff7765e24f8 - tokio::loom::std::unsafe_cell::UnsafeCell<enum2$<tokio::runtime::task::core::Stage<core::pin::Pin<alloc::boxed::Box<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,alloc::alloc::Global> > > > >::with_mut
+                               at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\loom\std\unsafe_cell.rs:16
+  24:     0x7ff7765e24f8 - tokio::runtime::task::core::Core<core::pin::Pin<alloc::boxed::Box<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,alloc::alloc::Global> >,alloc::sync::Arc<tokio::task::local::Shared,alloc::alloc::Global> >::poll<core::pin::Pin<alloc::boxe
+                               at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\task\core.rs:320
+  25:     0x7ff7765cad52 - tokio::runtime::task::harness::poll_future::closure$0<core::pin::Pin<alloc::boxed::Box<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,alloc::alloc::Global> >,alloc::sync::Arc<tokio::task::local::Shared,alloc::alloc::Global> >
+                               at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\task\harness.rs:532
+  26:     0x7ff77668c7b8 - core::panic::unwind_safe::impl$25::call_once<enum2$<core::task::poll::Poll<enum2$<core::result::Result<tuple$<>,eyre::Report> > > >,tokio::runtime::task::harness::poll_future::closure_env$0<core::pin::Pin<alloc::boxed::Box<enum2$<init::test_hello_world_ini
+                               at C:\Users\mcclu\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib\rustlib\src\rust\library\core\src\panic\unwind_safe.rs:272
+  27:     0x7ff77659a9a5 - std::panicking::try::do_call<core::panic::unwind_safe::AssertUnwindSafe<tokio::runtime::task::harness::poll_future::closure_env$0<core::pin::Pin<alloc::boxed::Box<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,alloc::alloc::Global> >,all
+                               at C:\Users\mcclu\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib\rustlib\src\rust\library\std\src\panicking.rs:589
+  28:     0x7ff776695783 - std::panic::catch_unwind<core::panic::unwind_safe::AssertUnwindSafe<tokio::runtime::task::harness::poll_future::closure_env$0<enum2$<init::test_hello_world_empty::closure$0::async_block_env$0>,alloc::sync::Arc<tokio::task::local::Shared,alloc::alloc::Globa
+  29:     0x7ff7766938ab - std::panicking::try
+                               at C:\Users\mcclu\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib\rustlib\src\rust\library\std\src\panicking.rs:552
+  30:     0x7ff7766938ab - std::panic::catch_unwind<core::panic::unwind_safe::AssertUnwindSafe<tokio::runtime::task::harness::poll_future::closure_env$0<core::pin::Pin<alloc::boxed::Box<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,alloc::alloc::Global> >,alloc::
+                               at C:\Users\mcclu\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib\rustlib\src\rust\library\std\src\panic.rs:359
+  31:     0x7ff7765c90a9 - tokio::runtime::task::harness::poll_future<core::pin::Pin<alloc::boxed::Box<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,alloc::alloc::Global> >,alloc::sync::Arc<tokio::task::local::Shared,alloc::alloc::Global> >
+                               at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\task\harness.rs:520
+  32:     0x7ff7765cc561 - tokio::runtime::task::harness::Harness<core::pin::Pin<alloc::boxed::Box<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,alloc::alloc::Global> >,alloc::sync::Arc<tokio::task::local::Shared,alloc::alloc::Global> >::poll_inner<core::pin::Pin
+                               at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\task\harness.rs:209
+  33:     0x7ff7765cf023 - tokio::runtime::task::harness::Harness<core::pin::Pin<alloc::boxed::Box<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,alloc::alloc::Global> >,alloc::sync::Arc<tokio::task::local::Shared,alloc::alloc::Global> >::poll<core::pin::Pin<alloc
+                               at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\task\harness.rs:154
+  34:     0x7ff77653417b - tokio::runtime::task::raw::poll<core::pin::Pin<alloc::boxed::Box<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,alloc::alloc::Global> >,alloc::sync::Arc<tokio::task::local::Shared,alloc::alloc::Global> >
+                               at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\task\raw.rs:271
+  35:     0x7ff776b82666 - tokio::runtime::task::raw::RawTask::poll
+                               at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\task\raw.rs:201
+  36:     0x7ff776ba9302 - tokio::runtime::task::LocalNotified<alloc::sync::Arc<tokio::task::local::Shared,alloc::alloc::Global> >::run<alloc::sync::Arc<tokio::task::local::Shared,alloc::alloc::Global> >
+                               at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\task\mod.rs:463
+  37:     0x7ff776b8ecee - tokio::task::local::impl$4::tick::closure$0
+                               at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\task\local.rs:739
+  38:     0x7ff776b8ec32 - tokio::task::coop::with_budget
+                               at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\task\coop\mod.rs:167
+  39:     0x7ff776b8ec32 - tokio::task::coop::budget
+                               at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\task\coop\mod.rs:133
+  40:     0x7ff776b8ec32 - tokio::task::local::LocalSet::tick
+                               at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\task\local.rs:739
+  41:     0x7ff77669d228 - tokio::task::local::impl$10::poll::closure$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hello_world_init::closure_env$0> > >
+                               at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\task\local.rs:1045
+  42:     0x7ff77669c9f5 - tokio::task::local::impl$4::with::closure$0<enum2$<core::task::poll::Poll<enum2$<core::result::Result<enum2$<core::result::Result<enum2$<core::result::Result<tuple$<>,eyre::Report> >,tokio::runtime::task::error::JoinError> >,tokio::time::error::Elapsed> > 
+                               at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\task\local.rs:793
+  43:     0x7ff776589faf - std::thread::local::LocalKey<tokio::task::local::LocalData>::try_with<tokio::task::local::LocalData,tokio::task::local::impl$4::with::closure_env$0<enum2$<core::task::poll::Poll<enum2$<core::result::Result<enum2$<core::result::Result<enum2$<core::result::R
+                               at C:\Users\mcclu\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib\rustlib\src\rust\library\std\src\thread\local.rs:315
+  44:     0x7ff776588bfd - std::thread::local::LocalKey<tokio::task::local::LocalData>::with<tokio::task::local::LocalData,tokio::task::local::impl$4::with::closure_env$0<enum2$<core::task::poll::Poll<enum2$<core::result::Result<enum2$<core::result::Result<enum2$<core::result::Resul
+                               at C:\Users\mcclu\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib\rustlib\src\rust\library\std\src\thread\local.rs:279
+  45:     0x7ff77669c811 - tokio::task::local::LocalSet::with<enum2$<core::task::poll::Poll<enum2$<core::result::Result<enum2$<core::result::Result<enum2$<core::result::Result<tuple$<>,eyre::Report> >,tokio::runtime::task::error::JoinError> >,tokio::time::error::Elapsed> > > >,tokio
+                               at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\task\local.rs:791
+  46:     0x7ff77669d081 - tokio::task::local::impl$10::poll<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hello_world_init::closure_env$0> > >
+                               at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\task\local.rs:1031
+  47:     0x7ff77669cc5e - tokio::task::local::impl$4::run_until::async_fn$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hello_world_init::closure_env$0> > >
+                               at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\task\local.rs:689
+  48:     0x7ff776574988 - tokio::runtime::park::impl$4::block_on::closure$0<enum2$<tokio::task::local::impl$4::run_until::async_fn_env$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hello_world_init::c
+                               at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\park.rs:284
+  49:     0x7ff776573ff7 - tokio::task::coop::with_budget
+                               at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\task\coop\mod.rs:167
+  50:     0x7ff776573ff7 - tokio::task::coop::budget
+                               at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\task\coop\mod.rs:133
+  51:     0x7ff776573ff7 - tokio::runtime::park::CachedParkThread::block_on<enum2$<tokio::task::local::impl$4::run_until::async_fn_env$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hello_world_init::cl
+                               at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\park.rs:284
+  52:     0x7ff776535a42 - tokio::runtime::context::blocking::BlockingRegionGuard::block_on<enum2$<tokio::task::local::impl$4::run_until::async_fn_env$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hell
+                               at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\context\blocking.rs:66
+  53:     0x7ff776629622 - tokio::runtime::scheduler::multi_thread::impl$0::block_on::closure$0<enum2$<tokio::task::local::impl$4::run_until::async_fn_env$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_
+                               at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\scheduler\multi_thread\mod.rs:87
+  54:     0x7ff7765bf214 - tokio::runtime::context::runtime::enter_runtime<tokio::runtime::scheduler::multi_thread::impl$0::block_on::closure_env$0<enum2$<tokio::task::local::impl$4::run_until::async_fn_env$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_w
+                               at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\context\runtime.rs:65
+  55:     0x7ff7766294c9 - tokio::runtime::scheduler::multi_thread::MultiThread::block_on<enum2$<tokio::task::local::impl$4::run_until::async_fn_env$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hello_
+                               at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\scheduler\multi_thread\mod.rs:86
+  56:     0x7ff7766040af - tokio::runtime::runtime::Runtime::block_on_inner<enum2$<tokio::task::local::impl$4::run_until::async_fn_env$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hello_world_init::cl
+                               at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\runtime.rs:358
+  57:     0x7ff776604372 - tokio::runtime::runtime::Runtime::block_on<enum2$<tokio::task::local::impl$4::run_until::async_fn_env$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hello_world_init::closure_
+                               at F:\packages\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.45.1\src\runtime\runtime.rs:330
+  58:     0x7ff7765ac18b - keystone::test_harness<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hello_world_init::closure_env$0>
+                               at F:\code\keystone\core\src\lib.rs:336
+  59:     0x7ff77656e088 - init::test_hello_world_init
+                               at F:\code\keystone\examples\hello-world\tests\init.rs:20
+  60:     0x7ff776578008 - init::test_hello_world_init::closure$0
+                               at F:\code\keystone\examples\hello-world\tests\init.rs:4
+  61:     0x7ff776630ab2 - core::ops::function::FnOnce::call_once<init::test_hello_world_init::closure_env$0,tuple$<> >
+                               at C:\Users\mcclu\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib\rustlib\src\rust\library\core\src\ops\function.rs:250
+  62:     0x7ff776c3ece0 - core::ops::function::FnOnce::call_once
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\core\src\ops\function.rs:250
+  63:     0x7ff776c3ece0 - test::__rust_begin_short_backtrace<enum2$<core::result::Result<tuple$<>,alloc::string::String> >,enum2$<core::result::Result<tuple$<>,alloc::string::String> > (*)()>
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\test\src\lib.rs:648
+  64:     0x7ff776c3d633 - test::run_test_in_process
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\test\src\lib.rs:671
+  65:     0x7ff776c3d633 - test::run_test::closure$0
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\test\src\lib.rs:592
+  66:     0x7ff776bf844c - test::run_test::closure$1
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\test\src\lib.rs:622
+  67:     0x7ff776bf844c - std::sys::backtrace::__rust_begin_short_backtrace<test::run_test::closure_env$1,tuple$<> >
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\std\src\sys\backtrace.rs:152
+  68:     0x7ff776bfc85d - core::ops::function::FnOnce::call_once<std::thread::impl$0::spawn_unchecked_::closure_env$1<test::run_test::closure_env$1,tuple$<> >,tuple$<> >
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\core\src\ops\function.rs:250
+  69:     0x7ff776cfd54d - alloc::boxed::impl$28::call_once
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\alloc\src\boxed.rs:1966
+  70:     0x7ff776cfd54d - alloc::boxed::impl$28::call_once
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\alloc\src\boxed.rs:1966
+  71:     0x7ff776cfd54d - std::sys::pal::windows::thread::impl$0::new::thread_start
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\std\src\sys\pal\windows\thread.rs:56
+  72:     0x7ff99a23e8d7 - BaseThreadInitThunk
+  73:     0x7ff99a87c34c - RtlUserThreadStart
+
+thread 'test_hello_world_init' panicked at F:\code\keystone\core\src\lib.rs:338:24:
+called `Result::unwrap()` on an `Err` value: JoinError::Panic(Id(17), "called `Result::unwrap()` on an `Err` value: Error from Hello World\n\nCaused by:\n    Failed: Failed:    0: std::backtrace_rs::backtrace::win64::trace\n                 at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\\std\\src\\..\\..\\backtrace\\src\\backtrace\\win64.rs:85\n       1: std::backtrace_rs::backtrace::trace_unsynchronized\n                 at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\\std\\src\\..\\..\\backtrace\\src\\backtrace\\mod.rs:66\n       2: std::backtrace::Backtrace::create\n                 at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\\std\\src\\backtrace.rs:331\n       3: std::backtrace::Backtrace::capture\n                 at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\\std\\src\\backtrace.rs:296\n       4: capnp::impl$6::from\n                 at F:\\packages\\.cargo\\git\\checkouts\\capstone-rs-632f171ccb653c24\\84502ed\\capnp\\src\\lib.rs:534\n       5: core::result::impl$28::from_residual<tuple$<>,std::io::error::Error,capnp::Error>\n                 at C:\\Users\\mcclu\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\lib\\rustlib\\src\\rust\\library\\core\\src\\result.rs:2050\n       6: capnp_futures::serialize::write_message::async_fn$0<ref_mut$<keystone::byte_stream::ClientWriter>,ref$<alloc::rc::Rc<capnp::message::Builder<capnp::message::HeapAllocator>,alloc::alloc::Global> > >\n                 at F:\\packages\\.cargo\\git\\checkouts\\capstone-rs-632f171ccb653c24\\84502ed\\capnp-futures\\src\\serialize.rs:202\n       7: capnp_futures::write_queue::write_queue::async_block$0<keystone::byte_stream::ClientWriter,alloc::rc::Rc<capnp::message::Builder<capnp::message::HeapAllocator>,alloc::alloc::Global> >\n                 at F:\\packages\\.cargo\\git\\checkouts\\capstone-rs-632f171ccb653c24\\84502ed\\capnp-futures\\src\\write_queue.rs:79\n       8: futures_util::future::future::map::impl$2::poll<enum2$<capnp_futures::write_queue::write_queue::async_block_env$0<keystone::byte_stream::ClientWriter,alloc::rc::Rc<capnp::message::Builder<capnp::message::HeapAllocator>,alloc::alloc::Global> > >,capnp_rpc::\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\futures-util-0.3.31\\src\\future\\future\\map.rs:55\n       9: futures_util::future::future::impl$14::poll<enum2$<capnp_futures::write_queue::write_queue::async_block_env$0<keystone::byte_stream::ClientWriter,alloc::rc::Rc<capnp::message::Builder<capnp::message::HeapAllocator>,alloc::alloc::Global> > >,capnp_rpc::twop\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\futures-util-0.3.31\\src\\lib.rs:86\n      10: futures_util::future::future::flatten::impl$2::poll<futures_util::future::future::Map<enum2$<capnp_futures::write_queue::write_queue::async_block_env$0<keystone::byte_stream::ClientWriter,alloc::rc::Rc<capnp::message::Builder<capnp::message::HeapAllocator>\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\futures-util-0.3.31\\src\\future\\future\\flatten.rs:50\n      11: futures_util::future::future::impl$29::poll<enum2$<capnp_futures::write_queue::write_queue::async_block_env$0<keystone::byte_stream::ClientWriter,alloc::rc::Rc<capnp::message::Builder<capnp::message::HeapAllocator>,alloc::alloc::Global> > >,futures_util::f\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\futures-util-0.3.31\\src\\lib.rs:86\n      12: capnp::capability::impl$2::poll<tuple$<>,capnp::Error>\n                 at F:\\packages\\.cargo\\git\\checkouts\\capstone-rs-632f171ccb653c24\\84502ed\\capnp\\src\\capability.rs:105\n      13: futures_util::future::future::shared::impl$11::poll<capnp::capability::Promise<tuple$<>,capnp::Error> >\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\futures-util-0.3.31\\src\\future\\future\\shared.rs:322\n      14: capnp::capability::impl$2::poll<tuple$<>,capnp::Error>\n                 at F:\\packages\\.cargo\\git\\checkouts\\capstone-rs-632f171ccb653c24\\84502ed\\capnp\\src\\capability.rs:105\n      15: futures_util::future::future::map::impl$2::poll<capnp::capability::Promise<tuple$<>,capnp::Error>,capnp_rpc::impl$0::new::closure_env$0<capnp_rpc::rpc_twoparty_capnp::Side>,capnp::capability::Promise<tuple$<>,capnp::Error> >\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\futures-util-0.3.31\\src\\future\\future\\map.rs:55\n      16: futures_util::future::future::impl$14::poll<capnp::capability::Promise<tuple$<>,capnp::Error>,capnp_rpc::impl$0::new::closure_env$0<capnp_rpc::rpc_twoparty_capnp::Side> >\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\futures-util-0.3.31\\src\\lib.rs:86\n      17: futures_util::future::future::flatten::impl$2::poll<futures_util::future::future::Map<capnp::capability::Promise<tuple$<>,capnp::Error>,capnp_rpc::impl$0::new::closure_env$0<capnp_rpc::rpc_twoparty_capnp::Side> > >\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\futures-util-0.3.31\\src\\future\\future\\flatten.rs:50\n      18: futures_util::future::future::impl$29::poll<capnp::capability::Promise<tuple$<>,capnp::Error>,capnp::capability::Promise<tuple$<>,capnp::Error>,capnp_rpc::impl$0::new::closure_env$0<capnp_rpc::rpc_twoparty_capnp::Side> >\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\futures-util-0.3.31\\src\\lib.rs:86\n      19: core::future::future::impl$1::poll<alloc::boxed::Box<dyn$<core::future::future::Future<assoc$<Output,enum2$<core::result::Result<tuple$<>,capnp::Error> > > > >,alloc::alloc::Global> >\n                 at C:\\Users\\mcclu\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\lib\\rustlib\\src\\rust\\library\\core\\src\\future\\future.rs:124\n      20: futures_util::future::future::map::impl$2::poll<core::pin::Pin<alloc::boxed::Box<dyn$<core::future::future::Future<assoc$<Output,enum2$<core::result::Result<tuple$<>,capnp::Error> > > > >,alloc::alloc::Global> >,capnp_rpc::task_set::impl$4::poll::closure_e\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\futures-util-0.3.31\\src\\future\\future\\map.rs:55\n      21: futures_util::future::future::impl$14::poll<core::pin::Pin<alloc::boxed::Box<dyn$<core::future::future::Future<assoc$<Output,enum2$<core::result::Result<tuple$<>,capnp::Error> > > > >,alloc::alloc::Global> >,capnp_rpc::task_set::impl$4::poll::closure_env$0\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\futures-util-0.3.31\\src\\lib.rs:86\n      22: capnp_rpc::task_set::impl$1::poll<capnp::Error>\n                 at F:\\packages\\.cargo\\git\\checkouts\\capstone-rs-632f171ccb653c24\\84502ed\\capnp-rpc\\src\\task_set.rs:55\n      23: futures_util::stream::futures_unordered::impl$7::poll_next<enum2$<capnp_rpc::task_set::TaskInProgress<capnp::Error> > >\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\futures-util-0.3.31\\src\\stream\\futures_unordered\\mod.rs:528\n      24: capnp_rpc::task_set::impl$4::poll<capnp::Error>\n                 at F:\\packages\\.cargo\\git\\checkouts\\capstone-rs-632f171ccb653c24\\84502ed\\capnp-rpc\\src\\task_set.rs:174\n      25: capnp_rpc::impl$1::poll<capnp_rpc::rpc_twoparty_capnp::Side>\n                 at F:\\packages\\.cargo\\git\\checkouts\\capstone-rs-632f171ccb653c24\\84502ed\\capnp-rpc\\src\\lib.rs:345\n      26: core::future::future::impl$0::poll<capnp_rpc::RpcSystem<capnp_rpc::rpc_twoparty_capnp::Side> >\n                 at C:\\Users\\mcclu\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\lib\\rustlib\\src\\rust\\library\\core\\src\\future\\future.rs:112\n      27: keystone::posix_module::impl$2::spawn::async_fn$0::closure$1::async_block$0::async_block$0::closure$0<enum2$<keystone::keystone::impl$2::passthrough_stderr::async_fn_env$0> (*)(keystone::byte_stream::ByteStreamBufferImpl)>\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\tokio-1.45.1\\src\\macros\\select.rs:708\n      28: core::future::poll_fn::impl$2::poll<enum2$<keystone::posix_module::impl$2::spawn::async_fn$0::closure$1::async_block$0::async_block$0::__tokio_select_util::Out<enum2$<core::result::Result<tuple$<>,capnp::Error> >,enum2$<core::option::Option<bool> > > >,key\n                 at C:\\Users\\mcclu\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\lib\\rustlib\\src\\rust\\library\\core\\src\\future\\poll_fn.rs:151\n      29: keystone::posix_module::impl$2::spawn::async_fn$0::closure$1::async_block$0::async_block$0<enum2$<keystone::keystone::impl$2::passthrough_stderr::async_fn_env$0> (*)(keystone::byte_stream::ByteStreamBufferImpl)>\n                 at F:\\code\\keystone\\core\\src\\posix_module.rs:221\n      30: tokio::runtime::task::core::impl$6::poll::closure$0<enum2$<keystone::posix_module::impl$2::spawn::async_fn$0::closure$1::async_block$0::async_block_env$0<enum2$<keystone::keystone::impl$2::passthrough_stderr::async_fn_env$0> (*)(keystone::byte_stream::Byte\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\tokio-1.45.1\\src\\runtime\\task\\core.rs:331\n      31: tokio::loom::std::unsafe_cell::UnsafeCell<enum2$<tokio::runtime::task::core::Stage<enum2$<keystone::posix_module::impl$2::spawn::async_fn$0::closure$1::async_block$0::async_block_env$0<enum2$<keystone::keystone::impl$2::passthrough_stderr::async_fn_env$0> \n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\tokio-1.45.1\\src\\loom\\std\\unsafe_cell.rs:16\n      32: tokio::runtime::task::core::Core<enum2$<keystone::posix_module::impl$2::spawn::async_fn$0::closure$1::async_block$0::async_block_env$0<enum2$<keystone::keystone::impl$2::passthrough_stderr::async_fn_env$0> (*)(keystone::byte_stream::ByteStreamBufferImpl)> \n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\tokio-1.45.1\\src\\runtime\\task\\core.rs:320\n      33: tokio::runtime::task::harness::poll_future::closure$0<enum2$<keystone::posix_module::impl$2::spawn::async_fn$0::closure$1::async_block$0::async_block_env$0<enum2$<keystone::keystone::impl$2::passthrough_stderr::async_fn_env$0> (*)(keystone::byte_stream::By\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\tokio-1.45.1\\src\\runtime\\task\\harness.rs:532\n      34: core::panic::unwind_safe::impl$25::call_once<enum2$<core::task::poll::Poll<enum2$<core::result::Result<tuple$<>,capnp::Error> > > >,tokio::runtime::task::harness::poll_future::closure_env$0<enum2$<keystone::posix_module::impl$2::spawn::async_fn$0::closure$\n                 at C:\\Users\\mcclu\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\lib\\rustlib\\src\\rust\\library\\core\\src\\panic\\unwind_safe.rs:272\n      35: std::panicking::try::do_call<core::panic::unwind_safe::AssertUnwindSafe<tokio::runtime::task::harness::poll_future::closure_env$0<enum2$<keystone::posix_module::impl$2::spawn::async_fn$0::closure$1::async_block$0::async_block_env$0<enum2$<keystone::keyston\n                 at C:\\Users\\mcclu\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\lib\\rustlib\\src\\rust\\library\\std\\src\\panicking.rs:589\n      36: std::panic::catch_unwind<core::panic::unwind_safe::AssertUnwindSafe<tokio::runtime::task::harness::poll_future::closure_env$0<enum2$<init::test_hello_world_empty::closure$0::async_block_env$0>,alloc::sync::Arc<tokio::task::local::Shared,alloc::alloc::Globa\n      37: std::panicking::try\n                 at C:\\Users\\mcclu\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\lib\\rustlib\\src\\rust\\library\\std\\src\\panicking.rs:552\n      38: std::panic::catch_unwind<core::panic::unwind_safe::AssertUnwindSafe<tokio::runtime::task::harness::poll_future::closure_env$0<enum2$<keystone::posix_module::impl$2::spawn::async_fn$0::closure$1::async_block$0::async_block_env$0<enum2$<keystone::keystone::i\n                 at C:\\Users\\mcclu\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\lib\\rustlib\\src\\rust\\library\\std\\src\\panic.rs:359\n      39: tokio::runtime::task::harness::poll_future<enum2$<keystone::posix_module::impl$2::spawn::async_fn$0::closure$1::async_block$0::async_block_env$0<enum2$<keystone::keystone::impl$2::passthrough_stderr::async_fn_env$0> (*)(keystone::byte_stream::ByteStreamBuf\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\tokio-1.45.1\\src\\runtime\\task\\harness.rs:520\n      40: tokio::runtime::task::harness::Harness<enum2$<keystone::posix_module::impl$2::spawn::async_fn$0::closure$1::async_block$0::async_block_env$0<enum2$<keystone::keystone::impl$2::passthrough_stderr::async_fn_env$0> (*)(keystone::byte_stream::ByteStreamBufferI\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\tokio-1.45.1\\src\\runtime\\task\\harness.rs:209\n      41: tokio::runtime::task::harness::Harness<enum2$<keystone::posix_module::impl$2::spawn::async_fn$0::closure$1::async_block$0::async_block_env$0<enum2$<keystone::keystone::impl$2::passthrough_stderr::async_fn_env$0> (*)(keystone::byte_stream::ByteStreamBufferI\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\tokio-1.45.1\\src\\runtime\\task\\harness.rs:154\n      42: tokio::runtime::task::raw::poll<enum2$<keystone::posix_module::impl$2::spawn::async_fn$0::closure$1::async_block$0::async_block_env$0<enum2$<keystone::keystone::impl$2::passthrough_stderr::async_fn_env$0> (*)(keystone::byte_stream::ByteStreamBufferImpl)> >\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\tokio-1.45.1\\src\\runtime\\task\\raw.rs:271\n      43: tokio::runtime::task::raw::RawTask::poll\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\tokio-1.45.1\\src\\runtime\\task\\raw.rs:201\n      44: tokio::runtime::task::LocalNotified<alloc::sync::Arc<tokio::task::local::Shared,alloc::alloc::Global> >::run<alloc::sync::Arc<tokio::task::local::Shared,alloc::alloc::Global> >\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\tokio-1.45.1\\src\\runtime\\task\\mod.rs:463\n      45: tokio::task::local::impl$4::tick::closure$0\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\tokio-1.45.1\\src\\task\\local.rs:739\n      46: tokio::task::coop::with_budget\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\tokio-1.45.1\\src\\task\\coop\\mod.rs:167\n      47: tokio::task::coop::budget\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\tokio-1.45.1\\src\\task\\coop\\mod.rs:133\n      48: tokio::task::local::LocalSet::tick\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\tokio-1.45.1\\src\\task\\local.rs:739\n      49: tokio::task::local::impl$10::poll::closure$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hello_world_init::closure_env$0> > >\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\tokio-1.45.1\\src\\task\\local.rs:1045\n      50: tokio::task::local::impl$4::with::closure$0<enum2$<core::task::poll::Poll<enum2$<core::result::Result<enum2$<core::result::Result<enum2$<core::result::Result<tuple$<>,eyre::Report> >,tokio::runtime::task::error::JoinError> >,tokio::time::error::Elapsed> > \n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\tokio-1.45.1\\src\\task\\local.rs:793\n      51: std::thread::local::LocalKey<tokio::task::local::LocalData>::try_with<tokio::task::local::LocalData,tokio::task::local::impl$4::with::closure_env$0<enum2$<core::task::poll::Poll<enum2$<core::result::Result<enum2$<core::result::Result<enum2$<core::result::R\n                 at C:\\Users\\mcclu\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\lib\\rustlib\\src\\rust\\library\\std\\src\\thread\\local.rs:315\n      52: std::thread::local::LocalKey<tokio::task::local::LocalData>::with<tokio::task::local::LocalData,tokio::task::local::impl$4::with::closure_env$0<enum2$<core::task::poll::Poll<enum2$<core::result::Result<enum2$<core::result::Result<enum2$<core::result::Resul\n                 at C:\\Users\\mcclu\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\lib\\rustlib\\src\\rust\\library\\std\\src\\thread\\local.rs:279\n      53: tokio::task::local::LocalSet::with<enum2$<core::task::poll::Poll<enum2$<core::result::Result<enum2$<core::result::Result<enum2$<core::result::Result<tuple$<>,eyre::Report> >,tokio::runtime::task::error::JoinError> >,tokio::time::error::Elapsed> > > >,tokio\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\tokio-1.45.1\\src\\task\\local.rs:791\n      54: tokio::task::local::impl$10::poll<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hello_world_init::closure_env$0> > >\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\tokio-1.45.1\\src\\task\\local.rs:1031\n      55: tokio::task::local::impl$4::run_until::async_fn$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hello_world_init::closure_env$0> > >\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\tokio-1.45.1\\src\\task\\local.rs:689\n      56: tokio::runtime::park::impl$4::block_on::closure$0<enum2$<tokio::task::local::impl$4::run_until::async_fn_env$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hello_world_init::c\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\tokio-1.45.1\\src\\runtime\\park.rs:284\n      57: tokio::task::coop::with_budget\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\tokio-1.45.1\\src\\task\\coop\\mod.rs:167\n      58: tokio::task::coop::budget\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\tokio-1.45.1\\src\\task\\coop\\mod.rs:133\n      59: tokio::runtime::park::CachedParkThread::block_on<enum2$<tokio::task::local::impl$4::run_until::async_fn_env$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hello_world_init::cl\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\tokio-1.45.1\\src\\runtime\\park.rs:284\n      60: tokio::runtime::context::blocking::BlockingRegionGuard::block_on<enum2$<tokio::task::local::impl$4::run_until::async_fn_env$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hell\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\tokio-1.45.1\\src\\runtime\\context\\blocking.rs:66\n      61: tokio::runtime::scheduler::multi_thread::impl$0::block_on::closure$0<enum2$<tokio::task::local::impl$4::run_until::async_fn_env$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\tokio-1.45.1\\src\\runtime\\scheduler\\multi_thread\\mod.rs:87\n      62: tokio::runtime::context::runtime::enter_runtime<tokio::runtime::scheduler::multi_thread::impl$0::block_on::closure_env$0<enum2$<tokio::task::local::impl$4::run_until::async_fn_env$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_w\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\tokio-1.45.1\\src\\runtime\\context\\runtime.rs:65\n      63: tokio::runtime::scheduler::multi_thread::MultiThread::block_on<enum2$<tokio::task::local::impl$4::run_until::async_fn_env$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hello_\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\tokio-1.45.1\\src\\runtime\\scheduler\\multi_thread\\mod.rs:86\n      64: tokio::runtime::runtime::Runtime::block_on_inner<enum2$<tokio::task::local::impl$4::run_until::async_fn_env$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hello_world_init::cl\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\tokio-1.45.1\\src\\runtime\\runtime.rs:358\n      65: tokio::runtime::runtime::Runtime::block_on<enum2$<tokio::task::local::impl$4::run_until::async_fn_env$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hello_world_init::closure_\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\tokio-1.45.1\\src\\runtime\\runtime.rs:330\n      66: keystone::test_harness<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hello_world_init::closure_env$0>\n                 at F:\\code\\keystone\\core\\src\\lib.rs:336\n      67: init::test_hello_world_init\n                 at .\\tests\\init.rs:20\n      68: init::test_hello_world_init::closure$0\n                 at .\\tests\\init.rs:4\n      69: core::ops::function::FnOnce::call_once<init::test_hello_world_init::closure_env$0,tuple$<> >\n                 at C:\\Users\\mcclu\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\lib\\rustlib\\src\\rust\\library\\core\\src\\ops\\function.rs:250\n      70: core::ops::function::FnOnce::call_once\n                 at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\\core\\src\\ops\\function.rs:250\n      71: test::__rust_begin_short_backtrace<enum2$<core::result::Result<tuple$<>,alloc::string::String> >,enum2$<core::result::Result<tuple$<>,alloc::string::String> > (*)()>\n                 at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\\test\\src\\lib.rs:648\n      72: test::run_test_in_process\n                 at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\\test\\src\\lib.rs:671\n      73: test::run_test::closure$0\n                 at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\\test\\src\\lib.rs:592\n      74: test::run_test::closure$1\n                 at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\\test\\src\\lib.rs:622\n      75: std::sys::backtrace::__rust_begin_short_backtrace<test::run_test::closure_env$1,tuple$<> >\n                 at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\\std\\src\\sys\\backtrace.rs:152\n      76: core::ops::function::FnOnce::call_once<std::thread::impl$0::spawn_unchecked_::closure_env$1<test::run_test::closure_env$1,tuple$<> >,tuple$<> >\n                 at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\\core\\src\\ops\\function.rs:250\n      77: alloc::boxed::impl$28::call_once\n                 at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\\alloc\\src\\boxed.rs:1966\n      78: alloc::boxed::impl$28::call_once\n                 at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\\alloc\\src\\boxed.rs:1966\n      79: std::sys::pal::windows::thread::impl$0::new::thread_start\n                 at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\\std\\src\\sys\\pal\\windows\\thread.rs:56\n      80: BaseThreadInitThunk\n      81: RtlUserThreadStart\n     |    0: std::backtrace_rs::backtrace::win64::trace\n                 at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\\std\\src\\..\\..\\backtrace\\src\\backtrace\\win64.rs:85\n       1: std::backtrace_rs::backtrace::trace_unsynchronized\n                 at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\\std\\src\\..\\..\\backtrace\\src\\backtrace\\mod.rs:66\n       2: std::backtrace::Backtrace::create\n                 at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\\std\\src\\backtrace.rs:331\n       3: std::backtrace::Backtrace::capture\n                 at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\\std\\src\\backtrace.rs:296\n       4: capnp::Error::failed\n                 at F:\\packages\\.cargo\\git\\checkouts\\capstone-rs-632f171ccb653c24\\84502ed\\capnp\\src\\lib.rs:459\n       5: keystone::keystone::impl$0::to_capnp::closure$0<tuple$<>,capnp::Error>\n                 at F:\\code\\keystone\\core\\src\\keystone.rs:36\n       6: enum2$<core::result::Result<tuple$<>,capnp::Error> >::map_err<tuple$<>,capnp::Error,capnp::Error,keystone::keystone::impl$0::to_capnp::closure_env$0<tuple$<>,capnp::Error> >\n                 at C:\\Users\\mcclu\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\lib\\rustlib\\src\\rust\\library\\core\\src\\result.rs:884\n       7: keystone::keystone::impl$0::to_capnp<tuple$<>,capnp::Error>\n                 at F:\\code\\keystone\\core\\src\\keystone.rs:36\n       8: keystone::posix_module::flatten_to_capnp<tuple$<>,capnp::Error,tokio::runtime::task::error::JoinError>\n                 at F:\\code\\keystone\\core\\src\\posix_module.rs:118\n       9: keystone::posix_module::impl$2::spawn::async_fn$0::closure$1::async_block$0<enum2$<keystone::keystone::impl$2::passthrough_stderr::async_fn_env$0> (*)(keystone::byte_stream::ByteStreamBufferImpl)>\n                 at F:\\code\\keystone\\core\\src\\posix_module.rs:236\n      10: core::future::future::impl$1::poll<alloc::boxed::Box<dyn$<core::future::future::Future<assoc$<Output,enum2$<core::result::Result<tuple$<>,eyre::Report> > > > >,alloc::alloc::Global> >\n                 at C:\\Users\\mcclu\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\lib\\rustlib\\src\\rust\\library\\core\\src\\future\\future.rs:124\n      11: futures_util::stream::futures_unordered::impl$7::poll_next<core::pin::Pin<alloc::boxed::Box<dyn$<core::future::future::Future<assoc$<Output,enum2$<core::result::Result<tuple$<>,eyre::Report> > > > >,alloc::alloc::Global> > >\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\futures-util-0.3.31\\src\\stream\\futures_unordered\\mod.rs:528\n      12: futures_util::stream::stream::StreamExt::poll_next_unpin<futures_util::stream::futures_unordered::FuturesUnordered<core::pin::Pin<alloc::boxed::Box<dyn$<core::future::future::Future<assoc$<Output,enum2$<core::result::Result<tuple$<>,eyre::Report> > > > >,a\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\futures-util-0.3.31\\src\\stream\\stream\\mod.rs:1638\n      13: futures_util::stream::stream::next::impl$3::poll<futures_util::stream::futures_unordered::FuturesUnordered<core::pin::Pin<alloc::boxed::Box<dyn$<core::future::future::Future<assoc$<Output,enum2$<core::result::Result<tuple$<>,eyre::Report> > > > >,alloc::al\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\futures-util-0.3.31\\src\\stream\\stream\\next.rs:32\n      14: keystone::drive_stream::async_fn$0<core::pin::Pin<alloc::boxed::Box<dyn$<core::future::future::Future<assoc$<Output,enum2$<core::result::Result<tuple$<>,eyre::Report> > > > >,alloc::alloc::Global> > >\n                 at F:\\code\\keystone\\core\\src\\lib.rs:349\n      15: tokio::future::maybe_done::impl$1::poll<enum2$<keystone::drive_stream::async_fn_env$0<core::pin::Pin<alloc::boxed::Box<dyn$<core::future::future::Future<assoc$<Output,enum2$<core::result::Result<tuple$<>,eyre::Report> > > > >,alloc::alloc::Global> > > > >\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\tokio-1.45.1\\src\\future\\maybe_done.rs:65\n      16: keystone::test_shutdown::async_fn$0::closure$0\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\tokio-1.45.1\\src\\macros\\try_join.rs:184\n      17: core::future::poll_fn::impl$2::poll<enum2$<core::result::Result<tuple$<tuple$<>,tuple$<> >,eyre::Report> >,keystone::test_shutdown::async_fn$0::closure_env$0>\n                 at C:\\Users\\mcclu\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\lib\\rustlib\\src\\rust\\library\\core\\src\\future\\poll_fn.rs:151\n      18: keystone::test_shutdown::async_fn$0\n                 at F:\\code\\keystone\\core\\src\\lib.rs:359\n      19: init::test_hello_world_init::closure$0::async_block$0\n                 at .\\tests\\init.rs:47\n      20: core::future::future::impl$1::poll<alloc::boxed::Box<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,alloc::alloc::Global> >\n                 at C:\\Users\\mcclu\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\lib\\rustlib\\src\\rust\\library\\core\\src\\future\\future.rs:124\n      21: tokio::runtime::task::core::impl$6::poll::closure$0<core::pin::Pin<alloc::boxed::Box<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,alloc::alloc::Global> >,alloc::sync::Arc<tokio::task::local::Shared,alloc::alloc::Global> >\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\tokio-1.45.1\\src\\runtime\\task\\core.rs:331\n      22: tokio::loom::std::unsafe_cell::UnsafeCell<enum2$<tokio::runtime::task::core::Stage<core::pin::Pin<alloc::boxed::Box<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,alloc::alloc::Global> > > > >::with_mut\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\tokio-1.45.1\\src\\loom\\std\\unsafe_cell.rs:16\n      23: tokio::runtime::task::core::Core<core::pin::Pin<alloc::boxed::Box<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,alloc::alloc::Global> >,alloc::sync::Arc<tokio::task::local::Shared,alloc::alloc::Global> >::poll<core::pin::Pin<alloc::boxe\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\tokio-1.45.1\\src\\runtime\\task\\core.rs:320\n      24: tokio::runtime::task::harness::poll_future::closure$0<core::pin::Pin<alloc::boxed::Box<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,alloc::alloc::Global> >,alloc::sync::Arc<tokio::task::local::Shared,alloc::alloc::Global> >\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\tokio-1.45.1\\src\\runtime\\task\\harness.rs:532\n      25: core::panic::unwind_safe::impl$25::call_once<enum2$<core::task::poll::Poll<enum2$<core::result::Result<tuple$<>,eyre::Report> > > >,tokio::runtime::task::harness::poll_future::closure_env$0<core::pin::Pin<alloc::boxed::Box<enum2$<init::test_hello_world_ini\n                 at C:\\Users\\mcclu\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\lib\\rustlib\\src\\rust\\library\\core\\src\\panic\\unwind_safe.rs:272\n      26: std::panicking::try::do_call<core::panic::unwind_safe::AssertUnwindSafe<tokio::runtime::task::harness::poll_future::closure_env$0<core::pin::Pin<alloc::boxed::Box<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,alloc::alloc::Global> >,all\n                 at C:\\Users\\mcclu\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\lib\\rustlib\\src\\rust\\library\\std\\src\\panicking.rs:589\n      27: std::panic::catch_unwind<core::panic::unwind_safe::AssertUnwindSafe<tokio::runtime::task::harness::poll_future::closure_env$0<enum2$<init::test_hello_world_empty::closure$0::async_block_env$0>,alloc::sync::Arc<tokio::task::local::Shared,alloc::alloc::Globa\n      28: std::panicking::try\n                 at C:\\Users\\mcclu\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\lib\\rustlib\\src\\rust\\library\\std\\src\\panicking.rs:552\n      29: std::panic::catch_unwind<core::panic::unwind_safe::AssertUnwindSafe<tokio::runtime::task::harness::poll_future::closure_env$0<core::pin::Pin<alloc::boxed::Box<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,alloc::alloc::Global> >,alloc::\n                 at C:\\Users\\mcclu\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\lib\\rustlib\\src\\rust\\library\\std\\src\\panic.rs:359\n      30: tokio::runtime::task::harness::poll_future<core::pin::Pin<alloc::boxed::Box<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,alloc::alloc::Global> >,alloc::sync::Arc<tokio::task::local::Shared,alloc::alloc::Global> >\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\tokio-1.45.1\\src\\runtime\\task\\harness.rs:520\n      31: tokio::runtime::task::harness::Harness<core::pin::Pin<alloc::boxed::Box<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,alloc::alloc::Global> >,alloc::sync::Arc<tokio::task::local::Shared,alloc::alloc::Global> >::poll_inner<core::pin::Pin\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\tokio-1.45.1\\src\\runtime\\task\\harness.rs:209\n      32: tokio::runtime::task::harness::Harness<core::pin::Pin<alloc::boxed::Box<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,alloc::alloc::Global> >,alloc::sync::Arc<tokio::task::local::Shared,alloc::alloc::Global> >::poll<core::pin::Pin<alloc\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\tokio-1.45.1\\src\\runtime\\task\\harness.rs:154\n      33: tokio::runtime::task::raw::poll<core::pin::Pin<alloc::boxed::Box<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,alloc::alloc::Global> >,alloc::sync::Arc<tokio::task::local::Shared,alloc::alloc::Global> >\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\tokio-1.45.1\\src\\runtime\\task\\raw.rs:271\n      34: tokio::runtime::task::raw::RawTask::poll\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\tokio-1.45.1\\src\\runtime\\task\\raw.rs:201\n      35: tokio::runtime::task::LocalNotified<alloc::sync::Arc<tokio::task::local::Shared,alloc::alloc::Global> >::run<alloc::sync::Arc<tokio::task::local::Shared,alloc::alloc::Global> >\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\tokio-1.45.1\\src\\runtime\\task\\mod.rs:463\n      36: tokio::task::local::impl$4::tick::closure$0\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\tokio-1.45.1\\src\\task\\local.rs:739\n      37: tokio::task::coop::with_budget\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\tokio-1.45.1\\src\\task\\coop\\mod.rs:167\n      38: tokio::task::coop::budget\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\tokio-1.45.1\\src\\task\\coop\\mod.rs:133\n      39: tokio::task::local::LocalSet::tick\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\tokio-1.45.1\\src\\task\\local.rs:739\n      40: tokio::task::local::impl$10::poll::closure$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hello_world_init::closure_env$0> > >\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\tokio-1.45.1\\src\\task\\local.rs:1045\n      41: tokio::task::local::impl$4::with::closure$0<enum2$<core::task::poll::Poll<enum2$<core::result::Result<enum2$<core::result::Result<enum2$<core::result::Result<tuple$<>,eyre::Report> >,tokio::runtime::task::error::JoinError> >,tokio::time::error::Elapsed> > \n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\tokio-1.45.1\\src\\task\\local.rs:793\n      42: std::thread::local::LocalKey<tokio::task::local::LocalData>::try_with<tokio::task::local::LocalData,tokio::task::local::impl$4::with::closure_env$0<enum2$<core::task::poll::Poll<enum2$<core::result::Result<enum2$<core::result::Result<enum2$<core::result::R\n                 at C:\\Users\\mcclu\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\lib\\rustlib\\src\\rust\\library\\std\\src\\thread\\local.rs:315\n      43: std::thread::local::LocalKey<tokio::task::local::LocalData>::with<tokio::task::local::LocalData,tokio::task::local::impl$4::with::closure_env$0<enum2$<core::task::poll::Poll<enum2$<core::result::Result<enum2$<core::result::Result<enum2$<core::result::Resul\n                 at C:\\Users\\mcclu\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\lib\\rustlib\\src\\rust\\library\\std\\src\\thread\\local.rs:279\n      44: tokio::task::local::LocalSet::with<enum2$<core::task::poll::Poll<enum2$<core::result::Result<enum2$<core::result::Result<enum2$<core::result::Result<tuple$<>,eyre::Report> >,tokio::runtime::task::error::JoinError> >,tokio::time::error::Elapsed> > > >,tokio\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\tokio-1.45.1\\src\\task\\local.rs:791\n      45: tokio::task::local::impl$10::poll<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hello_world_init::closure_env$0> > >\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\tokio-1.45.1\\src\\task\\local.rs:1031\n      46: tokio::task::local::impl$4::run_until::async_fn$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hello_world_init::closure_env$0> > >\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\tokio-1.45.1\\src\\task\\local.rs:689\n      47: tokio::runtime::park::impl$4::block_on::closure$0<enum2$<tokio::task::local::impl$4::run_until::async_fn_env$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hello_world_init::c\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\tokio-1.45.1\\src\\runtime\\park.rs:284\n      48: tokio::task::coop::with_budget\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\tokio-1.45.1\\src\\task\\coop\\mod.rs:167\n      49: tokio::task::coop::budget\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\tokio-1.45.1\\src\\task\\coop\\mod.rs:133\n      50: tokio::runtime::park::CachedParkThread::block_on<enum2$<tokio::task::local::impl$4::run_until::async_fn_env$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hello_world_init::cl\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\tokio-1.45.1\\src\\runtime\\park.rs:284\n      51: tokio::runtime::context::blocking::BlockingRegionGuard::block_on<enum2$<tokio::task::local::impl$4::run_until::async_fn_env$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hell\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\tokio-1.45.1\\src\\runtime\\context\\blocking.rs:66\n      52: tokio::runtime::scheduler::multi_thread::impl$0::block_on::closure$0<enum2$<tokio::task::local::impl$4::run_until::async_fn_env$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\tokio-1.45.1\\src\\runtime\\scheduler\\multi_thread\\mod.rs:87\n      53: tokio::runtime::context::runtime::enter_runtime<tokio::runtime::scheduler::multi_thread::impl$0::block_on::closure_env$0<enum2$<tokio::task::local::impl$4::run_until::async_fn_env$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_w\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\tokio-1.45.1\\src\\runtime\\context\\runtime.rs:65\n      54: tokio::runtime::scheduler::multi_thread::MultiThread::block_on<enum2$<tokio::task::local::impl$4::run_until::async_fn_env$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hello_\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\tokio-1.45.1\\src\\runtime\\scheduler\\multi_thread\\mod.rs:86\n      55: tokio::runtime::runtime::Runtime::block_on_inner<enum2$<tokio::task::local::impl$4::run_until::async_fn_env$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hello_world_init::cl\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\tokio-1.45.1\\src\\runtime\\runtime.rs:358\n      56: tokio::runtime::runtime::Runtime::block_on<enum2$<tokio::task::local::impl$4::run_until::async_fn_env$0<enum2$<keystone::test_harness::async_block_env$0<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hello_world_init::closure_\n                 at F:\\packages\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\tokio-1.45.1\\src\\runtime\\runtime.rs:330\n      57: keystone::test_harness<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hello_world_init::closure_env$0>\n                 at F:\\code\\keystone\\core\\src\\lib.rs:336\n      58: init::test_hello_world_init\n                 at .\\tests\\init.rs:20\n      59: init::test_hello_world_init::closure$0\n                 at .\\tests\\init.rs:4\n      60: core::ops::function::FnOnce::call_once<init::test_hello_world_init::closure_env$0,tuple$<> >\n                 at C:\\Users\\mcclu\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\lib\\rustlib\\src\\rust\\library\\core\\src\\ops\\function.rs:250\n      61: core::ops::function::FnOnce::call_once\n                 at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\\core\\src\\ops\\function.rs:250\n      62: test::__rust_begin_short_backtrace<enum2$<core::result::Result<tuple$<>,alloc::string::String> >,enum2$<core::result::Result<tuple$<>,alloc::string::String> > (*)()>\n                 at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\\test\\src\\lib.rs:648\n      63: test::run_test_in_process\n                 at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\\test\\src\\lib.rs:671\n      64: test::run_test::closure$0\n                 at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\\test\\src\\lib.rs:592\n      65: test::run_test::closure$1\n                 at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\\test\\src\\lib.rs:622\n      66: std::sys::backtrace::__rust_begin_short_backtrace<test::run_test::closure_env$1,tuple$<> >\n                 at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\\std\\src\\sys\\backtrace.rs:152\n      67: core::ops::function::FnOnce::call_once<std::thread::impl$0::spawn_unchecked_::closure_env$1<test::run_test::closure_env$1,tuple$<> >,tuple$<> >\n                 at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\\core\\src\\ops\\function.rs:250\n      68: alloc::boxed::impl$28::call_once\n                 at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\\alloc\\src\\boxed.rs:1966\n      69: alloc::boxed::impl$28::call_once\n                 at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\\alloc\\src\\boxed.rs:1966\n      70: std::sys::pal::windows::thread::impl$0::new::thread_start\n                 at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\\std\\src\\sys\\pal\\windows\\thread.rs:56\n      71: BaseThreadInitThunk\n      72: RtlUserThreadStart\n\n\nLocation:\n    F:\\code\\keystone\\core\\src\\posix_module.rs:313:56", ...)
+stack backtrace:
+   0:     0x7ff776cf4492 - std::backtrace_rs::backtrace::win64::trace
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\std\src\..\..\backtrace\src\backtrace\win64.rs:85
+   1:     0x7ff776cf4492 - std::backtrace_rs::backtrace::trace_unsynchronized
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\std\src\..\..\backtrace\src\backtrace\mod.rs:66
+   2:     0x7ff776cf4492 - std::sys::backtrace::_print_fmt
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\std\src\sys\backtrace.rs:66
+   3:     0x7ff776cf4492 - std::sys::backtrace::impl$0::print::impl$0::fmt
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\std\src\sys\backtrace.rs:39
+   4:     0x7ff776d17eeb - core::fmt::rt::Argument::fmt
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\core\src\fmt\rt.rs:181
+   5:     0x7ff776d17eeb - core::fmt::write
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\core\src\fmt\mod.rs:1446
+   6:     0x7ff776cefa97 - std::io::default_write_fmt
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\std\src\io\mod.rs:639
+   7:     0x7ff776cefa97 - std::io::Write::write_fmt<alloc::vec::Vec<u8,alloc::alloc::Global> >
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\std\src\io\mod.rs:1914
+   8:     0x7ff776cf42d5 - std::sys::backtrace::BacktraceLock::print
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\std\src\sys\backtrace.rs:42
+   9:     0x7ff776cf931a - std::panicking::default_hook::closure$0
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\std\src\panicking.rs:300
+  10:     0x7ff776cf910b - std::panicking::default_hook
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\std\src\panicking.rs:324
+  11:     0x7ff776c37852 - alloc::boxed::impl$30::call
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\alloc\src\boxed.rs:1980
+  12:     0x7ff776c37852 - test::test_main_with_exit_callback::closure$0<test::test_main::closure_env$0>
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\test\src\lib.rs:145
+  13:     0x7ff776cf9f3e - std::panicking::rust_panic_with_hook
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\std\src\panicking.rs:841
+  14:     0x7ff776cf9c99 - std::panicking::begin_panic_handler::closure$0
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\std\src\panicking.rs:706
+  15:     0x7ff776cf525f - std::sys::backtrace::__rust_end_short_backtrace<std::panicking::begin_panic_handler::closure_env$0,never$>
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\std\src\sys\backtrace.rs:168
+  16:     0x7ff776cf989e - std::panicking::begin_panic_handler
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\std\src\panicking.rs:697
+  17:     0x7ff776ef8ff1 - core::panicking::panic_fmt
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\core\src\panicking.rs:75
+  18:     0x7ff776ef94c0 - core::result::unwrap_failed
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\core\src\result.rs:1732
+  19:     0x7ff7765ac32c - enum2$<core::result::Result<enum2$<core::result::Result<tuple$<>,eyre::Report> >,tokio::runtime::task::error::JoinError> >::unwrap
+                               at C:\Users\mcclu\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib\rustlib\src\rust\library\core\src\result.rs:1137
+  20:     0x7ff7765ac32c - keystone::test_harness<enum2$<init::test_hello_world_init::closure$0::async_block_env$0>,init::test_hello_world_init::closure_env$0>
+                               at F:\code\keystone\core\src\lib.rs:338
+  21:     0x7ff77656e088 - init::test_hello_world_init
+                               at F:\code\keystone\examples\hello-world\tests\init.rs:20
+  22:     0x7ff776578008 - init::test_hello_world_init::closure$0
+                               at F:\code\keystone\examples\hello-world\tests\init.rs:4
+  23:     0x7ff776630ab2 - core::ops::function::FnOnce::call_once<init::test_hello_world_init::closure_env$0,tuple$<> >
+                               at C:\Users\mcclu\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib\rustlib\src\rust\library\core\src\ops\function.rs:250
+  24:     0x7ff776c3ece0 - core::ops::function::FnOnce::call_once
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\core\src\ops\function.rs:250
+  25:     0x7ff776c3ece0 - test::__rust_begin_short_backtrace<enum2$<core::result::Result<tuple$<>,alloc::string::String> >,enum2$<core::result::Result<tuple$<>,alloc::string::String> > (*)()>
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\test\src\lib.rs:648
+  26:     0x7ff776c3d633 - test::run_test_in_process
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\test\src\lib.rs:671
+  27:     0x7ff776c3d633 - test::run_test::closure$0
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\test\src\lib.rs:592
+  28:     0x7ff776bf844c - test::run_test::closure$1
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\test\src\lib.rs:622
+  29:     0x7ff776bf844c - std::sys::backtrace::__rust_begin_short_backtrace<test::run_test::closure_env$1,tuple$<> >
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\std\src\sys\backtrace.rs:152
+  30:     0x7ff776bfc85d - core::ops::function::FnOnce::call_once<std::thread::impl$0::spawn_unchecked_::closure_env$1<test::run_test::closure_env$1,tuple$<> >,tuple$<> >
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\core\src\ops\function.rs:250
+  31:     0x7ff776cfd54d - alloc::boxed::impl$28::call_once
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\alloc\src\boxed.rs:1966
+  32:     0x7ff776cfd54d - alloc::boxed::impl$28::call_once
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\alloc\src\boxed.rs:1966
+  33:     0x7ff776cfd54d - std::sys::pal::windows::thread::impl$0::new::thread_start
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library\std\src\sys\pal\windows\thread.rs:56
+  34:     0x7ff99a23e8d7 - BaseThreadInitThunk
+  35:     0x7ff99a87c34c - RtlUserThreadStart
+
+
+failures:
+    test_hello_world_init
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.37s
+

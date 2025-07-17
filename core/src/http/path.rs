@@ -5,6 +5,7 @@ use hyper::{HeaderMap, http::uri::Authority};
 use hyper_tls::HttpsConnector;
 use hyper_util::client::legacy::{Client as HttpClient, ResponseFuture, connect::HttpConnector};
 use std::rc::Rc;
+use crate::capnp_rpc;
 
 use Path::HttpVerb;
 

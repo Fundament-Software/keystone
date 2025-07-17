@@ -1,13 +1,12 @@
-include!(concat!(env!("OUT_DIR"), "/capnproto.rs"));
-
-use crate::complex_config_capnp::config;
-use crate::complex_config_capnp::root;
-use capnp::any_pointer::Owned as any_pointer;
 use capnp::private::capability::ClientHook;
 use capnp::traits::Imbue;
 use capnp::traits::ImbueMut;
 use capnp::traits::Owned;
 use capnp_macros::capnproto_rpc;
+use complex_config::complex_config_capnp::config;
+use complex_config::complex_config_capnp::root;
+use keystone::capnp::any_pointer::Owned as any_pointer;
+use keystone::{capnp, tokio};
 use std::rc::Rc;
 
 pub struct ComplexConfigImpl {
@@ -31,9 +30,9 @@ impl root::Server for ComplexConfigImpl {
     }
 }
 
-impl keystone::Module<complex_config_capnp::config::Owned> for ComplexConfigImpl {
+impl keystone::Module<complex_config::complex_config_capnp::config::Owned> for ComplexConfigImpl {
     async fn new(
-        config: <complex_config_capnp::config::Owned as Owned>::Reader<'_>,
+        config: <complex_config::complex_config_capnp::config::Owned as Owned>::Reader<'_>,
         _: keystone::keystone_capnp::host::Client<any_pointer>,
     ) -> capnp::Result<Self> {
         let mut msg = capnp::message::Builder::new_default();
@@ -48,9 +47,9 @@ impl keystone::Module<complex_config_capnp::config::Owned> for ComplexConfigImpl
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     keystone::main::<
-        crate::complex_config_capnp::config::Owned,
+        complex_config::complex_config_capnp::config::Owned,
         ComplexConfigImpl,
-        crate::complex_config_capnp::root::Owned,
+        complex_config::complex_config_capnp::root::Owned,
     >(async move {
         //let _: Vec<String> = ::std::env::args().collect();
     })
@@ -67,9 +66,9 @@ fn test_complex_config() -> eyre::Result<()> {
         .init();
 
     keystone::test_module_harness::<
-        crate::complex_config_capnp::config::Owned,
+        complex_config::complex_config_capnp::config::Owned,
         ComplexConfigImpl,
-        crate::complex_config_capnp::root::Owned,
+        complex_config::complex_config_capnp::root::Owned,
         _,
     >(
         &keystone::build_module_config(
@@ -79,7 +78,7 @@ fn test_complex_config() -> eyre::Result<()> {
         ),
         "Complex Config",
         |api| async move {
-            let config_client: crate::complex_config_capnp::root::Client = api;
+            let config_client: complex_config::complex_config_capnp::root::Client = api;
 
             tracing::debug!("Got API");
             let get_config = config_client.get_config_request();

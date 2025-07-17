@@ -2,8 +2,8 @@ use crate::database::DatabaseExt;
 use crate::keystone::CapnpResult;
 use crate::sqlite::SqliteDatabase;
 use crate::storage_capnp::sturdy_ref;
-use capnp::any_pointer::Owned as any_pointer;
-use capnp::traits::SetPointerBuilder;
+use crate::capnp::any_pointer::Owned as any_pointer;
+use crate::capnp::traits::SetPointerBuilder;
 use std::rc::Rc;
 
 pub struct SturdyRefImpl {
@@ -52,8 +52,8 @@ impl Drop for SturdyRefImpl {
     }
 }
 /*
-use capnp::capability::FromClientHook;
-use capnp_rpc::CapabilityServerSet;
+use crate::capnp::capability::FromClientHook;
+use crate::capnp_rpc::{self, CapabilityServerSet};
 
 impl<T: capnp::traits::Owned> sturdy_ref::Server<T> for SturdyRefImpl
 where

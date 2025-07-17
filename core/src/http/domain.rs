@@ -38,7 +38,7 @@ impl Domain::Server for DomainImpl {
         let original_domain_name = self.domain_name.clone();
         let new_domain_name = name.to_string()? + "." + original_domain_name.as_str();
         let domain_impl = DomainImpl::new(new_domain_name, self.https_client.clone())?;
-        let domain: Domain::Client = capnp_rpc::new_client(domain_impl);
+        let domain: Domain::Client = crate::capnp_rpc::new_client(domain_impl);
         results.get().set_result(domain);
         Ok(())
     }
@@ -51,7 +51,7 @@ impl Domain::Server for DomainImpl {
             path_list?,
             self.https_client.clone(),
         )?;
-        let path: Path::Client = capnp_rpc::new_client(path_impl);
+        let path: Path::Client = crate::capnp_rpc::new_client(path_impl);
         results.get().set_result(path);
         Ok(())
     }
@@ -59,7 +59,7 @@ impl Domain::Server for DomainImpl {
     async fn finalize_domain(self: Rc<Self>) {
         let mut return_domain = self.as_ref().clone();
         return_domain.modifiable = false;
-        let client = capnp_rpc::new_client(return_domain);
+        let client = crate::capnp_rpc::new_client(return_domain);
         results.get().set_result(client);
         Ok(())
     }

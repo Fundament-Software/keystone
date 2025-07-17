@@ -1,6 +1,8 @@
 use std::borrow::Borrow;
 use std::{cell::RefCell, io::Write, rc::Rc};
 
+use crate::capnp::{Error, capability::Promise};
+use crate::capnp_rpc::{self, CapabilityServerSet};
 use crate::{
     byte_stream::ByteStreamImpl,
     cap_std_capnp::{
@@ -16,9 +18,7 @@ use cap_std::{
     time::{Duration, Instant, MonotonicClock, SystemClock, SystemTime},
 };
 use cap_tempfile::{TempDir, TempFile};
-use capnp::{Error, capability::Promise};
 use capnp_macros::{capnp_let, capnproto_rpc};
-use capnp_rpc::CapabilityServerSet;
 
 pub struct AmbientAuthorityImpl {
     pub authority: AmbientAuthority,
@@ -1337,6 +1337,7 @@ pub mod tests {
     use crate::{
         cap_std_capnp::{ambient_authority, dir_entry, metadata, permissions, system_time},
         cap_std_capnproto::AmbientAuthorityImpl,
+        capnp_rpc,
     };
     use std::cell::RefCell;
 

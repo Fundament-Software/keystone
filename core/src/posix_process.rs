@@ -116,19 +116,17 @@ use cap_std::io_lifetimes::raw::{FromRawFilelike, RawFilelike};
 use capnp_macros::capnproto_rpc;
 use eyre::Result;
 use std::rc::Rc;
-use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadHalf, WriteHalf};
+use tokio::io::{AsyncWriteExt, ReadHalf, WriteHalf};
 #[cfg(windows)]
 use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
 #[cfg(not(windows))]
 use tokio::net::{UnixListener, UnixStream};
-use tokio::process::ChildStdin;
-use tokio::runtime::Handle;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 pub type PosixProgramClient = program::Client<PosixArgs, ByteStream, PosixError>;
+use crate::capnp_rpc::{self, CapabilityServerSet};
 use crate::keystone::CapnpResult;
 use atomic_take::AtomicTake;
-use capnp_rpc::CapabilityServerSet;
 use futures_util::FutureExt;
 use futures_util::future::BoxFuture;
 use futures_util::future::LocalBoxFuture;
@@ -138,7 +136,6 @@ use std::process::ExitStatus;
 use tokio::io::AsyncReadExt;
 use tokio::sync::oneshot;
 use tokio::sync::watch;
-use tokio::task::JoinSet;
 
 #[cfg(windows)]
 #[capnproto_rpc(crate::byte_stream_capnp::byte_stream)]
@@ -151,9 +148,9 @@ impl crate::byte_stream_capnp::byte_stream::Server for Mutex<Option<WriteHalf<Na
                 Err(e) => Err(capnp::Error::failed(e.to_string())),
             }
         } else {
-            Err(capnp::Error::failed(
-                "Write called on byte stream after closed.".into(),
-            ))
+            // Because capnproto is stupid, we cannot error here, since it will always try to write
+            // to a pipe that has already been closed even during a graceful exit.
+            Ok(())
         }
     }
 
@@ -185,9 +182,9 @@ impl crate::byte_stream_capnp::byte_stream::Server
                 Err(e) => Err(capnp::Error::failed(e.to_string())),
             }
         } else {
-            Err(capnp::Error::failed(
-                "Write called on byte stream after closed.".into(),
-            ))
+            // Because capnproto is stupid, we cannot error here, since it will always try to write
+            // to a pipe that has already been closed even during a graceful exit.
+            Ok(())
         }
     }
 
@@ -324,6 +321,7 @@ impl PosixProcessImpl {
                 _ = pipe_token.cancelled() => Ok(0),
                 result = stdout_stream.copy(&mut read) => result
             }?;
+            let _ = stdout_stream.end_request().send().promise.await;
             Ok(read)
         };
 
@@ -340,7 +338,7 @@ impl PosixProcessImpl {
 
         let mut stderr = std::io::stderr();
         let stderr_future = async move {
-            tokio::select! {
+            let r = tokio::select! {
                 _ = stderr_token.cancelled() => Ok(0),
                 result = async {
                     let mut count = 0;
@@ -353,10 +351,12 @@ impl PosixProcessImpl {
                         }
                         stderr.write_all(&buf[..len])?;
                         count += len;
-                      }
-                      Ok::<usize, eyre::Report>(count)
+                    }
+                    Ok::<usize, eyre::Report>(count)
                 } => result
-            }
+            }?;
+            let _ = stderr_stream.end_request().send().promise.await;
+            Ok(r)
         };
 
         let (tx, rx) = watch::channel(None);
@@ -385,9 +385,15 @@ impl PosixProcessImpl {
 impl PosixProcessImpl {
     #[allow(clippy::needless_return)]
     async fn finish(&self) -> capnp::Result<i32> {
+        tracing::debug!("finish() called");
         #[cfg(not(windows))]
         use std::os::unix::process::ExitStatusExt;
 
+        // TODO: Taking away stdin here ensures that no errant writes will ever make it through a closed pipe,
+        // because this is called directly after a stop_request has returned. However, this also means we are closing
+        // this side of the pipe before the module has finished emptying it's queue, which may have unintended
+        // consequences.
+        let _ = self.stdin.lock().await.take();
         let mut exitcode = self.exitcode.clone();
         let status = exitcode.wait_for(|x| x.is_some()).await.to_capnp()?;
 
@@ -418,6 +424,8 @@ impl process::Server<ByteStream, PosixError> for PosixProcessImpl {
     }
 
     async fn kill(self: Rc<Self>) -> capnp::Result<()> {
+        tracing::debug!("kill() called");
+
         if let Some(sender) = self.killsender.take() {
             let _ = sender.send(());
             self.cancellation_token.cancel();

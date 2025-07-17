@@ -1,5 +1,5 @@
+use crate::capnp::capability::{RemotePromise, Response};
 use bytes::BytesMut;
-use capnp::capability::{RemotePromise, Response};
 use capnp_macros::capnproto_rpc;
 use futures_util::FutureExt;
 use std::future::Future;
@@ -103,7 +103,7 @@ impl ByteStreamBufferImpl {
     }
 
     pub fn new_client(&self) -> Client {
-        capnp_rpc::new_client_from_rc(self.0.clone())
+        crate::capnp_rpc::new_client_from_rc(self.0.clone())
     }
 }
 
@@ -310,7 +310,8 @@ fn write_test() -> eyre::Result<()> {
         std::future::ready(Ok(()))
     });
 
-    let client: crate::byte_stream_capnp::byte_stream::Client = capnp_rpc::new_client(server);
+    let client: crate::byte_stream_capnp::byte_stream::Client =
+        crate::capnp_rpc::new_client(server);
     let mut write_request = client.write_request();
     write_request.get().set_bytes(&[73, 22, 66, 91]);
 

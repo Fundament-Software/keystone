@@ -21,7 +21,7 @@ impl HttpsImpl {
 impl Https::Server for HttpsImpl {
     async fn domain(self: Rc<Self>, name: capnp::text::Reader) {
         let domain_impl = DomainImpl::new(name.to_str()?, self.https_client.clone())?;
-        let domain: Domain::Client = capnp_rpc::new_client(domain_impl);
+        let domain: Domain::Client = crate::capnp_rpc::new_client(domain_impl);
         results.get().set_result(domain);
         Ok(())
     }

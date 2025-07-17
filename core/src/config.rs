@@ -6,8 +6,8 @@ use crate::keystone::Error;
 use crate::keystone_capnp::cap_expr;
 use crate::keystone_capnp::keystone_config;
 use crate::toml_capnp;
-use capnp::schema::CapabilitySchema;
-use capnp::{
+use crate::capnp::schema::CapabilitySchema;
+use crate::capnp::{
     dynamic_struct, dynamic_value, introspect::TypeVariant, schema::DynamicSchema, schema_capnp,
     traits::HasTypeId,
 };

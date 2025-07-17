@@ -57,7 +57,7 @@ fn test_stateful() -> Result<()> {
                     Ok::<(), eyre::Error>(())
                 };
 
-                tokio::select! {
+                keystone::tokio::select! {
                     r = keystone::drive_stream(&mut rpc_systems) => Ok(r?),
                     r = fut => r,
                 }?;
@@ -80,7 +80,7 @@ fn test_stateful() -> Result<()> {
                 Ok::<(), eyre::Error>(())
             };
 
-            tokio::select! {
+            keystone::tokio::select! {
                 r = keystone::drive_stream(&mut rpc_systems) => Ok(r?),
                 r = fut => r,
             }?;

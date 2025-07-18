@@ -2,15 +2,16 @@ use crate::scheduler_usage_capnp::callback;
 use crate::scheduler_usage_capnp::root;
 use crate::scheduler_usage_capnp::storage;
 use atomic_take::AtomicTake;
-use capnp::any_pointer::Owned as any_pointer;
 use capnp::capability::FromClientHook;
 use capnp_macros::capnproto_rpc;
 use chrono::Datelike;
 use chrono::Timelike;
 use keystone::CapnpResult;
+use keystone::capnp::any_pointer::Owned as any_pointer;
 use keystone::scheduler_capnp::action;
 use keystone::storage_capnp::restore;
 use keystone::storage_capnp::saveable;
+use keystone::{capnp, capnp_rpc, tokio};
 use std::rc::Rc;
 use tokio::sync::oneshot;
 
@@ -117,7 +118,7 @@ impl root::Server for SchedulerUsageImpl {
 
 #[capnproto_rpc(restore)]
 impl restore::Server<storage::Owned> for SchedulerUsageImpl {
-    async fn restore(self: Rc<Self>, data: Reader) -> Result<(), ::capnp::Error> {
+    async fn restore(self: Rc<Self>, data: Reader) -> Result<(), capnp::Error> {
         tracing::info!("restore called");
 
         let action = match data.get_storage().which()? {

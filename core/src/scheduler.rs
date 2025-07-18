@@ -1,4 +1,4 @@
-use capnp::introspect::Introspect;
+use crate::capnp::introspect::Introspect;
 use capnp_macros::capnproto_rpc;
 use chrono::DateTime;
 use chrono::Datelike;
@@ -7,13 +7,15 @@ use chrono::Timelike;
 use rusqlite::CachedStatement;
 use rusqlite::OptionalExtension;
 
+use crate::capnp;
+use crate::capnp::any_pointer::Owned as any_pointer;
+use crate::capnp::private::capability::ClientHook;
+use crate::capnp_rpc;
 use crate::database::DatabaseExt;
 use crate::keystone::CapnpResult;
 use crate::scheduler_capnp::MissBehavior;
 use crate::sqlite::SqliteDatabase;
 use atomicbox::AtomicOptionBox;
-use capnp::any_pointer::Owned as any_pointer;
-use capnp::private::capability::ClientHook;
 use chrono_tz::Tz;
 use eyre::Result;
 use futures_util::TryFutureExt;
@@ -219,7 +221,7 @@ impl Scheduler {
     }
 
     async fn catch_error<T>(e: eyre::ErrReport) -> capnp::Result<T> {
-        eprintln!("Error when executing action: {}", e);
+        eprintln!("Error when executing action: {e}");
         let r = capnp::Error::failed(e.to_string());
         LAST_ERROR.store(Some(Box::new(e)), std::sync::atomic::Ordering::AcqRel);
         Err(r)
@@ -257,7 +259,7 @@ impl Scheduler {
     }
 
     fn overflow_error(id: i64, remove: &mut CachedStatement<'_>) -> rusqlite::Result<usize> {
-        eprintln!("Overflow error while processing {}, canceling task", id);
+        eprintln!("Overflow error while processing {id}, canceling task");
         remove.execute(params![id])
     }
 
@@ -522,7 +524,7 @@ impl root::Server for Scheduler {
         self: Rc<Self>,
         params: root::OnceParams,
         mut results: root::OnceResults,
-    ) -> Result<(), ::capnp::Error> {
+    ) -> Result<(), capnp::Error> {
         let params = params.get()?;
         let action_id = db_save_action(self.db.clone(), params.get_act()?.client.hook).await?;
         let miss = if params.get_fire_if_missed() {
@@ -558,7 +560,7 @@ impl root::Server for Scheduler {
         self: Rc<Self>,
         params: root::EveryParams,
         mut results: root::EveryResults,
-    ) -> Result<(), ::capnp::Error> {
+    ) -> Result<(), capnp::Error> {
         let params = params.get()?;
 
         let action_id = db_save_action(self.db.clone(), params.get_act()?.client.hook).await?;
@@ -597,7 +599,7 @@ impl root::Server for Scheduler {
         self: Rc<Self>,
         params: root::ComplexParams,
         mut results: root::ComplexResults,
-    ) -> Result<(), ::capnp::Error> {
+    ) -> Result<(), capnp::Error> {
         let params = params.get()?;
 
         let action_id = db_save_action(self.db.clone(), params.get_act()?.client.hook).await?;
@@ -632,6 +634,12 @@ impl root::Server for Scheduler {
 
 #[cfg(test)]
 mod tests {
+    use crate::capnp;
+    use crate::capnp::any_pointer::Owned as any_pointer;
+    use crate::capnp::capability::FromClientHook;
+    use crate::capnp::capability::FromServer;
+    use crate::capnp::private::capability::ClientHook;
+    use crate::capnp_rpc;
     use crate::keystone::CapnpResult;
     use crate::scheduler_capnp::MissBehavior;
     use crate::scheduler_capnp::action;
@@ -640,10 +648,6 @@ mod tests {
     use crate::storage_capnp::restore;
     use crate::storage_capnp::saveable;
     use atomic_take::AtomicTake;
-    use capnp::any_pointer::Owned as any_pointer;
-    use capnp::capability::FromClientHook;
-    use capnp::capability::FromServer;
-    use capnp::private::capability::ClientHook;
     use capnp_macros::capnproto_rpc;
     use chrono::Datelike;
     use chrono::TimeZone;
@@ -797,7 +801,7 @@ mod tests {
             self: Rc<Self>,
             params: restore::RestoreParams<any_pointer>,
             mut results: restore::RestoreResults<any_pointer>,
-        ) -> Result<(), ::capnp::Error> {
+        ) -> Result<(), capnp::Error> {
             let key: capnp::text::Reader = params.get()?.get_data()?.get_as()?;
             let key = key.to_string()?;
 

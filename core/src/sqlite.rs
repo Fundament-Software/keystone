@@ -1,4 +1,7 @@
 use crate::buffer_allocator::BufferAllocator;
+use crate::capnp;
+use crate::capnp::capability::{FromClientHook, RemotePromise};
+use crate::capnp_rpc::{self, CapabilityServerSet};
 use crate::database::DatabaseExt;
 use crate::keystone::CapabilityServerSetExt;
 use crate::keystone::CapnpResult;
@@ -14,9 +17,7 @@ use crate::sqlite_capnp::{
 };
 use crate::storage_capnp::{saveable, sturdy_ref};
 use crate::sturdyref::SturdyRefImpl;
-use capnp::capability::{FromClientHook, RemotePromise};
 use capnp_macros::{capnp_let, capnproto_rpc};
-use capnp_rpc::CapabilityServerSet;
 use eyre::eyre;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use rusqlite::{Connection, OpenFlags, Result, params_from_iter};
@@ -601,7 +602,7 @@ impl SqliteDatabase {
             }
             statement_and_params
                 .statement
-                .push_str(format!("{}, ", t).as_str());
+                .push_str(format!("{t}, ").as_str());
             Ok(())
         }
         statement_and_params.statement.push_str("SELECT ");
@@ -1014,7 +1015,7 @@ impl restore::Server<crate::sqlite_capnp::storage::Owned> for SqliteDatabase {
         self: Rc<Self>,
         params: restore::RestoreParams<crate::sqlite_capnp::storage::Owned>,
         mut results: restore::RestoreResults<crate::sqlite_capnp::storage::Owned>,
-    ) -> Result<(), ::capnp::Error> {
+    ) -> Result<(), capnp::Error> {
         let data = params.get()?.get_data()?;
         let hook = if data.get_id() == AccessLevel::Index as u8 {
             self.index_set
@@ -1920,7 +1921,7 @@ pub enum DBAnyBindings<'a> {
     _Real(f64),
     _Text(&'a str),
     _Blob(&'a [u8]),
-    _Pointer(Box<dyn ::capnp::private::capability::ClientHook>),
+    _Pointer(Box<dyn capnp::private::capability::ClientHook>),
 }
 impl<'a> From<DBAnyBindings<'a>> for d_b_any::DBAny<'a> {
     fn from(value: DBAnyBindings<'a>) -> Self {
@@ -2708,10 +2709,10 @@ pub enum ParseError {
 
 #[cfg(test)]
 mod tests {
+    use crate::capnp::capability::FromServer;
+    use crate::capnp::private::capability::ClientHook;
     use crate::sqlite_capnp::insert::source;
     use crate::sqlite_capnp::select_core;
-    use capnp::capability::FromServer;
-    use capnp::private::capability::ClientHook;
     use d_b_any::DBAny;
     use tempfile::NamedTempFile;
 

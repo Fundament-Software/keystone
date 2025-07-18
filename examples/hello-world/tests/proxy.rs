@@ -1,5 +1,5 @@
 use capnp::private::capability::ClientHook;
-use keystone::ProxyServer;
+use keystone::{capnp, tokio};
 
 #[test]
 fn test_hello_world_proxy() -> eyre::Result<()> {

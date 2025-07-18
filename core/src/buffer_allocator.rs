@@ -19,7 +19,7 @@ impl BufferAllocator {
     }
 }
 
-unsafe impl capnp::message::Allocator for BufferAllocator {
+unsafe impl crate::capnp::message::Allocator for BufferAllocator {
     fn allocate_segment(&mut self, minimum_size: u32) -> (*mut u8, u32) {
         let byte_count = minimum_size as usize * std::mem::size_of::<u64>();
         if self.used {

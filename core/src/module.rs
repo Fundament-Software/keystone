@@ -1,6 +1,7 @@
-use capnp::capability::RemotePromise;
-use capnp::{any_pointer::Owned as any_pointer, dynamic_struct};
-use capnp::{dynamic_list, dynamic_value};
+use crate::capnp::capability::RemotePromise;
+use crate::capnp::{self, dynamic_list, dynamic_value};
+use crate::capnp::{any_pointer::Owned as any_pointer, dynamic_struct};
+use crate::capnp_rpc::queued;
 use eyre::Result;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -309,7 +310,7 @@ macro_rules! format_capnp_type {
 impl CapnpType {
     pub fn to_string(&self, name: &str) -> String {
         match self {
-            CapnpType::Void => format!("{} :Void,", name),
+            CapnpType::Void => format!("{name} :Void,"),
             CapnpType::Bool(b) => format_capnp_type!(name, b, "Bool"),
             CapnpType::Int8(i) => format_capnp_type!(name, i, "Int8"),
             CapnpType::Int16(i) => format_capnp_type!(name, i, "Int16"),
@@ -325,9 +326,9 @@ impl CapnpType {
             CapnpType::Text(t) => format_capnp_type!(name, t, "Text"),
             CapnpType::AnyPointer(capnp_type) => {
                 if let Some(c) = capnp_type {
-                    format!("{} - {} :AnyPointer", name, c.to_string(""))
+                    format!("{name} - {} :AnyPointer", c.to_string(""))
                 } else {
-                    format!("{} :AnyPointer", name)
+                    format!("{name} :AnyPointer")
                 }
             }
             CapnpType::Data(items) => {
@@ -337,7 +338,7 @@ impl CapnpType {
                 for v in iter {
                     fields.push(v.to_string());
                 }
-                format!("{} - [{}] :Data", name, fields.join(", "))
+                format!("{name} - [{}] :Data", fields.join(", "))
             }
             CapnpType::Struct(st) => {
                 let mut fields = Vec::new();
@@ -346,7 +347,7 @@ impl CapnpType {
                 for v in iter {
                     fields.push(v.to_string());
                 }
-                format!("{{{}}} :{}", fields.join(", "), name)
+                format!("{{{}}} :{name}", fields.join(", "))
             }
             CapnpType::List(l) => {
                 let mut fields = Vec::new();
@@ -355,7 +356,7 @@ impl CapnpType {
                 for v in iter {
                     fields.push(v.to_string(""));
                 }
-                format!("{} - {{{}}} :List<>", name, fields.join(", ")) //TODO list type
+                format!("{name} - {{{}}} :List<>", fields.join(", ")) //TODO list type
             }
             CapnpType::Capability(c) => {
                 //TODO specify cap
@@ -363,12 +364,12 @@ impl CapnpType {
                     &r.to_str().unwrap()
                         [c.schema.get_proto().get_display_name_prefix_length() as usize..]
                 } else {
-                    &"Client"
+                    "Client"
                 };
                 if let Some(c) = &c.hook {
-                    format!("{} - Some({}) :{ty}", name, c.get_brand())
+                    format!("{name} - Some({}) :{ty}", c.get_brand())
                 } else {
-                    format!("{} :{ty}", name)
+                    format!("{name} :{ty}")
                 }
             }
             CapnpType::None => name.to_string(),
@@ -419,7 +420,7 @@ pub struct ModuleInstance {
         >,
     >,
     pub state: ModuleState,
-    pub queue: capnp_rpc::queued::Client,
+    pub queue: queued::Client,
     pub dyn_schema: Option<capnp::schema::DynamicSchema>,
 }
 
@@ -468,7 +469,7 @@ impl ModuleInstance {
         self.bootstrap = None;
         self.process = None;
         self.program = None;
-        self.queue = capnp_rpc::queued::Client::new(None);
+        self.queue = queued::Client::new(None);
         let (empty_send, _) = tokio::sync::mpsc::channel(1);
         self.pause = empty_send;
     }
@@ -487,17 +488,23 @@ impl ModuleInstance {
 
         let stop_request = bootstrap.stop_request().send();
 
+        tracing::debug!("Sent a stop_request to {}", &self.name);
+
         // Call the stop method with some timeout
         if (tokio::time::timeout(timeout, stop_request.promise).await).is_err() {
             // Force kill the module.
+            tracing::warn!("{} timed out when requesting stop!", &self.name);
             self.kill().await;
             self.reset();
             Ok(())
         } else {
+            tracing::debug!("Got stop_request reply back from {}", &self.name);
+
             if let Some(p) = self.process.as_ref() {
                 // Now join the process with the same timeout
                 match tokio::time::timeout(timeout, p.join_request().send().promise).await {
                     Ok(result) => {
+                        tracing::debug!("Joined process for {}", &self.name);
                         self.state = match Self::check_error(&self.name, result) {
                             Ok(v) => v,
                             Err(e) => {
@@ -520,6 +527,7 @@ impl ModuleInstance {
 
     pub async fn kill(&mut self) {
         if let Some(p) = self.process.as_ref() {
+            tracing::warn!("Force killing {}", &self.name);
             let _ = p.kill_request().send().promise.await;
         }
 

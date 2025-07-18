@@ -1,4 +1,6 @@
 use super::Path;
+use crate::capnp;
+use crate::capnp_rpc;
 use capnp_macros::capnproto_rpc;
 use http_body_util::BodyExt;
 use hyper::{HeaderMap, http::uri::Authority};
@@ -19,7 +21,7 @@ impl std::fmt::Display for Path::HttpVerb {
             HttpVerb::Options => "OPTIONS",
             HttpVerb::Patch => "PATCH",
         };
-        write!(f, "{}", verb)
+        write!(f, "{verb}")
     }
 }
 
@@ -68,7 +70,7 @@ impl PathImpl {
 
     fn get_uri(&self) -> capnp::Result<String> {
         let authority = self.authority.to_string();
-        let mut url = format!("https://{}", authority)
+        let mut url = format!("https://{authority}")
             .parse::<url::Url>()
             .map_err(|_| capnp::Error::failed("Couldn't create base url".to_string()))?;
         url.path_segments_mut()

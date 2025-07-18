@@ -1,6 +1,7 @@
 use crate::indirect_world_capnp::root;
-use capnp::any_pointer::Owned as any_pointer;
 use capnp_macros::capnproto_rpc;
+use keystone::capnp;
+use keystone::capnp::any_pointer::Owned as any_pointer;
 use std::rc::Rc;
 
 pub struct IndirectWorldImpl {
@@ -9,7 +10,7 @@ pub struct IndirectWorldImpl {
 
 #[capnproto_rpc(root)]
 impl root::Server for IndirectWorldImpl {
-    async fn say_hello(self: Rc<Self>, request: Reader) -> Result<(), ::capnp::Error> {
+    async fn say_hello(self: Rc<Self>, request: Reader) -> Result<(), capnp::Error> {
         tracing::debug!("say_hello was called!");
 
         let mut sayhello = self.hello_client.say_hello_request();

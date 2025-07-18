@@ -47,7 +47,7 @@ fn test_sqlite_usage_init() -> eyre::Result<()> {
                     Ok::<(), eyre::Error>(())
                 };
 
-                tokio::select! {
+                keystone::tokio::select! {
                     r = keystone::drive_stream(&mut rpc_systems) => Ok(r?),
                     r = fut => r,
                 }?;
@@ -72,7 +72,7 @@ fn test_sqlite_usage_init() -> eyre::Result<()> {
                 Ok::<(), eyre::Error>(())
             };
 
-            tokio::select! {
+            keystone::tokio::select! {
                 r = keystone::drive_stream(&mut rpc_systems) => Ok(r?),
                 r = fut => r,
             }?;

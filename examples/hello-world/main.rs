@@ -1,8 +1,8 @@
-include!(concat!(env!("OUT_DIR"), "/capnproto.rs"));
-
-use crate::hello_world_capnp::root;
-use capnp::any_pointer::Owned as any_pointer;
 use capnp_macros::capnproto_rpc;
+use hello_world::hello_world_capnp;
+use hello_world::hello_world_capnp::root;
+use keystone::capnp::any_pointer::Owned as any_pointer;
+use keystone::{capnp, capnp_rpc, tokio};
 use std::rc::Rc;
 
 pub struct HelloWorldImpl {
@@ -52,10 +52,48 @@ impl keystone::Module<hello_world_capnp::config::Owned> for HelloWorldImpl {
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(feature = "tracing")]
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::DEBUG)
+        .with_writer(std::io::stderr)
+        .with_ansi(true)
+        .init();
+
     keystone::main::<crate::hello_world_capnp::config::Owned, HelloWorldImpl, root::Owned>(
         async move {
             //let _: Vec<String> = ::std::env::args().collect();
         },
     )
     .await
+}
+
+#[test]
+fn test_hello_world_inline() -> eyre::Result<()> {
+    keystone::test_module_harness::<
+        crate::hello_world_capnp::config::Owned,
+        HelloWorldImpl,
+        crate::hello_world_capnp::root::Owned,
+        _,
+    >(
+        &keystone::build_module_config(
+            "Hello World",
+            "hello-world-module",
+            r#"{  greeting = "Bonjour" }"#,
+        ),
+        "Hello World",
+        |api| async move {
+            let hello_client: crate::hello_world_capnp::root::Client = api;
+
+            let mut sayhello = hello_client.say_hello_request();
+            sayhello.get().init_request().set_name("Keystone".into());
+            let hello_response = sayhello.send().promise.await?;
+
+            let msg = hello_response.get()?.get_reply()?.get_message()?;
+
+            assert_eq!(msg, "Bonjour, Keystone!");
+            Ok::<(), eyre::Report>(())
+        },
+    )?;
+
+    Ok(())
 }

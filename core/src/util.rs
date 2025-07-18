@@ -18,7 +18,7 @@ unsafe fn get_mac() -> Option<u64> {
         let mut padapter = info[0].assume_init_mut() as *mut IpHelper::IP_ADAPTER_INFO;
         let mut i = 0;
         while !padapter.is_null() {
-            (*padapter).Address[(*padapter).AddressLength as usize..].fill(0);
+            (&mut (*padapter).Address)[(*padapter).AddressLength as usize..].fill(0);
             all.push(u64::from_le_bytes((*padapter).Address));
             padapter = (*padapter).Next;
             info[i].assume_init_drop();

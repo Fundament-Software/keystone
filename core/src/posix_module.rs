@@ -1,5 +1,10 @@
 use crate::byte_stream::ByteStreamBufferImpl;
 use crate::byte_stream_capnp::byte_stream::Owned as ByteStream;
+use crate::capnp;
+use crate::capnp::any_pointer::Owned as any_pointer;
+use crate::capnp::any_pointer::Owned as cap_pointer;
+use crate::capnp::capability::RemotePromise;
+use crate::capnp_rpc::{self, CapabilityServerSet};
 use crate::keystone::CapnpResult;
 use crate::keystone::LogCapture;
 use crate::module_capnp::module_error;
@@ -10,11 +15,7 @@ use crate::posix_spawn_capnp::posix_args::Owned as PosixArgs;
 use crate::posix_spawn_capnp::posix_error::Owned as PosixError;
 use crate::spawn_capnp::process;
 use crate::spawn_capnp::program;
-use capnp::any_pointer::Owned as any_pointer;
-use capnp::any_pointer::Owned as cap_pointer;
-use capnp::capability::RemotePromise;
 use capnp_macros::capnproto_rpc;
-use capnp_rpc::CapabilityServerSet;
 use eyre::Context;
 use futures_util::FutureExt;
 use futures_util::future::LocalBoxFuture;
@@ -89,7 +90,7 @@ impl process::Server<cap_pointer, module_error::Owned<any_pointer>>
         self: Rc<Self>,
         _: process::JoinParams<cap_pointer, module_error::Owned<any_pointer>>,
         mut results: process::JoinResults<cap_pointer, module_error::Owned<any_pointer>>,
-    ) -> Result<(), ::capnp::Error> {
+    ) -> Result<(), capnp::Error> {
         let span = tracing::trace_span!("posix_module_process");
         let _enter = span.enter();
         tracing::trace!("join()");
@@ -127,7 +128,7 @@ impl<F: LogCapture>
         module_error::Owned<any_pointer>,
     > for PosixModuleProgramImpl<F>
 {
-    async fn spawn(self: Rc<Self>, args: Reader) -> Result<(), ::capnp::Error> {
+    async fn spawn(self: Rc<Self>, args: Reader) -> Result<(), capnp::Error> {
         let span = tracing::span!(tracing::Level::DEBUG, "posix_program::spawn");
         let _enter = span.enter();
         let mut request = self.posix_program.spawn_request();
@@ -162,7 +163,7 @@ impl<F: LogCapture>
                                 pair.get_config()?,
                             )?;
 
-                        let (process_future, killsender) = {
+                        let (process_future, pipe_future, stderr_future, killsender) = {
                             let process_impl = self
                                 .module
                                 .process_set
@@ -174,9 +175,17 @@ impl<F: LogCapture>
 
                             (
                                 process_impl
-                                    .future
+                                    .process
                                     .take()
                                     .expect("Process had no future to wait on!"),
+                                process_impl
+                                    .stdout
+                                    .take()
+                                    .expect("Process had no pipe to wait on!"),
+                                process_impl
+                                    .stderr
+                                    .take()
+                                    .expect("Process had no stderr to wait on!"),
                                 process_impl
                                     .killsender
                                     .take()
@@ -186,9 +195,11 @@ impl<F: LogCapture>
 
                         let sink = self.module.stderr_sink.call(stderr.clone());
 
-                        let mut process_handle = tokio::task::spawn_local(async move {
-                            tokio::try_join!(process_future, sink).map(|(f, _)| f)
-                        });
+                        //let mut process_handle = tokio::task::spawn_local(async move {
+                        //    tokio::try_join!(process_future, sink).map(|(f, _)| f)
+                        //});
+                        let mut process_handle = tokio::task::spawn_local(process_future);
+                        let sink_handle = tokio::task::spawn_local(sink);
 
                         let (send, mut pause_recv) = mpsc::channel::<bool>(1);
 
@@ -213,44 +224,84 @@ impl<F: LogCapture>
                                         }
                                     });
 
+                                    // Start driving the pipes
+                                    let pipe_handle = tokio::task::spawn_local(pipe_future);
+                                    let stderr_handle = tokio::task::spawn_local(stderr_future);
+
                                     // Here, we await both joinhandles to see which returns first. If one returns an error, we kill the other one, otherwise
                                     // we await the other handle. This is done carefully so that we never await a handle twice
 
-                                    let result = tokio::select! {
+                                    let mut result = tokio::select! {
                                         r = &mut rpc_handle => {
                                             if let Err(e) = flatten_to_capnp(r) {
+                                                tracing::debug!("rpc_handle returned error: {e}");
                                                 let _ = kill.send(()); Err(e)
                                             } else {
+                                                tracing::debug!("rpc_handle returned success");
                                                 flatten_to_capnp(process_handle.await)
                                             }
                                         },
                                         r = &mut process_handle => {
+                                                tracing::debug!("process handle returned before rpc_handle closed");
                                             let blah: capnp::Result<ExitStatus> = match r {
                                                 Ok(Ok(e)) => {
                                                     if e.success() {
+                                                        tracing::debug!("process returned success, awaiting rpc_handle");
                                                         flatten_to_capnp(rpc_handle.await).map(move |_| e)
                                                     } else {
+                                                        tracing::debug!("process returned {e}, disconnecting rpc_handle");
                                                         let _ = disconnect.await;
                                                         Err(e).to_capnp()
                                                     }
                                                 }
                                                 Ok(Err(e)) => {
+                                                        tracing::debug!("process returned {e}, disconnecting rpc_handle");
                                                     let _ = disconnect.await;
                                                     Err(e).to_capnp()
                                                 }
                                                 Err(e) => {
+                                                        tracing::debug!("Error joining process: {e}, disconnecting rpc_handle");
                                                     let _ = disconnect.await;
                                                     Err(e).to_capnp()
                                                 }
                                             };
                                             blah
-                                         },
+                                         }
                                     };
 
+                                    // We only await the pipes AFTER the rpc connection has completely closed, otherwise the RPC system
+                                    // could try to read from a closed pipe. The pipe future returns a handle to the pipe itself to ensure
+                                    // it continues to exist up until the moment we await it.
+                                    tracing::debug!("awaiting pipe");
+                                    if let Err(e) = pipe_handle.await {
+                                        if result.is_ok() {
+                                            result = Err(capnp::Error::failed(e.to_string()));
+                                        }
+                                    }
+
+                                    tracing::debug!("awaiting stderr stream");
+                                    if let Err(e) = stderr_handle.await {
+                                        if result.is_ok() {
+                                            result = Err(capnp::Error::failed(e.to_string()));
+                                        }
+                                    }
+
+                                    /*tracing::debug!("awaiting sink handle");
+                                    if let Err(e) = sink_handle.await {
+                                        if result.is_ok() {
+                                            result = Err(capnp::Error::failed(e.to_string()));
+                                        }
+                                    }*/
+
+                                    // TODO: sink_handle deadlocks for some reason, possibly due to waiting on a
+                                    // write forever before it can close?
+                                    sink_handle.abort();
+
+                                    tracing::debug!("returning from module future");
                                     result.map(|_| ()).wrap_err_with(move || {
                                         let name = handle.borrow().debug_name.clone();
                                         if let Some(n) = name {
-                                            format!("Error from {}", n)
+                                            format!("Error from {n}")
                                         } else {
                                             format!(
                                                 "Error from Unknown Module {}",

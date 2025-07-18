@@ -19,10 +19,10 @@ fn test_complex_config_init() -> Result<()> {
                 let get_response = get_config.send().promise.await?;
 
                 let _ = get_response.get()?.get_reply()?;
-                Ok::<(), capnp::Error>(())
+                Ok::<(), keystone::capnp::Error>(())
             };
 
-            tokio::select! {
+            keystone::tokio::select! {
                 r = keystone::drive_stream(&mut rpc_systems) => Ok(r?),
                 r = fut => r,
             }?;

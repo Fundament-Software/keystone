@@ -34,6 +34,7 @@ tokio = { version = "1.40", features = [
   "macros",
   "io-std",
   "time",
+  "io-util",
   "tracing",
   "signal",
   "process",
@@ -41,14 +42,11 @@ tokio = { version = "1.40", features = [
 tokio-util = { version = "0.7.11", features = ["compat"] }
 async-backtrace = "0.2.7"
 futures-util = "0.3"
-capstone = { git = "https://github.com/Fundament-Software/capstone-rs" }
-capstone-futures = { git = "https://github.com/Fundament-Software/capstone-rs" }
-capstone-rpc = { git = "https://github.com/Fundament-Software/capstone-rs" }
 capstone-macros = { git = "https://github.com/Fundament-Software/capstone-rs" }
 capstone-gen = { git = "https://github.com/Fundament-Software/capstone-rs" }
 async-byte-channel = { git = "https://github.com/Fundament-Software/capstone-rs" }
 uuid = "1.*"
-rusqlite = { version = "0.35", features = [
+rusqlite = { version = "0.37", features = [
   "bundled",
   "modern_sqlite",
   "i128_blob",

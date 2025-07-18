@@ -1,5 +1,5 @@
-use capnp::any_pointer::Owned as any_pointer;
-use capnp::{dynamic_struct, dynamic_value};
+use crate::capnp::any_pointer::Owned as any_pointer;
+use crate::capnp::{self, dynamic_struct, dynamic_value};
 use circular_buffer::CircularBuffer;
 use clap::{Parser, Subcommand, ValueEnum};
 use crossterm::event::KeyCode::Char;
@@ -2135,7 +2135,7 @@ fn main() -> Result<()> {
 
     match cli.command {
         Commands::Build { toml, output } => {
-            let mut message = ::capnp::message::Builder::new_default();
+            let mut message = capnp::message::Builder::new_default();
             let mut msg = message.init_root::<keystone_config::Builder>();
             let mut parent = None;
             let source = if let Some(t) = toml.as_ref() {
@@ -2190,13 +2190,32 @@ fn main() -> Result<()> {
             config,
             interactive,
         } => {
+            #[cfg(not(windows))]
+            unsafe {
+                let fd_a = libc::open(
+                    std::ffi::CString::new("/dev/null").unwrap().as_ptr(),
+                    libc::O_RDONLY,
+                );
+                if fd_a < 0 {
+                    panic!("How did we fail to open /dev/null");
+                } else if fd_a != 4 {
+                    let fd_b = libc::fcntl(fd_a, libc::F_DUPFD, 4);
+                    libc::close(fd_a);
+                    if fd_b < 0 {
+                        panic!("fcntl(fd_a, F_DUPFD, 4) failed");
+                    } else if fd_b != 4 {
+                        libc::close(fd_b);
+                        panic!("fd 4 already in use");
+                    }
+                }
+            }
             if let Some(p) = toml {
                 let path = Path::new(&p);
                 let mut f = std::fs::File::open(path)?;
                 let mut buf = String::new();
                 f.read_to_string(&mut buf)?;
 
-                let mut message = ::capnp::message::Builder::new_default();
+                let mut message = capnp::message::Builder::new_default();
                 let mut msg = message.init_root::<keystone_config::Builder>();
                 let dir = path.parent().unwrap_or(Path::new(""));
                 config::to_capnp(&buf.parse::<toml::Table>()?, msg.reborrow(), dir)?;

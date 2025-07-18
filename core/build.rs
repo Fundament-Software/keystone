@@ -13,6 +13,7 @@ fn main() {
         .into();
 
     let mut cmd = capnpc::CompilerCommand::new();
+    cmd.capnp_root("::caplog::capnp");
     cmd.output_path(out_dir.join("capnp_output"));
     cmd.omnibus(out_dir.join("capnproto.rs"));
 
@@ -41,5 +42,5 @@ fn main() {
         .flat_map(|entry| Ok::<u64, std::io::Error>(keystone_build::get_capnp_id(entry?.path())));
 
     let provides = ids.map(|x| x.to_string()).collect::<Vec<_>>().join(",");
-    println!("cargo::metadata=SCHEMA_PROVIDES={}", provides);
+    println!("cargo::metadata=SCHEMA_PROVIDES={provides}");
 }

@@ -2,15 +2,16 @@ use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 use std::{fs::File, io::BufReader, path::Path};
 
+use crate::capnp;
+use crate::capnp::schema::CapabilitySchema;
+use crate::capnp::{
+    dynamic_struct, dynamic_value, introspect::TypeVariant, schema::DynamicSchema, schema_capnp,
+    traits::HasTypeId,
+};
 use crate::keystone::Error;
 use crate::keystone_capnp::cap_expr;
 use crate::keystone_capnp::keystone_config;
 use crate::toml_capnp;
-use capnp::schema::CapabilitySchema;
-use capnp::{
-    dynamic_struct, dynamic_value, introspect::TypeVariant, schema::DynamicSchema, schema_capnp,
-    traits::HasTypeId,
-};
 use eyre::{Context, Result};
 use toml::{Table, Value, value::Offset};
 
@@ -78,7 +79,7 @@ impl Default for SchemaPool {
 
 fn value_to_list<F>(
     l: &[Value],
-    mut builder: ::capnp::dynamic_list::Builder,
+    mut builder: capnp::dynamic_list::Builder,
     schema: capnp::schema_capnp::type_::Reader,
     schemas: &SchemaPool,
     dir: &Path,
@@ -586,13 +587,13 @@ where
             let expr = if let TypeVariant::Struct(st) = root
                 .get_type_by_id(method.get_result_struct_type())
                 .ok_or(Error::MissingType(
-                    format!("{} return values", name),
+                    format!("{name} return values"),
                     method.get_result_struct_type(),
                 ))? {
                 build_cap_field(name, expr, root, schemas, callback, list, (*st).into(), dir)?
             } else {
                 return Err(Error::TypeMismatchCapstone(
-                    format!("Results for {}", name),
+                    format!("Results for {name}"),
                     "struct".into(),
                 )
                 .into());
@@ -605,7 +606,7 @@ where
             let params =
                 root.get_type_by_id(method.get_param_struct_type())
                     .ok_or(Error::MissingType(
-                        format!("{} parameters", name),
+                        format!("{name} parameters"),
                         method.get_result_struct_type(),
                     ))?;
             if let TypeVariant::Struct(st) = params {
@@ -614,7 +615,7 @@ where
                 value_to_struct(v, dynobj, schemas, dir, callback)?;
             } else {
                 return Err(Error::TypeMismatchCapstone(
-                    format!("Params for {}", name),
+                    format!("Params for {name}"),
                     "struct".into(),
                 )
                 .into());
@@ -883,7 +884,7 @@ fn builtin_schemas() -> capnp::Result<SchemaPool> {
 
 #[test]
 fn test_basic_config() -> Result<()> {
-    let mut message = ::capnp::message::Builder::new_default();
+    let mut message = capnp::message::Builder::new_default();
     let mut msg = message.init_root::<keystone_config::Builder>();
     let source = r#"
 database = "test.sqlite"
@@ -907,7 +908,7 @@ path = "/test/"
 
 #[test]
 fn test_hello_world_config() -> Result<()> {
-    let mut message = ::capnp::message::Builder::new_default();
+    let mut message = capnp::message::Builder::new_default();
     let mut msg = message.init_root::<keystone_config::Builder>();
     let source = format!(
         r#"
@@ -938,7 +939,7 @@ config = {{ greeting = "Bonjour" }}
 
 #[test]
 fn test_indirect_config() -> Result<()> {
-    let mut message = ::capnp::message::Builder::new_default();
+    let mut message = capnp::message::Builder::new_default();
     let mut msg = message.init_root::<keystone_config::Builder>();
     let source = format!(
         r#"
@@ -979,7 +980,7 @@ config = {{ helloWorld = [ "@Hello World" ] }}
 
 #[test]
 fn test_stateful_config() -> Result<()> {
-    let mut message = ::capnp::message::Builder::new_default();
+    let mut message = capnp::message::Builder::new_default();
     let mut msg = message.init_root::<keystone_config::Builder>();
     let source = format!(
         r#"
@@ -1010,7 +1011,7 @@ config = {{ echoWord = "Echo" }}
 
 #[test]
 fn test_complex_config() -> Result<()> {
-    let mut message = ::capnp::message::Builder::new_default();
+    let mut message = capnp::message::Builder::new_default();
     let mut msg = message.init_root::<keystone_config::Builder>();
     let source = format!(
         r#"
@@ -1043,7 +1044,7 @@ config = {{ nested = {{ state = [ "@keystone", "initCell", {{id = "myCellName"}}
 
 #[test]
 fn test_config_array() -> Result<()> {
-    let mut message = ::capnp::message::Builder::new_default();
+    let mut message = capnp::message::Builder::new_default();
     let mut msg = message.init_root::<keystone_config::Builder>();
     let source = format!(
         r#"

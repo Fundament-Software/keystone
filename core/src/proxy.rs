@@ -1,19 +1,16 @@
-use crate::KeystoneRoot;
-use crate::scheduler::Scheduler;
-use crate::sqlite::SqliteDatabase;
+use crate::capnp;
+use crate::capnp::MessageSize;
+use crate::capnp::capability::Client;
+use crate::capnp::capability::Params;
+use crate::capnp::capability::Request;
+use crate::capnp::capability::Results;
+use crate::capnp::capability::Server;
+use crate::capnp::private::capability::ClientHook;
+use crate::capnp::private::layout::CapTable;
+use crate::capnp::traits::FromPointerReader;
+use crate::capnp_rpc::CapabilityServerSet;
 use crate::util::SnowflakeSource;
 use caplog::{CapLog, MAX_BUFFER_SIZE};
-use capnp::MessageSize;
-use capnp::capability::Client;
-use capnp::capability::FromServer;
-use capnp::capability::Params;
-use capnp::capability::Request;
-use capnp::capability::Results;
-use capnp::capability::Server;
-use capnp::private::capability::ClientHook;
-use capnp::private::layout::CapTable;
-use capnp::traits::FromPointerReader;
-use capnp_rpc::CapabilityServerSet;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -109,21 +106,19 @@ impl Server for ProxyServer {
                     } else if cap.get_brand() == self.target.hook.get_brand() {
                         // Not a proxy, belongs to either side of the RPC connection, so doesn't need a proxy
                         cap
+                    } else if client.hook.is_local_client() {
+                        client.hook
                     } else {
-                        if client.hook.is_local_client() == true {
-                            client.hook
-                        } else {
-                            // Not a proxy, belongs to some other RPC connection, needs a proxy
-                            self.set
-                                .borrow_mut()
-                                .new_client(ProxyServer::new(
-                                    cap,
-                                    self.set.clone(),
-                                    self.log.clone(),
-                                    self.snowflake.clone(),
-                                ))
-                                .hook
-                        }
+                        // Not a proxy, belongs to some other RPC connection, needs a proxy
+                        self.set
+                            .borrow_mut()
+                            .new_client(ProxyServer::new(
+                                cap,
+                                self.set.clone(),
+                                self.log.clone(),
+                                self.snowflake.clone(),
+                            ))
+                            .hook
                     },
                 )
             } else {

@@ -20,12 +20,7 @@ name = "sqlite-usage-module"
 path = "main.rs"
 
 [dependencies]
-capstone.workspace = true
-capstone-futures.workspace = true
-capstone-rpc.workspace = true
 capstone-macros.workspace = true
-tokio.workspace = true
-tokio-util.workspace = true
 tracing-subscriber.workspace = true
 tracing.workspace = true
 keystone.workspace = true
@@ -37,7 +32,4 @@ async-byte-channel.workspace = true
 keystone = { path = "../../core", features = ["testing"] }
 
 [build-dependencies]
-capstone-gen.workspace = true
-tempfile.workspace = true
-eyre.workspace = true
 keystone-build.workspace = true

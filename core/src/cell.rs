@@ -1,7 +1,8 @@
+use crate::capnp;
+use crate::capnp::any_pointer::Owned as any_pointer;
 use crate::database::DatabaseExt;
 use crate::sqlite::SqliteDatabase;
 use crate::storage_capnp::cell;
-use capnp::any_pointer::Owned as any_pointer;
 use capnp_macros::capnproto_rpc;
 use std::rc::Rc;
 
@@ -38,7 +39,7 @@ impl cell::Server<any_pointer> for SimpleCellImpl {
         self.db
             .get_state(self.id, builder.reborrow().into())
             .map_err(|e| {
-                eprintln!("CELL GET ERROR: {}", e);
+                eprintln!("CELL GET ERROR: {e}");
                 capnp::Error::failed(
                     "Cell did not exist! did you forget to set it to something first?".into(),
                 )
@@ -56,7 +57,7 @@ impl cell::Server<any_pointer> for SimpleCellImpl {
         tracing::debug!("set()");
 
         self.db.set_state(self.id, data).await.map_err(|e| {
-            eprintln!("CELL SET ERROR: {}", e);
+            eprintln!("CELL SET ERROR: {e}");
             capnp::Error::failed("Could not set data for cell!".into())
         })?;
 

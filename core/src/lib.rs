@@ -210,7 +210,7 @@ pub async fn start<
 
     if let Err(e) = err {
         // Don't report disconnects as an error.
-        if e.kind != ::capnp::ErrorKind::Disconnected {
+        if e.kind != capnp::ErrorKind::Disconnected {
             tracing::error!("RPC callback FAILED!");
             return Err(e.into());
         }
@@ -329,7 +329,7 @@ pub fn test_harness<F: Future<Output = eyre::Result<()>> + 'static>(
     config: &str,
     f: impl FnOnce(capnp::message::Builder<capnp::message::HeapAllocator>) -> F + 'static,
 ) -> eyre::Result<()> {
-    let mut message = ::capnp::message::Builder::new_default();
+    let mut message = capnp::message::Builder::new_default();
     let mut msg = message.init_root::<keystone_config::Builder>();
 
     let temp_db = NamedTempFile::new().unwrap().into_temp_path();

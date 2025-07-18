@@ -1,5 +1,6 @@
 use crate::byte_stream::ByteStreamBufferImpl;
 use crate::cap_replacement::CapReplacement;
+use crate::capnp;
 use crate::capnp::any_pointer::Owned as any_pointer;
 use crate::capnp::capability::FromServer;
 use crate::capnp::capability::{FromClientHook, RemotePromise};
@@ -25,7 +26,6 @@ use std::time::Duration;
 use std::{cell::RefCell, collections::HashMap, path::Path, rc::Rc};
 use tokio::io::AsyncReadExt;
 use tokio::task::JoinHandle;
-
 pub trait CapnpResult<T> {
     fn to_capnp(self) -> capnp::Result<T>;
 }
@@ -179,7 +179,7 @@ impl Keystone {
         reader: T,
         writer: U,
     ) -> Result<(Self, API, RpcSystemSet)> {
-        let mut message = ::capnp::message::Builder::new_default();
+        let mut message = capnp::message::Builder::new_default();
         let mut msg = message.init_root::<keystone_config::Builder>();
         crate::config::to_capnp(
             &config.as_ref().parse::<toml::Table>()?,
@@ -1007,7 +1007,7 @@ pub fn get_binary_path(name: &str) -> std::path::PathBuf {
 
     #[cfg(windows)]
     {
-        target_dir.join(format!("{}.exe", name).as_str())
+        target_dir.join(format!("{name}.exe").as_str())
     }
 
     #[cfg(not(windows))]
@@ -1035,7 +1035,7 @@ impl crate::keystone_capnp::root::Server for KeystoneRoot {
         self: Rc<Self>,
         params: crate::keystone_capnp::root::InitCellParams,
         mut results: crate::keystone_capnp::root::InitCellResults,
-    ) -> Result<(), ::capnp::Error> {
+    ) -> Result<(), capnp::Error> {
         let span = tracing::debug_span!("host", id = BUILTIN_KEYSTONE);
         let _enter = span.enter();
         let params = params.get()?;

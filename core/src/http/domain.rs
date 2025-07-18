@@ -1,5 +1,6 @@
 use super::path::PathImpl;
 use super::{Domain, Path};
+use crate::capnp;
 use capnp_macros::capnproto_rpc;
 use hyper::http::uri::Authority;
 use hyper_tls::HttpsConnector;

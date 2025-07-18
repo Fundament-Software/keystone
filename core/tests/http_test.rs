@@ -149,7 +149,7 @@ async fn subdomains() -> eyre::Result<()> {
 
 // when domain is finalized, cannot add subdomains or change domains
 #[tokio::test]
-async fn finalize_domains() -> eyre::Result<(), capnp::Error> {
+async fn finalize_domains() -> eyre::Result<(), keystone::capnp::Error> {
     let client = https_client();
 
     // Requesting domain
@@ -173,7 +173,7 @@ async fn finalize_domains() -> eyre::Result<(), capnp::Error> {
 
 // after a path is finalized, you can't add more paths.
 #[tokio::test]
-async fn finalize_paths() -> eyre::Result<(), capnp::Error> {
+async fn finalize_paths() -> eyre::Result<(), keystone::capnp::Error> {
     let client = https_client();
 
     // Requesting domain
@@ -207,7 +207,7 @@ async fn finalize_paths() -> eyre::Result<(), capnp::Error> {
 
 // When query strings are finalized it isn't possible to add more query bindings
 #[tokio::test]
-async fn finalize_query() -> eyre::Result<(), capnp::Error> {
+async fn finalize_query() -> eyre::Result<(), keystone::capnp::Error> {
     let client = https_client();
 
     // Requesting domain
@@ -252,7 +252,7 @@ async fn finalize_query() -> eyre::Result<(), capnp::Error> {
 
 // When an allowlist of verbs is set, it isn't possible to expand the allowlist with the set allowlist function
 #[tokio::test]
-async fn allowlist_test() -> eyre::Result<(), capnp::Error> {
+async fn allowlist_test() -> eyre::Result<(), keystone::capnp::Error> {
     let client = https_client();
 
     // Requesting domain

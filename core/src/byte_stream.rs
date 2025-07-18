@@ -1,3 +1,4 @@
+use crate::capnp;
 use crate::capnp::capability::{RemotePromise, Response};
 use bytes::BytesMut;
 use capnp_macros::capnproto_rpc;

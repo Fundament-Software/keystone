@@ -30,7 +30,7 @@ pub struct SqliteUsageImpl {
 
 #[capnproto_rpc(root)]
 impl root::Server for SqliteUsageImpl {
-    async fn echo_alphabetical(self: Rc<Self>, request: Reader) -> Result<(), ::capnp::Error> {
+    async fn echo_alphabetical(self: Rc<Self>, request: Reader) -> Result<(), capnp::Error> {
         tracing::debug!("echo_alphabetical was called!");
 
         let res = self

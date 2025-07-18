@@ -2,15 +2,16 @@ use crate::buffer_allocator::BufferAllocator;
 use crate::cap_replacement;
 use crate::cap_replacement::CapReplacement;
 use crate::cap_replacement::GetPointerBuilder;
-use crate::keystone::CapnpResult;
-use crate::sqlite::SqliteDatabase;
-use crate::storage_capnp::restore::restore_results;
+use crate::capnp;
 use crate::capnp::any_pointer::Owned as any_pointer;
 use crate::capnp::capability::FromClientHook;
 use crate::capnp::message::{ReaderOptions, TypedReader};
 use crate::capnp::private::capability::ClientHook;
 use crate::capnp::traits::ImbueMut;
 use crate::capnp::traits::SetPointerBuilder;
+use crate::keystone::CapnpResult;
+use crate::sqlite::SqliteDatabase;
+use crate::storage_capnp::restore::restore_results;
 use eyre::Result;
 use rusqlite::{Connection, OpenFlags, params};
 use serde::{Deserialize, Serialize};
@@ -195,14 +196,13 @@ impl DatabaseExt for SqliteDatabase {
 
         self.connection.execute(
             format!(
-                "CREATE TABLE {} (
+                "CREATE TABLE {ROOT_STURDYREFS} (
                     id       INTEGER PRIMARY KEY,
                     module   INTEGER NOT NULL,
                     refcount INTEGER NOT NULL,
                     expires  INTEGER NOT NULL,
                     data     BLOB NOT NULL
-                )",
-                ROOT_STURDYREFS
+                )"
             )
             .as_str(),
             (),
@@ -329,11 +329,8 @@ impl DatabaseExt for SqliteDatabase {
     ) -> Result<capnp::capability::RemotePromise<restore_results::Owned<any_pointer, any_pointer>>>
     {
         let mut stmt = self.connection.prepare_cached(
-            format!(
-                "SELECT data, module FROM {} WHERE id = ?1 AND expires > ?2",
-                ROOT_STURDYREFS
-            )
-            .as_str(),
+            format!("SELECT data, module FROM {ROOT_STURDYREFS} WHERE id = ?1 AND expires > ?2",)
+                .as_str(),
         )?;
         let promise = stmt.query_row(
             params![id, cur_time()],
@@ -399,8 +396,7 @@ impl DatabaseExt for SqliteDatabase {
             Ok(conn
             .prepare_cached(
                 format!(
-                    "INSERT INTO {} (module, data, expires, refcount) VALUES (?1, ?2, ?3, 1) RETURNING id",
-                    ROOT_STURDYREFS
+                    "INSERT INTO {ROOT_STURDYREFS} (module, data, expires, refcount) VALUES (?1, ?2, ?3, 1) RETURNING id",
                 )
                 .as_str(),
             )?
@@ -435,8 +431,7 @@ impl DatabaseExt for SqliteDatabase {
             self.connection
                 .prepare_cached(
                     format!(
-                        "UPDATE {} SET refcount = refcount - 1 WHERE id = ?1 AND refcount > 0",
-                        ROOT_STURDYREFS
+                        "UPDATE {ROOT_STURDYREFS} SET refcount = refcount - 1 WHERE id = ?1 AND refcount > 0",
                     )
                     .as_str(),
                 )?
@@ -446,14 +441,13 @@ impl DatabaseExt for SqliteDatabase {
     }
 
     fn clean_sturdyrefs(&self, ids: &[i64]) -> Result<()> {
-        let list: Vec<String> = ids.iter().map(|id| format!("?{}", id)).collect();
+        let list: Vec<String> = ids.iter().map(|id| format!("?{id}")).collect();
 
         expect_change(
             self.connection
                 .prepare_cached(
                     format!(
-                        "DELETE FROM {} WHERE id IN ({}) AND refcount = 0",
-                        ROOT_STURDYREFS,
+                        "DELETE FROM {ROOT_STURDYREFS} WHERE id IN ({}) AND refcount = 0",
                         list.join(",")
                     )
                     .as_str(),

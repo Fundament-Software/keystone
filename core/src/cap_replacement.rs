@@ -1,3 +1,4 @@
+use crate::capnp;
 use crate::capnp::private::capability::ClientHook;
 use crate::capnp::private::layout::ElementSize;
 use crate::capnp::private::layout::PointerBuilder;

@@ -1,9 +1,10 @@
+use crate::capnp;
+use crate::capnp::any_pointer::Owned as any_pointer;
+use crate::capnp::traits::SetPointerBuilder;
 use crate::database::DatabaseExt;
 use crate::keystone::CapnpResult;
 use crate::sqlite::SqliteDatabase;
 use crate::storage_capnp::sturdy_ref;
-use crate::capnp::any_pointer::Owned as any_pointer;
-use crate::capnp::traits::SetPointerBuilder;
 use std::rc::Rc;
 
 pub struct SturdyRefImpl {
@@ -32,7 +33,7 @@ impl sturdy_ref::Server<any_pointer> for SturdyRefImpl {
         self: Rc<Self>,
         _: sturdy_ref::RestoreParams<any_pointer>,
         mut results: sturdy_ref::RestoreResults<any_pointer>,
-    ) -> Result<(), ::capnp::Error> {
+    ) -> Result<(), capnp::Error> {
         let promise = self.db.get_sturdyref(self.id).to_capnp()?;
 
         results
@@ -47,7 +48,7 @@ impl Drop for SturdyRefImpl {
     fn drop(&mut self) {
         if let Err(e) = self.db.drop_sturdyref(self.id) {
             // We can't allow a failure here to crash the program, so we do nothing
-            eprintln!("Failed to drop SturdyRef! {}", e);
+            eprintln!("Failed to drop SturdyRef! {e}");
         }
     }
 }
@@ -63,7 +64,7 @@ where
         &self,
         _: sturdy_ref::RestoreParams<T>,
         mut results: sturdy_ref::RestoreResults<T>,
-    ) -> Result<(), ::capnp::Error> {
+    ) -> Result<(), capnp::Error> {
         let promise = self
             .db
             .get_sturdyref(self.id)

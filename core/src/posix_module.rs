@@ -1,5 +1,6 @@
 use crate::byte_stream::ByteStreamBufferImpl;
 use crate::byte_stream_capnp::byte_stream::Owned as ByteStream;
+use crate::capnp;
 use crate::capnp::any_pointer::Owned as any_pointer;
 use crate::capnp::any_pointer::Owned as cap_pointer;
 use crate::capnp::capability::RemotePromise;
@@ -89,7 +90,7 @@ impl process::Server<cap_pointer, module_error::Owned<any_pointer>>
         self: Rc<Self>,
         _: process::JoinParams<cap_pointer, module_error::Owned<any_pointer>>,
         mut results: process::JoinResults<cap_pointer, module_error::Owned<any_pointer>>,
-    ) -> Result<(), ::capnp::Error> {
+    ) -> Result<(), capnp::Error> {
         let span = tracing::trace_span!("posix_module_process");
         let _enter = span.enter();
         tracing::trace!("join()");
@@ -127,7 +128,7 @@ impl<F: LogCapture>
         module_error::Owned<any_pointer>,
     > for PosixModuleProgramImpl<F>
 {
-    async fn spawn(self: Rc<Self>, args: Reader) -> Result<(), ::capnp::Error> {
+    async fn spawn(self: Rc<Self>, args: Reader) -> Result<(), capnp::Error> {
         let span = tracing::span!(tracing::Level::DEBUG, "posix_program::spawn");
         let _enter = span.enter();
         let mut request = self.posix_program.spawn_request();
@@ -300,7 +301,7 @@ impl<F: LogCapture>
                                     result.map(|_| ()).wrap_err_with(move || {
                                         let name = handle.borrow().debug_name.clone();
                                         if let Some(n) = name {
-                                            format!("Error from {}", n)
+                                            format!("Error from {n}")
                                         } else {
                                             format!(
                                                 "Error from Unknown Module {}",

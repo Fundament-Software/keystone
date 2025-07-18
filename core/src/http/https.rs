@@ -1,5 +1,6 @@
 use super::domain::DomainImpl;
 use super::{Domain, Https};
+use crate::capnp;
 use capnp_macros::capnproto_rpc;
 use hyper_tls::HttpsConnector;
 use hyper_util::client::legacy::{Client as HttpClient, connect::HttpConnector};

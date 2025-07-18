@@ -10,7 +10,7 @@ pub struct IndirectWorldImpl {
 
 #[capnproto_rpc(root)]
 impl root::Server for IndirectWorldImpl {
-    async fn say_hello(self: Rc<Self>, request: Reader) -> Result<(), ::capnp::Error> {
+    async fn say_hello(self: Rc<Self>, request: Reader) -> Result<(), capnp::Error> {
         tracing::debug!("say_hello was called!");
 
         let mut sayhello = self.hello_client.say_hello_request();

@@ -16,7 +16,7 @@ license.workspace = true
 doctest = false
 
 [dependencies]
-object = { version = "0.36", default-features = false, features = ["write"] }
+object = { version = "0.37", default-features = false, features = ["write"] }
 platforms = "3.4.0"
 wasm-gen = "0.1.4"
 capstone-gen.workspace = true

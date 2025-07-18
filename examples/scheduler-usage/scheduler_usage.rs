@@ -118,7 +118,7 @@ impl root::Server for SchedulerUsageImpl {
 
 #[capnproto_rpc(restore)]
 impl restore::Server<storage::Owned> for SchedulerUsageImpl {
-    async fn restore(self: Rc<Self>, data: Reader) -> Result<(), ::capnp::Error> {
+    async fn restore(self: Rc<Self>, data: Reader) -> Result<(), capnp::Error> {
         tracing::info!("restore called");
 
         let action = match data.get_storage().which()? {

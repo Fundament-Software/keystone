@@ -7,6 +7,7 @@ use chrono::Timelike;
 use rusqlite::CachedStatement;
 use rusqlite::OptionalExtension;
 
+use crate::capnp;
 use crate::capnp::any_pointer::Owned as any_pointer;
 use crate::capnp::private::capability::ClientHook;
 use crate::capnp_rpc;
@@ -220,7 +221,7 @@ impl Scheduler {
     }
 
     async fn catch_error<T>(e: eyre::ErrReport) -> capnp::Result<T> {
-        eprintln!("Error when executing action: {}", e);
+        eprintln!("Error when executing action: {e}");
         let r = capnp::Error::failed(e.to_string());
         LAST_ERROR.store(Some(Box::new(e)), std::sync::atomic::Ordering::AcqRel);
         Err(r)
@@ -258,7 +259,7 @@ impl Scheduler {
     }
 
     fn overflow_error(id: i64, remove: &mut CachedStatement<'_>) -> rusqlite::Result<usize> {
-        eprintln!("Overflow error while processing {}, canceling task", id);
+        eprintln!("Overflow error while processing {id}, canceling task");
         remove.execute(params![id])
     }
 
@@ -523,7 +524,7 @@ impl root::Server for Scheduler {
         self: Rc<Self>,
         params: root::OnceParams,
         mut results: root::OnceResults,
-    ) -> Result<(), ::capnp::Error> {
+    ) -> Result<(), capnp::Error> {
         let params = params.get()?;
         let action_id = db_save_action(self.db.clone(), params.get_act()?.client.hook).await?;
         let miss = if params.get_fire_if_missed() {
@@ -559,7 +560,7 @@ impl root::Server for Scheduler {
         self: Rc<Self>,
         params: root::EveryParams,
         mut results: root::EveryResults,
-    ) -> Result<(), ::capnp::Error> {
+    ) -> Result<(), capnp::Error> {
         let params = params.get()?;
 
         let action_id = db_save_action(self.db.clone(), params.get_act()?.client.hook).await?;
@@ -598,7 +599,7 @@ impl root::Server for Scheduler {
         self: Rc<Self>,
         params: root::ComplexParams,
         mut results: root::ComplexResults,
-    ) -> Result<(), ::capnp::Error> {
+    ) -> Result<(), capnp::Error> {
         let params = params.get()?;
 
         let action_id = db_save_action(self.db.clone(), params.get_act()?.client.hook).await?;
@@ -633,6 +634,7 @@ impl root::Server for Scheduler {
 
 #[cfg(test)]
 mod tests {
+    use crate::capnp;
     use crate::capnp::any_pointer::Owned as any_pointer;
     use crate::capnp::capability::FromClientHook;
     use crate::capnp::capability::FromServer;
@@ -799,7 +801,7 @@ mod tests {
             self: Rc<Self>,
             params: restore::RestoreParams<any_pointer>,
             mut results: restore::RestoreResults<any_pointer>,
-        ) -> Result<(), ::capnp::Error> {
+        ) -> Result<(), capnp::Error> {
             let key: capnp::text::Reader = params.get()?.get_data()?.get_as()?;
             let key = key.to_string()?;
 

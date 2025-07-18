@@ -1,3 +1,4 @@
+use crate::capnp;
 use crate::database::DatabaseExt;
 use crate::keystone::CapabilityServerSetExt;
 use crate::keystone::CapnpResult;
@@ -17,7 +18,7 @@ pub struct HostImpl<State> {
 
 impl<State> HostImpl<State>
 where
-    State: ::capnp::traits::Owned,
+    State: capnp::traits::Owned,
 {
     pub fn new(module_id: u64, db: Rc<SqliteDatabase>) -> Self {
         Self {
@@ -60,14 +61,14 @@ macro_rules! dyn_span {
 
 impl<State> save::Server<capnp::any_pointer::Owned> for HostImpl<State>
 where
-    State: ::capnp::traits::Owned,
+    State: capnp::traits::Owned,
     for<'a> capnp::dynamic_value::Builder<'a>: From<<State as capnp::traits::Owned>::Builder<'a>>,
 {
     async fn save(
         self: Rc<Self>,
         params: save::SaveParams<capnp::any_pointer::Owned>,
         mut results: save::SaveResults<capnp::any_pointer::Owned>,
-    ) -> Result<(), ::capnp::Error> {
+    ) -> Result<(), capnp::Error> {
         let sturdyref = crate::sturdyref::SturdyRefImpl::init(
             self.module_id,
             params.get()?.get_data()?,
@@ -88,14 +89,14 @@ where
 
 impl<State> host::Server<State> for HostImpl<State>
 where
-    State: ::capnp::traits::Owned,
+    State: capnp::traits::Owned,
     for<'a> capnp::dynamic_value::Builder<'a>: From<<State as capnp::traits::Owned>::Builder<'a>>,
 {
     async fn get_state(
         self: Rc<Self>,
         _: host::GetStateParams<State>,
         mut results: host::GetStateResults<State>,
-    ) -> Result<(), ::capnp::Error> {
+    ) -> Result<(), capnp::Error> {
         let span = tracing::debug_span!("host", id = self.module_id);
         let _enter = span.enter();
         tracing::debug!("get_state()");
@@ -110,7 +111,7 @@ where
         self: Rc<Self>,
         params: host::SetStateParams<State>,
         _: host::SetStateResults<State>,
-    ) -> Result<(), ::capnp::Error> {
+    ) -> Result<(), capnp::Error> {
         let span = tracing::debug_span!("host", id = self.module_id);
         let _enter = span.enter();
         tracing::debug!("set_state()");
@@ -125,7 +126,7 @@ where
         &self,
         params: host::LogParams<State>,
         _: host::LogResults<State>,
-    ) -> Result<(), ::capnp::Error> {
+    ) -> Result<(), capnp::Error> {
 
         let params = params.get()?;
         let obj: capnp::dynamic_value::Reader = params.get_obj()?.into();

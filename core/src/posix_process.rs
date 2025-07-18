@@ -1,3 +1,5 @@
+use crate::capnp;
+
 #[cfg(not(windows))]
 pub fn spawn_process_native<'i, I>(
     source: &cap_std::fs::File,
@@ -367,7 +369,7 @@ impl PosixProcessImpl {
             }?;
 
             tracing::debug!("Process exited with status {:?}", r);
-            tx.send_replace(r.clone());
+            tx.send_replace(r);
             Ok(r.unwrap_or_default())
         };
         Result::Ok(Self::new(

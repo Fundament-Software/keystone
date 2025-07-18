@@ -1,3 +1,4 @@
+use crate::capnp;
 use crate::capnp::MessageSize;
 use crate::capnp::capability::Client;
 use crate::capnp::capability::Params;
@@ -105,21 +106,19 @@ impl Server for ProxyServer {
                     } else if cap.get_brand() == self.target.hook.get_brand() {
                         // Not a proxy, belongs to either side of the RPC connection, so doesn't need a proxy
                         cap
+                    } else if client.hook.is_local_client() {
+                        client.hook
                     } else {
-                        if client.hook.is_local_client() == true {
-                            client.hook
-                        } else {
-                            // Not a proxy, belongs to some other RPC connection, needs a proxy
-                            self.set
-                                .borrow_mut()
-                                .new_client(ProxyServer::new(
-                                    cap,
-                                    self.set.clone(),
-                                    self.log.clone(),
-                                    self.snowflake.clone(),
-                                ))
-                                .hook
-                        }
+                        // Not a proxy, belongs to some other RPC connection, needs a proxy
+                        self.set
+                            .borrow_mut()
+                            .new_client(ProxyServer::new(
+                                cap,
+                                self.set.clone(),
+                                self.log.clone(),
+                                self.snowflake.clone(),
+                            ))
+                            .hook
                     },
                 )
             } else {

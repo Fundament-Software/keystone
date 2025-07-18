@@ -118,7 +118,9 @@ use cap_std::io_lifetimes::raw::{FromRawFilelike, RawFilelike};
 use capnp_macros::capnproto_rpc;
 use eyre::Result;
 use std::rc::Rc;
-use tokio::io::{AsyncWriteExt, ReadHalf, WriteHalf};
+use tokio::io::AsyncWriteExt;
+#[cfg(windows)]
+use tokio::io::{ReadHalf, WriteHalf};
 #[cfg(windows)]
 use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
 #[cfg(not(windows))]
@@ -214,7 +216,10 @@ pub struct PosixProcessImpl {
     #[cfg(not(windows))]
     pub stdin: Rc<Mutex<Option<tokio::net::unix::OwnedWriteHalf>>>,
     pub(crate) process: AtomicTake<BoxFuture<'static, Result<ExitStatus>>>,
+    #[cfg(windows)]
     pub(crate) stdout: AtomicTake<LocalBoxFuture<'static, Result<ReadHalf<NamedPipeServer>>>>,
+    #[cfg(not(windows))]
+    pub(crate) stdout: AtomicTake<LocalBoxFuture<'static, Result<tokio::net::unix::OwnedReadHalf>>>,
     pub(crate) stderr: AtomicTake<LocalBoxFuture<'static, Result<usize>>>,
     pub(crate) exitcode: watch::Receiver<Option<ExitStatus>>,
     pub(crate) killsender: AtomicTake<tokio::sync::oneshot::Sender<()>>,
@@ -227,7 +232,11 @@ impl PosixProcessImpl {
         #[cfg(windows)] stdin: Option<WriteHalf<NamedPipeServer>>,
         #[cfg(not(windows))] stdin: Option<tokio::net::unix::OwnedWriteHalf>,
         process: BoxFuture<'static, Result<ExitStatus>>,
-        stdout: LocalBoxFuture<'static, Result<ReadHalf<NamedPipeServer>>>,
+        #[cfg(windows)] stdout: LocalBoxFuture<'static, Result<ReadHalf<NamedPipeServer>>>,
+        #[cfg(not(windows))] stdout: LocalBoxFuture<
+            'static,
+            Result<tokio::net::unix::OwnedReadHalf>,
+        >,
         stderr: LocalBoxFuture<'static, Result<usize>>,
         killsender: tokio::sync::oneshot::Sender<()>,
         exitcode: watch::Receiver<Option<ExitStatus>>,

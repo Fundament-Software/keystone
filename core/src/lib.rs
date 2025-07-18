@@ -29,6 +29,7 @@ use atomic_take::AtomicTake;
 use caplog::capnp::any_pointer::Owned as any_pointer;
 use caplog::capnp::capability::FromServer;
 use caplog::capnp::traits::Owned;
+#[cfg(windows)]
 use caplog::capnp_rpc::tokio::io::{ReadHalf, WriteHalf};
 #[cfg(windows)]
 use caplog::capnp_rpc::tokio::net::windows::named_pipe::{ClientOptions, NamedPipeClient};

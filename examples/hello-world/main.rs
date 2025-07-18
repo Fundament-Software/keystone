@@ -52,6 +52,7 @@ impl keystone::Module<hello_world_capnp::config::Owned> for HelloWorldImpl {
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(feature = "tracing")]
     tracing_subscriber::fmt()
         .with_max_level(tracing::Level::DEBUG)
         .with_writer(std::io::stderr)

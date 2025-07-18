@@ -349,7 +349,7 @@ pub fn test_harness<F: Future<Output = eyre::Result<()>> + 'static>(
     let pool = tokio::task::LocalSet::new();
     let fut = pool.run_until(async move {
         tokio::time::timeout(
-            tokio::time::Duration::from_secs(500000),
+            tokio::time::Duration::from_secs(5),
             tokio::task::spawn_local(f(message)),
         )
         .await
@@ -357,9 +357,9 @@ pub fn test_harness<F: Future<Output = eyre::Result<()>> + 'static>(
 
     let runtime = tokio::runtime::Runtime::new()?;
     let result = runtime.block_on(fut);
-    //runtime.shutdown_timeout(std::time::Duration::from_millis(20000000));
-    if result.unwrap().unwrap().is_err() {
-        panic!("Test took too long!");
+    runtime.shutdown_timeout(std::time::Duration::from_millis(100));
+    if let Err(e) = result.unwrap().unwrap() {
+        panic!("{e}");
     }
 
     Ok(())

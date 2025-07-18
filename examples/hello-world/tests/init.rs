@@ -3,6 +3,7 @@ use keystone::{capnp, tokio};
 
 #[test]
 fn test_hello_world_init() -> eyre::Result<()> {
+    #[cfg(feature = "tracing")]
     tracing_subscriber::fmt()
         .with_max_level(tracing::Level::DEBUG)
         .with_ansi(true)

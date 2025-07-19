@@ -1,5 +1,5 @@
-use crate::capnp::any_pointer::Owned as any_pointer;
-use crate::capnp::{self, dynamic_struct, dynamic_value};
+use caplog::capnp::any_pointer::Owned as any_pointer;
+use caplog::capnp::{self, dynamic_struct, dynamic_value};
 use circular_buffer::CircularBuffer;
 use clap::{Parser, Subcommand, ValueEnum};
 use crossterm::event::KeyCode::Char;
@@ -1214,6 +1214,8 @@ impl Tui<'_> {
                     }
                 }
                 TabPage::Interface => {
+                    use caplog::capnp::private::capability::ClientHook;
+
                     if let Some(row) = self.keystone.table_state.selected() {
                         let desc = &mut self.instance.cap_functions[row as usize];
 
@@ -1230,11 +1232,7 @@ impl Tui<'_> {
                                         .as_ref()
                                         .unwrap()
                                         .api
-                                        .as_ref()
-                                        .unwrap()
-                                        .pipeline
-                                        .get_api()
-                                        .as_cap(),
+                                        .add_ref(),
                                     ModuleOrCap::Cap(c) => c.cap.clone(),
                                 };
                                 let module_id = match &desc.module_or_cap {

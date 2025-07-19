@@ -1,4 +1,3 @@
-use crate::capnp::capability::RemotePromise;
 use crate::capnp::{self, dynamic_list, dynamic_value};
 use crate::capnp::{any_pointer::Owned as any_pointer, dynamic_struct};
 use crate::capnp_rpc::queued;
@@ -411,16 +410,8 @@ pub struct ModuleInstance {
     pub(crate) process: Option<SpawnProcess>,
     pub(crate) bootstrap: Option<module_start::Client<any_pointer, any_pointer>>,
     pub pause: tokio::sync::mpsc::Sender<bool>,
-    pub api: Option<
-        RemotePromise<
-            crate::spawn_capnp::process::get_api_results::Owned<
-                any_pointer,
-                module_error::Owned<any_pointer>,
-            >,
-        >,
-    >,
     pub state: ModuleState,
-    pub queue: queued::Client,
+    pub api: queued::Client,
     pub dyn_schema: Option<capnp::schema::DynamicSchema>,
 }
 
@@ -465,11 +456,10 @@ impl ModuleInstance {
     }
 
     fn reset(&mut self) {
-        self.api = None;
         self.bootstrap = None;
         self.process = None;
         self.program = None;
-        self.queue = queued::Client::new(None);
+        self.api = queued::Client::new(None);
         let (empty_send, _) = tokio::sync::mpsc::channel(1);
         self.pause = empty_send;
     }

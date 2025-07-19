@@ -268,7 +268,7 @@ impl Keystone {
             .get_mut(&id)
             .ok_or(Error::ModuleNotFound(id))?;
         capnp_rpc::queued::ClientInner::resolve(
-            &module.queue.inner,
+            &module.api.inner,
             Ok(api.pipeline.get_api().as_cap()),
         );
         module.state = ModuleState::Ready;
@@ -326,9 +326,8 @@ impl Keystone {
                             program: None,
                             process: None,
                             bootstrap: None,
-                            api: None,
                             state: ModuleState::NotStarted,
-                            queue: capnp_rpc::queued::Client::new(None),
+                            api: capnp_rpc::queued::Client::new(None),
                             pause: empty_send.clone(),
                             dyn_schema: None,
                         },
@@ -348,7 +347,7 @@ impl Keystone {
             clients.extend(
                 modules
                     .iter()
-                    .map(|(id, instance)| (*id, instance.queue.add_ref())),
+                    .map(|(id, instance)| (*id, instance.api.add_ref())),
             );
 
             clients.insert(
@@ -524,7 +523,7 @@ impl Keystone {
                             .namemap
                             .get(&k)
                             .ok_or(capnp::Error::failed("couldn't find module!".into()))?;
-                        self.create_proxy(self.modules[id].queue.add_ref()).hook
+                        self.create_proxy(self.modules[id].api.add_ref()).hook
                     },
                 )))
             }
@@ -593,7 +592,7 @@ impl Keystone {
     ) -> Result<Pin<Box<dyn Future<Output = Result<()>>>>> {
         let module = modules.get_mut(&id).ok_or(Error::ModuleNotFound(id))?;
         module.state = ModuleState::StartFailure;
-        capnp_rpc::queued::ClientInner::resolve(&module.queue.inner, Err(e.clone()));
+        capnp_rpc::queued::ClientInner::resolve(&module.api.inner, Err(e.clone()));
         tracing::error!(
             "Module {} failed to start with error {}",
             module.name,
@@ -704,7 +703,7 @@ impl Keystone {
         let module = self.modules.get_mut(&id).ok_or(Error::ModuleNotFound(id))?;
         let p = process.get_api_request().send();
         capnp_rpc::queued::ClientInner::resolve(
-            &module.queue.inner,
+            &module.api.inner,
             Ok(p.pipeline.get_api().as_cap()),
         );
 
@@ -756,7 +755,6 @@ impl Keystone {
         module.program = Some(program);
         module.bootstrap = inner.borrow_mut().bootstrap.take();
         module.pause = inner.borrow_mut().pause.clone();
-        module.api = Some(p);
         module.state = ModuleState::Ready;
 
         let x = inner
@@ -881,15 +879,8 @@ impl Keystone {
             .get(module)
             .ok_or(Error::ModuleNameNotFound(module.into()))?;
         let module = self.modules.get(id).ok_or(Error::ModuleNotFound(*id))?;
-        let pipe = module
-            .api
-            .as_ref()
-            .ok_or(Error::DeferredNotFound("api ref".into()))?
-            .pipeline
-            .get_api()
-            .as_cap();
 
-        Ok(capnp::capability::FromClientHook::new(pipe))
+        Ok(capnp::capability::FromClientHook::new(module.api.add_ref()))
     }
     pub fn create_proxy(&self, hook: Box<dyn ClientHook>) -> capnp::capability::Client {
         self.proxy_set.borrow_mut().new_client(ProxyServer::new(
@@ -1095,9 +1086,7 @@ pub(crate) fn init_rpc_system<
     let mut api_request = bootstrap.start_request();
     api_request.get().init_config().set_as(config)?;
 
-    let api = api_request.send();
-
-    Ok((rpc_system, bootstrap, disconnector, api))
+    Ok((rpc_system, bootstrap, disconnector, api_request.send()))
 }
 
 /// This extends the capability server set so it can store an AnyPointer version of a client, but retrieve it as a specialized client type

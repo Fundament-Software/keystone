@@ -78,17 +78,12 @@ pub trait Module<Config: capnp::traits::Owned>: Sized {
 }
 
 #[allow(clippy::type_complexity)]
-pub struct ModuleImpl<
-    Config: 'static + capnp::traits::Owned,
-    Impl: 'static + Module<Config>,
-    API: 'static + for<'c> capnp::traits::Owned<Reader<'c>: FromServer<Impl>>,
-> {
-    bootstrap: std::cell::OnceCell<keystone_capnp::host::Client<any_pointer>>,
+pub struct ModuleImpl<Config: 'static + capnp::traits::Owned, Impl: 'static + Module<Config>> {
+    bootstrap: capnp_rpc::queued::Client,
     disconnector: AtomicTake<oneshot::Sender<()>>,
-    inner: OnceCell<Rc<Impl>>,
+    startsignal: AtomicTake<oneshot::Sender<()>>,
+    inner_impl: OnceCell<Rc<Impl>>,
     phantom: PhantomData<Config>,
-    phantomapi: PhantomData<API>,
-    sender: AtomicTake<oneshot::Sender<()>>,
 }
 
 #[capnproto_rpc(module_start)]
@@ -96,35 +91,38 @@ impl<
     Config: 'static + capnp::traits::Owned,
     Impl: 'static + Module<Config>,
     API: 'static + for<'c> capnp::traits::Owned<Reader<'c>: capnp::capability::FromServer<Impl>>,
-> module_start::Server<Config, API> for ModuleImpl<Config, Impl, API>
+> module_start::Server<Config, API> for ModuleImpl<Config, Impl>
 {
     async fn start(self: Rc<Self>, config: Reader) -> capnp::Result<()> {
-        if let Some(sender) = self.sender.take() {
+        use capnp::capability::FromClientHook;
+        use capnp::private::capability::ClientHook;
+
+        if let Some(sender) = self.startsignal.take() {
             let _ = sender.send(());
         }
+
         tracing::debug!("Constructing module implementation");
-        let bootstrap_ref = self.bootstrap.get();
-        if let Some(bootstrap) = bootstrap_ref {
-            let inner = self
-                .inner
-                .get_or_try_init(|| async {
-                    Ok::<Rc<Impl>, capnp::Error>(Rc::new(
-                        Impl::new(config, bootstrap.clone()).await?,
-                    ))
-                })
-                .await?;
-            let api: API::Reader<'_> = capnp::capability::FromClientHook::new(Box::new(
-                capnp_rpc::local::Client::new(API::Reader::from_rc(inner.clone())),
-            ));
-            results.get().set_api(api)
-        } else {
-            Err(capnp::Error::failed("Bootstrap API did not exist?! Was start() called before the RPC connection was fully established?".into()))
-        }
+        let inner = self
+            .inner_impl
+            .get_or_try_init(|| async {
+                Ok::<Rc<Impl>, capnp::Error>(Rc::new(
+                    Impl::new(
+                        config,
+                        keystone_capnp::host::Client::<any_pointer>::new(self.bootstrap.add_ref()),
+                    )
+                    .await?,
+                ))
+            })
+            .await?;
+        let api: API::Reader<'_> = capnp::capability::FromClientHook::new(Box::new(
+            capnp_rpc::local::Client::new(API::Reader::from_rc(inner.clone())),
+        ));
+        results.get().set_api(api)
     }
     async fn stop(self: Rc<Self>) -> capnp::Result<()> {
         tracing::debug!("Module recieved stop request");
         if let Some(tx) = self.disconnector.take() {
-            if let Some(inner) = self.inner.get() {
+            if let Some(inner) = self.inner_impl.get() {
                 inner.stop().await?;
             }
 
@@ -157,12 +155,11 @@ pub async fn start<
     let (tx, rx) = oneshot::channel::<()>();
 
     let module_impl = Rc::new(ModuleImpl {
-        bootstrap: Default::default(),
+        bootstrap: capnp_rpc::queued::Client::new(None),
         disconnector: AtomicTake::new(tx),
-        inner: Default::default(),
+        startsignal: AtomicTake::new(sender),
+        inner_impl: Default::default(),
         phantom: PhantomData,
-        phantomapi: PhantomData,
-        sender: AtomicTake::new(sender),
     });
 
     let module_client: module_start::Client<Config, API> =
@@ -177,11 +174,15 @@ pub async fn start<
     let mut rpc_system = RpcSystem::new(Box::new(network), Some(module_client.clone().client));
     let disconnector = rpc_system.get_disconnector();
 
-    let borrow = module_impl.as_ref();
-    borrow
-        .bootstrap
-        .set(rpc_system.bootstrap(rpc_twoparty_capnp::Side::Client))
-        .unwrap();
+    capnp_rpc::queued::ClientInner::resolve(
+        &module_impl.bootstrap.inner,
+        Ok(rpc_system
+            .bootstrap::<keystone_capnp::host::Client<any_pointer>>(
+                rpc_twoparty_capnp::Side::Client,
+            )
+            .client
+            .hook),
+    );
 
     tokio::task::spawn_local(async move {
         if tokio::time::timeout(tokio::time::Duration::from_secs(5), recv)

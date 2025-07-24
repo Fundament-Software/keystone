@@ -70,6 +70,10 @@ pub async fn drive_stream_with_error(
 
 #[test]
 fn test_hello_world_empty() -> eyre::Result<()> {
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::DEBUG)
+        .with_ansi(true)
+        .init();
     keystone::test_harness(
         &keystone::build_module_config(
             "Hello World",
@@ -81,6 +85,7 @@ fn test_hello_world_empty() -> eyre::Result<()> {
                 message
                     .get_root_as_reader::<keystone::keystone_capnp::keystone_config::Reader>()?,
                 false,
+                None,
             )?;
 
             instance
@@ -90,7 +95,6 @@ fn test_hello_world_empty() -> eyre::Result<()> {
                         .get_root_as_reader::<keystone::keystone_capnp::keystone_config::Reader>(
                         )?,
                     &rpc_systems,
-                    keystone::Keystone::passthrough_stderr,
                 )
                 .await?;
 

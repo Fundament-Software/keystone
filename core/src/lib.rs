@@ -12,9 +12,10 @@ pub mod host;
 pub mod http;
 mod keystone;
 pub mod module;
+mod posix;
 mod posix_module;
 mod posix_process;
-mod posix_spawn;
+mod process;
 pub mod proxy;
 pub mod scheduler;
 pub mod sqlite;
@@ -313,14 +314,15 @@ pub async fn test_create_keystone(
     let (mut instance, rpc_systems) = Keystone::new(
         message.get_root_as_reader::<keystone_config::Reader>()?,
         false,
+        None,
     )?;
 
+    let curdir = std::env::current_dir()?;
     instance
         .init(
-            &std::env::current_dir()?,
+            &curdir,
             message.get_root_as_reader::<keystone_config::Reader>()?,
             &rpc_systems,
-            Keystone::passthrough_stderr,
         )
         .await?;
 
@@ -416,7 +418,7 @@ pub fn test_module_harness<
     let module = module.to_string();
     let b = pool.run_until(pool.spawn_local(async move {
         let (mut instance, api, mut rpc_systems): (Keystone, API::Reader<'_>, RpcSystemSet) =
-            Keystone::init_single_module(&source, &module, server_reader, server_writer)
+            Keystone::init_single_module(&source, &module, server_reader, server_writer, None)
                 .await
                 .unwrap();
 

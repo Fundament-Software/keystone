@@ -80,6 +80,7 @@ atomicbox = "0.4"
 convert_case = { version = "0.8", optional = true }
 memchr = "2.7"
 libc = "0.2"
+parking_lot = "0.12"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2"

@@ -12,7 +12,7 @@ fn test_hello_world_proxy() -> eyre::Result<()> {
         |message| async move {
             let (mut instance, mut rpc_systems) =
                 keystone::test_create_keystone(&message).await.unwrap();
-            let module = &instance.modules[&instance.namemap["Hello World"]];
+            let module = &instance.instances[&instance.namemap["Hello World"]];
             let pipe = instance.create_proxy(module.api.add_ref()).hook;
 
             let hello_client: hello_world::hello_world_capnp::root::Client =

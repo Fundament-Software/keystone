@@ -8,7 +8,6 @@ use eyre::Result;
 use futures_util::{FutureExt, StreamExt};
 use keystone::CapnpType;
 use keystone::Keystone;
-use keystone::LogCapture;
 use keystone::ModuleState;
 use keystone::RpcSystemSet;
 use keystone::byte_stream::ByteStreamBufferImpl;
@@ -22,7 +21,7 @@ use std::io::Write;
 use std::path::Path;
 use std::pin::Pin;
 use std::{convert::Into, fs, io::Read};
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio_util::sync::CancellationToken;
 
@@ -178,40 +177,25 @@ fn keystone_startup(
     interactive: bool,
 ) -> Result<()> {
     let pool = tokio::task::LocalSet::new();
-    let (mut instance, mut rpc_systems) = Keystone::new(message, false)?;
+    let log = if interactive {
+        Some(mpsc::unbounded_channel::<(u64, String)>())
+    } else {
+        None
+    };
+
+    let (mut instance, mut rpc_systems) = Keystone::new(message, false, log.map(|(tx, _)| tx))?;
 
     let fut = pool.run_until(async move {
         // TODO: Eventually the terminal interface should be factored out into a module using a monitoring capability.
-        if interactive {
-            let (log_tx, log_rx) = mpsc::unbounded_channel::<(u64, String)>();
-            let log_tx_copy = log_tx.clone();
-            instance
-                .init_custom(dir, message.reborrow(), &rpc_systems, move |id| {
-                    let tx = log_tx_copy.clone();
-                    log_capture(id, tx)
-                })
-                .await?;
-            if let Err(e) = run_interface(
-                &mut instance,
-                &mut rpc_systems,
-                dir,
-                message,
-                log_rx,
-                log_tx,
-            )
-            .await
+        if let Some((_, log_rx)) = log {
+            instance.init(dir, message.reborrow(), &rpc_systems).await?;
+            if let Err(e) =
+                run_interface(&mut instance, &mut rpc_systems, dir, message, log_rx).await
             {
                 eprintln!("{}", e.to_string());
             }
         } else {
-            instance
-                .init(
-                    dir,
-                    message.reborrow(),
-                    &rpc_systems,
-                    keystone::Keystone::passthrough_stderr,
-                )
-                .await?;
+            instance.init(dir, message.reborrow(), &rpc_systems).await?;
             tokio::select! {
                 _ = drive_stream_with_error("Module crashed!", &mut rpc_systems) => (),
                 r = tokio::signal::ctrl_c() => r.expect("failed to listen to shutdown signal"),
@@ -321,7 +305,6 @@ struct Tui<'a> {
     dir: &'a Path,
     config: keystone_config::Reader<'a>,
     list_state: ListState,
-    log_tx: UnboundedSender<(u64, String)>,
     holding: Vec<ParamResultType>,
     input: RowCol,
     buffer: String, //TODO optimize input stuff
@@ -997,7 +980,7 @@ impl Tui<'_> {
     ) -> Result<keystone_config::module_config::Reader<'a, any_pointer>> {
         let modules = config.get_modules()?;
         for s in modules.iter() {
-            if instance.get_id(s)? == id {
+            if instance.gen_id(s)? == id {
                 return Ok(s);
             }
         }
@@ -1057,7 +1040,6 @@ impl Tui<'_> {
                                                     self.dir,
                                                     self.config.get_cap_table()?,
                                                     m.trace.as_str().to_ascii_lowercase(),
-                                                    log_capture(id, tx),
                                                 )
                                                 .await?,
                                         ) {
@@ -1094,7 +1076,6 @@ impl Tui<'_> {
                                     }
                                     2 => {
                                         let id = m.id;
-                                        let tx = self.log_tx.clone();
                                         let log_state = m.trace.as_str().to_ascii_lowercase();
                                         if let Some(x) = self.instance.modules.get_mut(&id) {
                                             x.stop(self.instance.timeout).await?;
@@ -1114,7 +1095,6 @@ impl Tui<'_> {
                                                     self.dir,
                                                     self.config.get_cap_table()?,
                                                     log_state,
-                                                    log_capture(id, tx),
                                                 )
                                                 .await?,
                                         ) {
@@ -1150,7 +1130,6 @@ impl Tui<'_> {
                                     }
                                     2 => {
                                         let id = m.id;
-                                        let tx = self.log_tx.clone();
                                         let log_state = m.trace.as_str().to_ascii_lowercase();
                                         if let Some(x) = self.instance.modules.get_mut(&id) {
                                             x.stop(self.instance.timeout).await?;
@@ -1170,7 +1149,6 @@ impl Tui<'_> {
                                                     self.dir,
                                                     self.config.get_cap_table()?,
                                                     log_state,
-                                                    log_capture(id, tx),
                                                 )
                                                 .await?,
                                         ) {
@@ -1882,7 +1860,6 @@ async fn event_loop<B: ratatui::prelude::Backend>(
     mut event_rx: UnboundedReceiver<TerminalEvent>,
     rpc_tx: UnboundedSender<Pin<Box<dyn Future<Output = Result<()>>>>>,
     mut log_rx: UnboundedReceiver<(u64, String)>,
-    log_tx: UnboundedSender<(u64, String)>,
     cancellation_token: CancellationToken,
     dir: &Path,
     config: keystone_config::Reader<'_>,
@@ -1909,7 +1886,6 @@ async fn event_loop<B: ratatui::prelude::Backend>(
         dir,
         config,
         list_state: ListState::default(),
-        log_tx,
         holding: Vec::new(),
         input: RowCol { row: 0, col: 0 },
         buffer: String::new(),
@@ -2042,49 +2018,12 @@ async fn event_stream(
     Ok(())
 }
 
-fn log_capture(id: u64, log_tx: UnboundedSender<(u64, String)>) -> impl LogCapture {
-    move |mut input: ByteStreamBufferImpl| {
-        let send = log_tx.clone();
-        async move {
-            let mut buf = [0u8; 1024];
-            loop {
-                let mut line = String::new();
-                loop {
-                    let len = input.read(&mut buf).await?;
-
-                    if len == 0 {
-                        break;
-                    }
-
-                    // If we find a newline, write up to the newline, shift the buffer over, then break
-                    if let Some(n) = memchr::memchr(b'\n', &buf[..len]) {
-                        if let Ok(s) = std::str::from_utf8(&buf[..n]) {
-                            line += s;
-                        }
-                        buf.copy_within(n..len, 0);
-                        break;
-                    } else if let Ok(s) = std::str::from_utf8(&buf[..len]) {
-                        line += s;
-                    }
-                }
-                // This IS the log function so we can't really do anything if this errors
-                if line.is_empty() {
-                    break;
-                }
-                let _ = send.send((id, line));
-            }
-            Ok::<(), eyre::Report>(())
-        }
-    }
-}
-
 async fn run_interface(
     instance: &mut Keystone,
     rpc_systems: &mut keystone::RpcSystemSet,
     dir: &Path,
     config: keystone_config::Reader<'_>,
     log_rx: UnboundedReceiver<(u64, String)>,
-    log_tx: UnboundedSender<(u64, String)>,
 ) -> Result<()> {
     let mut terminal = ratatui::init();
     terminal.clear()?;
@@ -2103,7 +2042,6 @@ async fn run_interface(
             event_rx,
             rpc_tx,
             log_rx,
-            log_tx,
             cancellation_token.clone(),
             dir,
             config

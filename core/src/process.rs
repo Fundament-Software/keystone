@@ -1,8 +1,10 @@
-#[cfg(windows)]
 use std::process::Stdio;
 use std::rc::Rc;
 
 use tokio::sync::{oneshot, watch};
+
+#[cfg(not(windows))]
+use tokio::net::UnixListener;
 
 use crate::capnp;
 use crate::keystone::CapnpResult;
@@ -11,11 +13,9 @@ use crate::sqlite::SqliteDatabase;
 #[cfg(not(windows))]
 fn native_command(
     source: &cap_std::fs::File,
-    current_dir: Option<cap_std::fs::Dir>,
+    current_dir: Option<&cap_std::fs::Dir>,
 ) -> tokio::process::Command {
     use cap_std::io_lifetimes::raw::AsRawFilelike;
-    use std::ffi::OsString;
-    use std::str::FromStr;
 
     let fd = source.as_raw_filelike();
     let path = format!("/proc/{}/fd/{}", std::process::id(), fd);
@@ -66,7 +66,7 @@ fn native_command(
 }
 
 #[cfg(not(windows))]
-pub fn create_ipc() -> Result<(UnixListener, String, tempfile::TempDir)> {
+pub fn create_ipc() -> std::io::Result<(UnixListener, String, tempfile::TempDir)> {
     let random = rand::random::<u8>() as char; //TODO security and better name
     let dir = tempfile::tempdir()?;
     let pipe_name = dir
@@ -79,7 +79,6 @@ pub fn create_ipc() -> Result<(UnixListener, String, tempfile::TempDir)> {
     Ok((server, pipe_name, dir))
 }
 
-#[cfg(windows)]
 pub fn spawn_process<'i, I>(
     source: &cap_std::fs::File,
     args: I,

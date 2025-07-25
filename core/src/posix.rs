@@ -135,7 +135,7 @@ pub fn get_exit_code(status: &ExitStatus) -> i32 {
     #[cfg(not(windows))]
     return status
         .code()
-        .unwrap_or_else(|| v.signal().unwrap_or(i32::MIN));
+        .unwrap_or_else(|| status.signal().unwrap_or(i32::MIN));
 
     #[cfg(windows)]
     return status.code().unwrap_or(i32::MIN);

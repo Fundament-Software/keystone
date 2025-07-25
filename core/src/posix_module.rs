@@ -20,6 +20,9 @@ use tokio::sync::OnceCell;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio_util::sync::CancellationToken;
 
+#[cfg(not(windows))]
+use tokio::net::UnixStream;
+
 pub struct PosixModuleProcessImpl<Fut: Future<Output = capnp::Result<ExitStatus>>> {
     process: Shared<Fut>,
     exit: OnceCell<ExitStatus>,

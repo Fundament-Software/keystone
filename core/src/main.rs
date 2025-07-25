@@ -20,8 +20,9 @@ use std::future::Future;
 use std::io::Write;
 use std::path::Path;
 use std::pin::Pin;
+use std::sync::atomic::Ordering;
 use std::{convert::Into, fs, io::Read};
-use tokio::io::{AsyncRead, AsyncReadExt};
+use tokio::io::AsyncRead;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio_util::sync::CancellationToken;
 
@@ -177,21 +178,20 @@ fn keystone_startup(
     interactive: bool,
 ) -> Result<()> {
     let pool = tokio::task::LocalSet::new();
-    let log = if interactive {
-        Some(mpsc::unbounded_channel::<(u64, String)>())
+    let (log_tx, log_rx) = if interactive {
+        let (tx, rx) = mpsc::unbounded_channel::<(u64, String)>();
+        (Some(tx), Some(rx))
     } else {
-        None
+        (None, None)
     };
 
-    let (mut instance, mut rpc_systems) = Keystone::new(message, false, log.map(|(tx, _)| tx))?;
+    let (mut instance, mut rpc_systems) = Keystone::new(message, false, log_tx)?;
 
     let fut = pool.run_until(async move {
         // TODO: Eventually the terminal interface should be factored out into a module using a monitoring capability.
-        if let Some((_, log_rx)) = log {
+        if let Some(rx) = log_rx {
             instance.init(dir, message.reborrow(), &rpc_systems).await?;
-            if let Err(e) =
-                run_interface(&mut instance, &mut rpc_systems, dir, message, log_rx).await
-            {
+            if let Err(e) = run_interface(&mut instance, &mut rpc_systems, dir, message, rx).await {
                 eprintln!("{}", e.to_string());
             }
         } else {
@@ -760,7 +760,7 @@ impl ratatui::widgets::Widget for &mut Tui<'_> {
                     if desc.type_id == 0 {
                         inner.push(Cell::from(desc.function_name.clone()));
                         widths.push(Constraint::Max(desc.function_name.len() as u16));
-                        if let ModuleOrCap::ModuleId(id) = &desc.module_or_cap {
+                        if let ModuleOrCap::InstanceId(id) = &desc.module_or_cap {
                             if let Some(m) = self.modules.get(id) {
                                 match m.state {
                                     ModuleState::NotStarted => {
@@ -980,7 +980,7 @@ impl Tui<'_> {
     ) -> Result<keystone_config::module_config::Reader<'a, any_pointer>> {
         let modules = config.get_modules()?;
         for s in modules.iter() {
-            if instance.gen_id(s)? == id {
+            if instance.get_id(s)? == id {
                 return Ok(s);
             }
         }
@@ -1025,27 +1025,32 @@ impl Tui<'_> {
                                 match m.selected.unwrap() {
                                     0 => {
                                         let id = m.id;
-                                        let tx = self.log_tx.clone();
                                         let s = Self::find_module_config(
                                             &self.config,
                                             &self.instance,
                                             id,
                                         )?;
 
+                                        let (finisher, finish) = tokio::sync::oneshot::channel();
+
                                         if let Err(t) = rpc_tx.send(
                                             self.instance
                                                 .init_module(
-                                                    id,
+                                                    self.instance.postgen_id(
+                                                        m.name.clone(),
+                                                        m.trace.as_str().to_ascii_lowercase(),
+                                                        finisher,
+                                                    )?,
                                                     s,
                                                     self.dir,
                                                     self.config.get_cap_table()?,
-                                                    m.trace.as_str().to_ascii_lowercase(),
+                                                    finish,
                                                 )
                                                 .await?,
                                         ) {
                                             tokio::try_join!(
                                                 self.instance
-                                                    .modules
+                                                    .instances
                                                     .get_mut(&m.id)
                                                     .unwrap()
                                                     .stop(self.instance.timeout),
@@ -1063,21 +1068,21 @@ impl Tui<'_> {
                             {
                                 match m.selected.unwrap() {
                                     0 => {
-                                        if let Some(x) = self.instance.modules.get_mut(&m.id) {
+                                        if let Some(x) = self.instance.instances.get_mut(&m.id) {
                                             x.stop(self.instance.timeout).await?;
                                             self.instance.cap_functions = Vec::new();
                                             self.input = RowCol { row: 0, col: 0 };
                                         }
                                     }
                                     1 => {
-                                        if let Some(x) = self.instance.modules.get_mut(&m.id) {
+                                        if let Some(x) = self.instance.instances.get_mut(&m.id) {
                                             x.pause(true).await?;
                                         }
                                     }
                                     2 => {
                                         let id = m.id;
                                         let log_state = m.trace.as_str().to_ascii_lowercase();
-                                        if let Some(x) = self.instance.modules.get_mut(&id) {
+                                        if let Some(x) = self.instance.instances.get_mut(&id) {
                                             x.stop(self.instance.timeout).await?;
                                             self.instance.cap_functions = Vec::new();
                                             self.input = RowCol { row: 0, col: 0 };
@@ -1087,20 +1092,26 @@ impl Tui<'_> {
                                             &self.instance,
                                             id,
                                         )?;
+
+                                        let (finisher, finish) = tokio::sync::oneshot::channel();
                                         if let Err(t) = rpc_tx.send(
                                             self.instance
                                                 .init_module(
-                                                    id,
+                                                    self.instance.postgen_id(
+                                                        m.name.clone(),
+                                                        log_state,
+                                                        finisher,
+                                                    )?,
                                                     s,
                                                     self.dir,
                                                     self.config.get_cap_table()?,
-                                                    log_state,
+                                                    finish,
                                                 )
                                                 .await?,
                                         ) {
                                             tokio::try_join!(
                                                 self.instance
-                                                    .modules
+                                                    .instances
                                                     .get_mut(&m.id)
                                                     .unwrap()
                                                     .stop(self.instance.timeout),
@@ -1117,21 +1128,21 @@ impl Tui<'_> {
                             ModuleState::Paused if m.selected.is_some() => {
                                 match m.selected.unwrap() {
                                     0 => {
-                                        if let Some(x) = self.instance.modules.get_mut(&m.id) {
+                                        if let Some(x) = self.instance.instances.get_mut(&m.id) {
                                             x.stop(self.instance.timeout).await?;
                                             self.instance.cap_functions = Vec::new();
                                             self.input = RowCol { row: 0, col: 0 };
                                         }
                                     }
                                     1 => {
-                                        if let Some(x) = self.instance.modules.get_mut(&m.id) {
+                                        if let Some(x) = self.instance.instances.get_mut(&m.id) {
                                             x.pause(false).await?;
                                         }
                                     }
                                     2 => {
                                         let id = m.id;
                                         let log_state = m.trace.as_str().to_ascii_lowercase();
-                                        if let Some(x) = self.instance.modules.get_mut(&id) {
+                                        if let Some(x) = self.instance.instances.get_mut(&id) {
                                             x.stop(self.instance.timeout).await?;
                                             self.instance.cap_functions = Vec::new();
                                             self.input = RowCol { row: 0, col: 0 };
@@ -1141,20 +1152,25 @@ impl Tui<'_> {
                                             &self.instance,
                                             id,
                                         )?;
+                                        let (finisher, finish) = tokio::sync::oneshot::channel();
                                         if let Err(t) = rpc_tx.send(
                                             self.instance
                                                 .init_module(
-                                                    id,
+                                                    self.instance.postgen_id(
+                                                        m.name.clone(),
+                                                        log_state,
+                                                        finisher,
+                                                    )?,
                                                     s,
                                                     self.dir,
                                                     self.config.get_cap_table()?,
-                                                    log_state,
+                                                    finish,
                                                 )
                                                 .await?,
                                         ) {
                                             tokio::try_join!(
                                                 self.instance
-                                                    .modules
+                                                    .instances
                                                     .get_mut(&m.id)
                                                     .unwrap()
                                                     .stop(self.instance.timeout),
@@ -1171,7 +1187,7 @@ impl Tui<'_> {
                             ModuleState::Closing if m.selected.is_some() => {
                                 match m.selected.unwrap() {
                                     0 => {
-                                        if let Some(x) = self.instance.modules.get_mut(&m.id) {
+                                        if let Some(x) = self.instance.instances.get_mut(&m.id) {
                                             x.kill().await;
                                             self.instance.cap_functions = Vec::new();
                                             self.input = RowCol { row: 0, col: 0 };
@@ -1203,9 +1219,9 @@ impl Tui<'_> {
                                     return Ok(());
                                 }
                                 let client = match &desc.module_or_cap {
-                                    ModuleOrCap::ModuleId(id) => self
+                                    ModuleOrCap::InstanceId(id) => self
                                         .instance
-                                        .modules
+                                        .instances
                                         .get(&id)
                                         .as_ref()
                                         .unwrap()
@@ -1213,17 +1229,13 @@ impl Tui<'_> {
                                         .add_ref(),
                                     ModuleOrCap::Cap(c) => c.cap.clone(),
                                 };
-                                let module_id = match &desc.module_or_cap {
-                                    ModuleOrCap::ModuleId(id) => id,
-                                    ModuleOrCap::Cap(c) => &c.module_id,
+                                let instance_id = match &desc.module_or_cap {
+                                    ModuleOrCap::InstanceId(id) => *id,
+                                    ModuleOrCap::Cap(c) => c.instance_id,
                                 };
-                                if let Some(dyn_schema) = &self
-                                    .instance
-                                    .modules
-                                    .get(&module_id)
-                                    .as_ref()
-                                    .unwrap()
-                                    .dyn_schema
+                                let path = &self.instance.instances[&instance_id].source;
+                                if let Some(dyn_schema) =
+                                    &self.instance.modules.get(path).map(|x| &x.dyn_schema)
                                 {
                                     let mut call =
                                         client.new_call(desc.type_id, desc.method_id, None);
@@ -1295,14 +1307,14 @@ impl Tui<'_> {
                                                 .clone()
                                             {
                                                 let parent_id = match &desc.module_or_cap {
-                                                    ModuleOrCap::Cap(c) => c.module_id.clone(),
-                                                    ModuleOrCap::ModuleId(id) => id.clone(),
+                                                    ModuleOrCap::Cap(c) => c.instance_id,
+                                                    ModuleOrCap::InstanceId(id) => *id,
                                                 };
                                                 if let Some(h) = &cap.hook {
                                                     let module_or_cap =
                                                         ModuleOrCap::Cap(CapnpHook {
                                                             cap: h.clone(),
-                                                            module_id: parent_id,
+                                                            instance_id: parent_id,
                                                         });
                                                     let func = FunctionDescription {
                                                         module_or_cap: module_or_cap.clone(),
@@ -1328,14 +1340,11 @@ impl Tui<'_> {
                                                     else {
                                                         todo!();
                                                     };
-                                                    let dyn_schema = self
-                                                        .instance
-                                                        .modules
-                                                        .get(&parent_id)
-                                                        .unwrap()
-                                                        .dyn_schema
-                                                        .as_ref()
-                                                        .unwrap();
+                                                    let parent_path =
+                                                        &self.instance.instances[&parent_id].source;
+                                                    let dyn_schema = &self.instance.modules
+                                                        [parent_path]
+                                                        .dyn_schema;
                                                     keystone::fill_function_descriptions(
                                                         &mut self.instance.cap_functions,
                                                         dyn_schema,
@@ -1866,7 +1875,7 @@ async fn event_loop<B: ratatui::prelude::Backend>(
 ) -> Result<()> {
     use sysinfo::{CpuRefreshKind, MemoryRefreshKind, RefreshKind, System};
 
-    let count = instance.modules.len() as u32;
+    let count = instance.instances.len() as u32;
     let mut app = Tui {
         tab: TabPage::Keystone,
         keystone: TuiKeystone {
@@ -1922,7 +1931,7 @@ async fn event_loop<B: ratatui::prelude::Backend>(
                     .modules
                     .iter()
                     .filter_map(|(id, _)| {
-                        if app.instance.modules.contains_key(id) {
+                        if app.instance.instances.contains_key(id) {
                             None
                         } else {
                             Some(*id)
@@ -1934,8 +1943,8 @@ async fn event_loop<B: ratatui::prelude::Backend>(
                     app.modules.remove(&id);
                 }
 
-                for (id, m) in &mut app.instance.modules {
-                    match m.state {
+                for (id, m) in &mut app.instance.instances {
+                    match ModuleState::try_from(m.state.load(Ordering::Relaxed)).unwrap() {
                         ModuleState::Ready | ModuleState::Paused => app.keystone.loaded += 1,
                         ModuleState::Initialized
                             if app.keystone.state == ModuleState::NotStarted =>
@@ -1946,7 +1955,8 @@ async fn event_loop<B: ratatui::prelude::Backend>(
                     }
                     if let Some(module) = app.modules.get_mut(id) {
                         module.name = m.name.clone();
-                        module.state = m.state;
+                        module.state =
+                            ModuleState::try_from(m.state.load(Ordering::Relaxed)).unwrap();
                     } else {
                         app.modules.insert(
                             *id,
@@ -1955,7 +1965,8 @@ async fn event_loop<B: ratatui::prelude::Backend>(
                                 cpu: CircularBuffer::new(),
                                 ram: CircularBuffer::new(),
                                 name: m.name.clone(),
-                                state: m.state,
+                                state: ModuleState::try_from(m.state.load(Ordering::Relaxed))
+                                    .unwrap(),
                                 selected: None,
                                 trace: tracing::Level::WARN,
                                 log: CircularBuffer::new(),

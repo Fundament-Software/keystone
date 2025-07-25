@@ -12,7 +12,8 @@ use crate::{
     module_capnp::module_start,
 };
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, derive_more::TryFrom)]
+#[try_from(repr)]
 #[repr(u8)]
 pub enum ModuleState {
     NotStarted,
@@ -43,14 +44,14 @@ impl std::fmt::Display for ModuleState {
 }
 #[derive(Clone)]
 pub enum ModuleOrCap {
-    ModuleId(u64),
+    InstanceId(u64),
     Cap(CapnpHook),
 }
 
 #[derive(Clone)]
 pub struct CapnpHook {
     pub cap: Box<dyn capnp::private::capability::ClientHook>,
-    pub module_id: u64, //Acquired from the schema, for getting the schema
+    pub instance_id: u64,
 }
 
 #[derive(Clone)]
@@ -397,7 +398,7 @@ pub struct FunctionDescription {
 //TODO potentially doesn't work for multiple of the same module
 impl std::hash::Hash for FunctionDescription {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        if let ModuleOrCap::ModuleId(id) = self.module_or_cap {
+        if let ModuleOrCap::InstanceId(id) = self.module_or_cap {
             id.hash(state);
         }
         self.function_name.hash(state);
@@ -413,7 +414,7 @@ impl Eq for FunctionDescription {}
 
 // Defines something that can spawn a ModuleInstance, which is usually a ModuleProgram
 pub struct ModuleSource {
-    pub module_id: u64,
+    pub schema_id: u64,
     pub(crate) program: ModuleProgram,
     pub dyn_schema: capnp::schema::DynamicSchema,
 }
@@ -421,7 +422,7 @@ pub struct ModuleSource {
 // Defines a particular module instance being tracked by Keystone
 pub struct ModuleInstance {
     //pub id: spawn_capnp::identifier::Client,
-    pub module_id: u64,
+    pub source: std::path::PathBuf,
     //pub instance_id: u64,
     pub name: String, // Simply stores id.to_string() so we don't need access to the id_set.
     // A module isn't always a process, but if it does have a process we need the ability to kill it
@@ -473,6 +474,7 @@ impl ModuleInstance {
     }
 
     fn reset(&mut self) {
+        self.process = None;
         self.bootstrap = None;
         self.api = queued::Client::new(None);
         self.pause.send_replace(false);
@@ -530,6 +532,7 @@ impl ModuleInstance {
                     Err(_) => self.kill().await,
                 }
             }
+
             self.reset();
             Ok(())
         }
@@ -539,6 +542,8 @@ impl ModuleInstance {
         if let Some(p) = self.process.as_ref() {
             tracing::warn!("Force killing {}", &self.name);
             let _ = p.kill_request().send().promise.await;
+        } else {
+            panic!("Tried to kill a module that doesn't have a process!")
         }
 
         self.state

@@ -133,7 +133,7 @@ where
         let params = params.get()?;
         let obj: capnp::dynamic_value::Reader = params.get_obj()?.into();
         let level = params.get_level()?;
-        let span = dyn_span!(level, "[REMOTE]", id = self.module_id);
+        let span = dyn_span!(level, "[REMOTE]", id = self.instance_id);
         let _enter = span.enter();
         dyn_event!(level, "{:?}", obj);
 

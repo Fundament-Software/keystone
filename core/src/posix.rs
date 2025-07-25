@@ -77,7 +77,9 @@ impl local_posix_program::Server for crate::KeystoneRoot {
     async fn file(self: Rc<Self>, file: Client) {
         let span = tracing::span!(tracing::Level::DEBUG, "LocalPosixProgram::file");
         let _enter = span.enter();
-        if let Some(handle) = self.file_server.borrow().get_file_handle(&file).await {
+
+        let resolved = capnp::capability::get_resolved_cap(file).await;
+        if let Some(handle) = self.file_server.borrow().get_file_handle(&resolved) {
             let program = PosixProgramImpl::new(handle);
 
             let program_client: PosixProgramClient =

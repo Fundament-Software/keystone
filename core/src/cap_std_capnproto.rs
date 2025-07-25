@@ -32,11 +32,10 @@ impl AmbientAuthorityImpl {
         Default::default()
     }
 
-    pub async fn get_file_handle(&self, client: &file::Client) -> Option<u64> {
+    pub fn get_file_handle(&self, client: &file::Client) -> Option<u64> {
         Some(
             self.file_set
-                .get_local_server(client)
-                .await?
+                .get_local_server_of_resolved(client)?
                 .file
                 .as_raw_filelike() as u64,
         )

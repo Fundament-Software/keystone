@@ -124,41 +124,39 @@ impl PosixModuleProgramImpl {
 
 use crate::spawn_capnp::program::{SpawnParams, SpawnResults};
 
-fn log_capture<Input: tokio::io::AsyncRead + Unpin + 'static>(
+async fn log_capture<Input: tokio::io::AsyncRead + Unpin + 'static>(
     mut input: Input,
     id: u64,
     send: UnboundedSender<(u64, String)>,
-) -> impl Future<Output = std::io::Result<()>> {
-    async move {
-        let mut buf = [0u8; 1024];
+) -> std::io::Result<()> {
+    let mut buf = [0u8; 1024];
+    loop {
+        let mut line = String::new();
         loop {
-            let mut line = String::new();
-            loop {
-                let len = input.read(&mut buf).await?;
+            let len = input.read(&mut buf).await?;
 
-                if len == 0 {
-                    break;
-                }
-
-                // If we find a newline, write up to the newline, shift the buffer over, then break
-                if let Some(n) = memchr::memchr(b'\n', &buf[..len]) {
-                    if let Ok(s) = std::str::from_utf8(&buf[..n]) {
-                        line += s;
-                    }
-                    buf.copy_within(n..len, 0);
-                    break;
-                } else if let Ok(s) = std::str::from_utf8(&buf[..len]) {
-                    line += s;
-                }
-            }
-            if line.is_empty() {
+            if len == 0 {
                 break;
             }
-            // This IS the log function so we can't really do anything if this errors
-            let _ = send.send((id, line));
+
+            // If we find a newline, write up to the newline, shift the buffer over, then break
+            if let Some(n) = memchr::memchr(b'\n', &buf[..len]) {
+                if let Ok(s) = std::str::from_utf8(&buf[..n]) {
+                    line += s;
+                }
+                buf.copy_within(n..len, 0);
+                break;
+            } else if let Ok(s) = std::str::from_utf8(&buf[..len]) {
+                line += s;
+            }
         }
-        Ok::<(), std::io::Error>(())
+        if line.is_empty() {
+            break;
+        }
+        // This IS the log function so we can't really do anything if this errors
+        let _ = send.send((id, line));
     }
+    Ok::<(), std::io::Error>(())
 }
 
 impl
@@ -186,14 +184,14 @@ impl
         let args = params.get()?.get_args()?;
         let id = params.get()?.get_id()?;
 
-        let identifier =
-            self.id_set
-                .borrow_mut()
-                .get_local_server(&id)
-                .await
-                .ok_or(capnp::Error::failed(
-                    "ID associated with module wasn't from this keystone instance!".into(),
-                ))?;
+        let resolved = capnp::capability::get_resolved_cap(id).await;
+        let identifier = self
+            .id_set
+            .borrow_mut()
+            .get_local_server_of_resolved(&resolved)
+            .ok_or(capnp::Error::failed(
+                "ID associated with module wasn't from this keystone instance!".into(),
+            ))?;
 
         let instance_id = identifier.id(&self.db).to_capnp()? as u64;
 
@@ -234,11 +232,11 @@ impl
         let (server, pipe_name) = crate::process::create_ipc()?;
 
         let workdir = if let Ok(aux) = args.get_aux() {
+            let resolved = capnp::capability::get_resolved_cap(aux).await;
             self.file_server
                 .borrow()
                 .dir_set
-                .get_local_server(&aux)
-                .await
+                .get_local_server_of_resolved(&resolved)
         } else {
             None
         };
@@ -282,14 +280,12 @@ impl
 
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
-        let streams = if let Some(tx) = self.log_tx.as_ref() {
-            Some((
+        let streams = self.log_tx.as_ref().map(|tx| {
+            (
                 log_capture(stdout.unwrap(), instance_id, tx.clone()),
                 log_capture(stderr.unwrap(), instance_id, tx.clone()),
-            ))
-        } else {
-            None
-        };
+            )
+        });
 
         let kill_token = CancellationToken::new();
         let recv = kill_token.clone();
@@ -396,8 +392,7 @@ impl
             exit: Default::default(),
         });
 
-        let module_process_client: process::Client<cap_pointer, module_error::Owned<any_pointer>> =
-            capnp_rpc::new_client_from_rc(module_process);
+        let module_process_client: AnyPointerClient = capnp_rpc::new_client_from_rc(module_process);
         results.get().set_result(module_process_client);
         Ok(())
     }

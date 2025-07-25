@@ -70,10 +70,12 @@ pub async fn drive_stream_with_error(
 
 #[test]
 fn test_hello_world_empty() -> eyre::Result<()> {
+    #[cfg(feature = "tracing")]
     tracing_subscriber::fmt()
         .with_max_level(tracing::Level::DEBUG)
         .with_ansi(true)
         .init();
+
     keystone::test_harness(
         &keystone::build_module_config(
             "Hello World",

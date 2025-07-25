@@ -51,7 +51,7 @@ pub trait DatabaseExt {
     ) -> Result<capnp::capability::RemotePromise<restore_results::Owned<any_pointer, any_pointer>>>;
     async fn add_sturdyref<R: SetPointerBuilder + Clone>(
         self: &Rc<Self>,
-        module_id: u64,
+        instance_id: u64,
         data: R,
         expires: Option<Microseconds>,
     ) -> Result<i64>;
@@ -332,64 +332,63 @@ impl DatabaseExt for SqliteDatabase {
             format!("SELECT data, module FROM {ROOT_STURDYREFS} WHERE id = ?1 AND expires > ?2",)
                 .as_str(),
         )?;
-        let promise = stmt.query_row(
-            params![id, cur_time()],
-            |row: &rusqlite::Row| -> Result<
-                capnp::capability::RemotePromise<restore_results::Owned<any_pointer, any_pointer>>,
-                rusqlite::Error,
-            > {
-                let id_ref = row.get_ref(1)?;
-                let module_id = id_ref.as_i64()? as u64;
-                let borrow = self.clients.borrow_mut();
-                let hook =
-                    borrow
-                        .get(&module_id)
-                        .ok_or(rusqlite::Error::IntegralValueOutOfRange(
-                            0,
-                            module_id as i64,
-                        ))?;
-                let client =
-                    crate::storage_capnp::restore::Client::<any_pointer>::new(hook.add_ref());
+        let promise =
+            stmt.query_row(
+                params![id, cur_time()],
+                |row: &rusqlite::Row| -> Result<
+                    capnp::capability::RemotePromise<
+                        restore_results::Owned<any_pointer, any_pointer>,
+                    >,
+                    rusqlite::Error,
+                > {
+                    let id_ref = row.get_ref(1)?;
+                    let instance_id = id_ref.as_i64()? as u64;
+                    let borrow = self.clients.borrow_mut();
+                    let hook = borrow.get(&instance_id).ok_or(
+                        rusqlite::Error::IntegralValueOutOfRange(0, instance_id as i64),
+                    )?;
+                    let client =
+                        crate::storage_capnp::restore::Client::<any_pointer>::new(hook.add_ref());
 
-                let v = row.get_ref(0)?;
-                let slice = [v.as_blob()?];
+                    let v = row.get_ref(0)?;
+                    let slice = [v.as_blob()?];
 
-                let message_reader =
-                    TypedReader::<_, any_pointer>::new(capnp::message::Reader::new(
-                        capnp::message::SegmentArray::new(&slice),
-                        ReaderOptions {
-                            traversal_limit_in_words: None,
-                            nesting_limit: 128,
-                        },
-                    ));
-                let reader: capnp::any_pointer::Reader = message_reader
-                    .get()
-                    .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+                    let message_reader =
+                        TypedReader::<_, any_pointer>::new(capnp::message::Reader::new(
+                            capnp::message::SegmentArray::new(&slice),
+                            ReaderOptions {
+                                traversal_limit_in_words: None,
+                                nesting_limit: 128,
+                            },
+                        ));
+                    let reader: capnp::any_pointer::Reader = message_reader
+                        .get()
+                        .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
 
-                let replacement = CapReplacement::new(reader, |value, builder| {
-                    get_replacement(self, value, builder)
-                });
+                    let replacement = CapReplacement::new(reader, |value, builder| {
+                        get_replacement(self, value, builder)
+                    });
 
-                let mut req = client.restore_request();
-                req.get()
-                    .init_data()
-                    .set_as(replacement)
-                    .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
-                Ok(req.send())
-            },
-        )?;
+                    let mut req = client.restore_request();
+                    req.get()
+                        .init_data()
+                        .set_as(replacement)
+                        .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+                    Ok(req.send())
+                },
+            )?;
         Ok(promise)
     }
 
     async fn add_sturdyref<R: SetPointerBuilder + Clone>(
         self: &Rc<Self>,
-        module_id: u64,
+        instance_id: u64,
         data: R,
         expires: Option<Microseconds>,
     ) -> Result<i64> {
         fn inner(
             conn: &rusqlite::Connection,
-            module_id: u64,
+            instance_id: u64,
             expire: i64,
             slice: &[u8],
         ) -> Result<i64> {
@@ -400,7 +399,7 @@ impl DatabaseExt for SqliteDatabase {
                 )
                 .as_str(),
             )?
-            .query_row(params![module_id, slice, expire], |row| row.get(0))?)
+            .query_row(params![instance_id, slice, expire], |row| row.get(0))?)
         }
 
         let expire = expires.unwrap_or(i64::MAX);
@@ -408,7 +407,7 @@ impl DatabaseExt for SqliteDatabase {
             let message = get_single_segment(self, &mut *alloc, data).await?;
             inner(
                 &self.connection,
-                module_id,
+                instance_id,
                 expire,
                 get_segment_slice(&message)?,
             )
@@ -417,7 +416,7 @@ impl DatabaseExt for SqliteDatabase {
             let message = get_single_segment(self, &mut alloc, data).await?;
             inner(
                 &self.connection,
-                module_id,
+                instance_id,
                 expire,
                 get_segment_slice(&message)?,
             )

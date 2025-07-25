@@ -5,7 +5,6 @@ fn test_indirect_init() -> eyre::Result<()> {
     #[cfg(feature = "tracing")]
     tracing_subscriber::fmt()
         .with_max_level(Level::DEBUG)
-        .with_writer(std::io::stderr)
         .with_ansi(true)
         .init();
 

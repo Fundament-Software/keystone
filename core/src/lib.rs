@@ -52,16 +52,8 @@ use std::os::fd::FromRawFd;
 use std::rc::Rc;
 use tempfile::NamedTempFile;
 use tokio::sync::OnceCell;
-use tracing_subscriber::filter::LevelFilter;
 
 include!(concat!(env!("OUT_DIR"), "/capnproto.rs"));
-
-pub fn fmt(filter: impl Into<LevelFilter>) -> impl Into<tracing::Dispatch> {
-    tracing_subscriber::fmt()
-        .with_max_level(filter)
-        .with_writer(std::io::stderr)
-        .with_ansi(true)
-}
 
 /// Trait that describes a keystone module
 #[allow(async_fn_in_trait)]
@@ -118,6 +110,7 @@ impl<
         let api: API::Reader<'_> = capnp::capability::FromClientHook::new(Box::new(
             capnp_rpc::local::Client::new(API::Reader::from_rc(inner.clone())),
         ));
+        tracing::debug!("Finished start()");
         results.get().set_api(api)
     }
     async fn stop(self: Rc<Self>) -> capnp::Result<()> {
@@ -132,12 +125,6 @@ impl<
         } else {
             Err(capnp::Error::from_kind(capnp::ErrorKind::Disconnected))
         }
-    }
-}
-
-impl std::fmt::Debug for keystone_capnp::host::Client<capnp::any_pointer::Owned> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        write!(f, "[{}]", self.client.hook.get_ptr())
     }
 }
 
@@ -236,7 +223,6 @@ pub async fn main<
             .with_env_filter(tracing_subscriber::EnvFilter::from_env(
                 "KEYSTONE_MODULE_LOG",
             ))
-            .with_writer(std::io::stderr)
             .with_ansi(true)
             .init();
     }

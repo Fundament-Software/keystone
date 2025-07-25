@@ -1707,6 +1707,7 @@ dependencies = [
  "color-eyre",
  "convert_case 0.8.0",
  "crossterm 0.29.0",
+ "derive_more",
  "eyre",
  "futures-util",
  "gethostname",

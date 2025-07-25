@@ -14,11 +14,11 @@ pub struct SturdyRefImpl {
 
 impl SturdyRefImpl {
     pub async fn init<R: SetPointerBuilder + Clone>(
-        module_id: u64,
+        instance_id: u64,
         data: R,
         db: Rc<SqliteDatabase>,
     ) -> eyre::Result<Self> {
-        let id = db.add_sturdyref(module_id, data, None).await.to_capnp()?;
+        let id = db.add_sturdyref(instance_id, data, None).await.to_capnp()?;
 
         Ok(Self { id, db })
     }

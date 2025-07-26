@@ -32,10 +32,10 @@ use caplog::capnp::capability::FromServer;
 use caplog::capnp::traits::Owned;
 #[cfg(windows)]
 use caplog::capnp_rpc::tokio::io::{ReadHalf, WriteHalf};
+#[cfg(not(windows))]
+use caplog::capnp_rpc::tokio::net::UnixStream;
 #[cfg(windows)]
 use caplog::capnp_rpc::tokio::net::windows::named_pipe::{ClientOptions, NamedPipeClient};
-#[cfg(not(windows))]
-use caplog::capnp_rpc::tokio::net::{UnixListener, UnixStream};
 use caplog::capnp_rpc::tokio::sync::oneshot;
 use caplog::capnp_rpc::{RpcSystem, rpc_twoparty_capnp, twoparty};
 use capnp_macros::capnproto_rpc;

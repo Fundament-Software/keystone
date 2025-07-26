@@ -13,8 +13,6 @@ use tokio::io::AsyncWriteExt;
 use tokio::io::{ReadHalf, WriteHalf};
 #[cfg(windows)]
 use tokio::net::windows::named_pipe::NamedPipeServer;
-#[cfg(not(windows))]
-use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 pub type PosixProgramClient = program::Client<PosixArgs, ByteStream, PosixError>;

@@ -140,7 +140,7 @@ dependencies = [
 [[package]]
 name = "async-byte-channel"
 version = "0.0.1"
-source = "git+https://github.com/Fundament-Software/capstone-rs#a42f4ca153b79e93990ae7765315a9a8850360b8"
+source = "git+https://github.com/Fundament-Software/capstone-rs#1196221ddbe4709df8881a3875c65c31c9582f88"
 dependencies = [
  "tokio",
 ]
@@ -323,7 +323,7 @@ dependencies = [
 [[package]]
 name = "caplog"
 version = "0.1.0"
-source = "git+https://github.com/Fundament-Software/caplog#abb85bafbce8bc07dbd1ea6bde60183bf5ea93ab"
+source = "git+https://github.com/Fundament-Software/caplog#a374e07e74bb14f017513420d8bff19c3eff4f60"
 dependencies = [
  "bitfield-struct",
  "capstone",
@@ -355,7 +355,7 @@ dependencies = [
 [[package]]
 name = "capstone"
 version = "0.18.0"
-source = "git+https://github.com/Fundament-Software/capstone-rs#a42f4ca153b79e93990ae7765315a9a8850360b8"
+source = "git+https://github.com/Fundament-Software/capstone-rs#1196221ddbe4709df8881a3875c65c31c9582f88"
 dependencies = [
  "embedded-io",
  "flurry",
@@ -365,7 +365,7 @@ dependencies = [
 [[package]]
 name = "capstone-futures"
 version = "0.18.0"
-source = "git+https://github.com/Fundament-Software/capstone-rs#a42f4ca153b79e93990ae7765315a9a8850360b8"
+source = "git+https://github.com/Fundament-Software/capstone-rs#1196221ddbe4709df8881a3875c65c31c9582f88"
 dependencies = [
  "capstone",
  "futures-util",
@@ -376,7 +376,7 @@ dependencies = [
 [[package]]
 name = "capstone-gen"
 version = "0.18.0"
-source = "git+https://github.com/Fundament-Software/capstone-rs#a42f4ca153b79e93990ae7765315a9a8850360b8"
+source = "git+https://github.com/Fundament-Software/capstone-rs#1196221ddbe4709df8881a3875c65c31c9582f88"
 dependencies = [
  "capnp-sys",
  "capstone",
@@ -388,7 +388,7 @@ dependencies = [
 [[package]]
 name = "capstone-macros"
 version = "0.18.0"
-source = "git+https://github.com/Fundament-Software/capstone-rs#a42f4ca153b79e93990ae7765315a9a8850360b8"
+source = "git+https://github.com/Fundament-Software/capstone-rs#1196221ddbe4709df8881a3875c65c31c9582f88"
 dependencies = [
  "capstone",
  "capstone-gen",
@@ -402,7 +402,7 @@ dependencies = [
 [[package]]
 name = "capstone-rpc"
 version = "0.18.0"
-source = "git+https://github.com/Fundament-Software/capstone-rs#a42f4ca153b79e93990ae7765315a9a8850360b8"
+source = "git+https://github.com/Fundament-Software/capstone-rs#1196221ddbe4709df8881a3875c65c31c9582f88"
 dependencies = [
  "capstone",
  "capstone-futures",
@@ -1382,9 +1382,9 @@ dependencies = [
 
 [[package]]
 name = "hyper-util"
-version = "0.1.15"
+version = "0.1.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f66d5bd4c6f02bf0542fad85d626775bab9258cf795a4256dcaf3161114d1df"
+checksum = "8d9b05277c7e8da2c93a568989bb6207bef0112e8d17df7a6eda4a3cf143bc5e"
 dependencies = [
  "base64",
  "bytes",
@@ -1398,7 +1398,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2",
+ "socket2 0.6.0",
  "system-configuration",
  "tokio",
  "tower-service",
@@ -1628,9 +1628,9 @@ checksum = "06432fb54d3be7964ecd3649233cddf80db2832f47fec34c01f65b3d9d774983"
 
 [[package]]
 name = "io-uring"
-version = "0.7.8"
+version = "0.7.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b86e202f00093dcba4275d4636b93ef9dd75d025ae560d2521b45ea28ab49013"
+checksum = "d93587f37623a1a17d94ef2bc9ada592f5465fe7732084ab7beefabe5c77c0c4"
 dependencies = [
  "bitflags",
  "cfg-if",
@@ -1834,9 +1834,9 @@ checksum = "241eaef5fd12c88705a01fc1066c48c4b36e0dd4377dcdc7ec3942cea7a69956"
 
 [[package]]
 name = "litrs"
-version = "0.4.1"
+version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b4ce301924b7887e9d637144fdade93f9dfff9b60981d4ac161db09720d39aa5"
+checksum = "f5e54036fe321fd421e10d732f155734c4e4afd610dd556d9a82833ab3ee0bed"
 
 [[package]]
 name = "lock_api"
@@ -2787,6 +2787,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "socket2"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "233504af464074f9d066d7b5416c5f9b894a5862a6506e306f7b816cdd6f1807"
+dependencies = [
+ "libc",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
 name = "sqlite-usage"
 version = "0.1.0"
 dependencies = [
@@ -3076,7 +3086,7 @@ dependencies = [
  "pin-project-lite",
  "signal-hook-registry",
  "slab",
- "socket2",
+ "socket2 0.5.10",
  "tokio-macros",
  "tracing",
  "windows-sys 0.52.0",

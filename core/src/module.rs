@@ -504,7 +504,6 @@ impl ModuleInstance {
             // Force kill the module.
             tracing::warn!("{} timed out when requesting stop!", &self.name);
             self.kill().await;
-            self.reset();
             Ok(())
         } else {
             tracing::debug!("Got stop_request reply back from {}", &self.name);
@@ -514,26 +513,29 @@ impl ModuleInstance {
                 match tokio::time::timeout(timeout, p.join_request().send().promise).await {
                     Ok(result) => {
                         tracing::debug!("Joined process for {}", &self.name);
-                        self.state.store(
-                            match Self::check_error(&self.name, result) {
-                                Ok(v) => v as u8,
-                                Err(e) => {
-                                    tracing::error!(
-                                        "Failure during {} error lookup: {}",
-                                        &self.name,
-                                        e.to_string()
-                                    );
-                                    ModuleState::CloseFailure as u8
-                                }
-                            },
-                            Ordering::Release,
-                        );
+                        let end_state = match Self::check_error(&self.name, result) {
+                            Ok(v) => v as u8,
+                            Err(e) => {
+                                tracing::error!(
+                                    "Failure during {} error lookup: {}",
+                                    &self.name,
+                                    e.to_string()
+                                );
+                                ModuleState::CloseFailure as u8
+                            }
+                        };
+
+                        self.reset(); // Always reset BEFORE setting the state to prevent race conditions
+                        self.state.store(end_state, Ordering::Release)
                     }
                     Err(_) => self.kill().await,
                 }
+            } else {
+                self.reset();
+                self.state
+                    .store(ModuleState::Closed as u8, Ordering::Release);
             }
 
-            self.reset();
             Ok(())
         }
     }
@@ -546,6 +548,7 @@ impl ModuleInstance {
             panic!("Tried to kill a module that doesn't have a process!")
         }
 
+        self.reset();
         self.state
             .store(ModuleState::Aborted as u8, Ordering::Release);
     }
@@ -564,7 +567,7 @@ impl ModuleInstance {
         Ok(())
     }
 
-    fn halted(&self) -> bool {
+    pub(crate) fn halted(&self) -> bool {
         let v = self.state.load(Ordering::Acquire);
 
         v == ModuleState::NotStarted as u8

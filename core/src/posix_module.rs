@@ -107,6 +107,20 @@ pub struct PosixModuleProgramImpl {
     log_tx: Option<UnboundedSender<(u64, String)>>,
 }
 
+#[cfg(not(windows))]
+type SyncResult = (
+    tokio::net::unix::OwnedReadHalf,
+    tokio::net::unix::OwnedWriteHalf,
+    tokio::process::Child,
+);
+
+#[cfg(windows)]
+type SyncResult = (
+    tokio::io::split::ReadHalf,
+    tokio::io::split::WriteHalf,
+    tokio::process::Child,
+);
+
 impl PosixModuleProgramImpl {
     pub fn new(
         program: cap_std::fs::File,
@@ -122,6 +136,85 @@ impl PosixModuleProgramImpl {
             db,
             log_tx,
         })
+    }
+
+    /// This whole process spawn section must be syncronous so we can lock it with a mutex.
+    fn spawn_sync(
+        source: &cap_std::fs::File,
+        dir: Option<&cap_std::fs::Dir>,
+        log_filter: &str,
+        inherit_output: bool,
+    ) -> capnp::Result<SyncResult> {
+        // TODO: Right now, this function being syncronous ensures nothing else runs while it does, but
+        // once we multithread the async system this will need to have a mutex lock
+
+        #[cfg(not(windows))]
+        let (server, backup_reserve_fd) = unsafe {
+            use std::os::fd::FromRawFd;
+
+            let backup_reserve_fd = libc::fcntl(4, libc::F_DUPFD_CLOEXEC, 5);
+            if backup_reserve_fd < 0 {
+                panic!("fcntl(4, F_DUPFD_CLOEXEC, 5) failed");
+            }
+            let mut socks = vec![0 as i32, 0 as i32];
+            if libc::socketpair(
+                libc::AF_UNIX,
+                libc::SOCK_STREAM | libc::SOCK_NONBLOCK | libc::SOCK_CLOEXEC,
+                0,
+                socks.as_mut_ptr(),
+            ) < 0
+            {
+                libc::close(backup_reserve_fd);
+                panic!("socketpair failed");
+            }
+            if libc::dup2(socks[1], 4) != 4 {
+                libc::close(backup_reserve_fd);
+                panic!("dup2(socks[1], 4) failed");
+            }
+            libc::close(socks[1]);
+            let server =
+                UnixStream::from_std(std::os::unix::net::UnixStream::from_raw_fd(socks[0]))
+                    .unwrap();
+            (server, backup_reserve_fd)
+        };
+        #[cfg(windows)]
+        let (server, pipe_name) = crate::process::create_ipc()?;
+
+        // Create the child process
+        #[cfg(windows)]
+        let child = crate::process::spawn_process(
+            source,
+            [Ok::<&str, capnp::Error>(pipe_name.as_str())].into_iter(),
+            dir,
+            log_filter,
+            inherit_output,
+            std::process::Stdio::null(),
+        )?;
+        #[cfg(not(windows))]
+        let child = crate::process::spawn_process(
+            source,
+            [].into_iter(),
+            dir,
+            log_filter,
+            inherit_output,
+            std::process::Stdio::null(),
+        )?;
+
+        #[cfg(windows)]
+        server.connect().await?;
+        tracing::debug!("connecting to pipe");
+
+        #[cfg(windows)]
+        let (read, write) = tokio::io::split(server);
+        #[cfg(not(windows))]
+        let (read, write) = server.into_split();
+        #[cfg(not(windows))]
+        unsafe {
+            libc::dup2(backup_reserve_fd, 4);
+            libc::close(backup_reserve_fd);
+        }
+
+        Ok((read, write, child))
     }
 }
 
@@ -201,39 +294,6 @@ impl
         let host: crate::keystone_capnp::host::Client<any_pointer> =
             capnp_rpc::new_client(crate::host::HostImpl::new(instance_id, self.db.clone()));
 
-        #[cfg(not(windows))]
-        let (server, backup_reserve_fd) = unsafe {
-            //TODO Thread unsafe, might need a lock in the future
-            use std::os::fd::FromRawFd;
-
-            let backup_reserve_fd = libc::fcntl(4, libc::F_DUPFD_CLOEXEC, 5);
-            if backup_reserve_fd < 0 {
-                panic!("fcntl(4, F_DUPFD_CLOEXEC, 5) failed");
-            }
-            let mut socks = vec![0 as i32, 0 as i32];
-            if libc::socketpair(
-                libc::AF_UNIX,
-                libc::SOCK_STREAM | libc::SOCK_NONBLOCK | libc::SOCK_CLOEXEC,
-                0,
-                socks.as_mut_ptr(),
-            ) < 0
-            {
-                libc::close(backup_reserve_fd);
-                panic!("socketpair failed");
-            }
-            if libc::dup2(socks[1], 4) != 4 {
-                libc::close(backup_reserve_fd);
-                panic!("dup2(socks[1], 4) failed");
-            }
-            libc::close(socks[1]);
-            let server =
-                UnixStream::from_std(std::os::unix::net::UnixStream::from_raw_fd(socks[0]))
-                    .unwrap();
-            (server, backup_reserve_fd)
-        };
-        #[cfg(windows)]
-        let (server, pipe_name) = crate::process::create_ipc()?;
-
         let workdir = if let Ok(aux) = args.get_aux() {
             let resolved = capnp::capability::get_resolved_cap(aux).await;
             self.file_server
@@ -244,39 +304,12 @@ impl
             None
         };
 
-        // Create the child process
-        #[cfg(windows)]
-        let mut child = crate::process::spawn_process(
+        let (read, write, mut child) = Self::spawn_sync(
             &self.program,
-            [Ok::<&str, capnp::Error>(pipe_name.as_str())].into_iter(),
             workdir.as_ref().map(|x| &x.dir),
             &identifier.log_filter,
             self.log_tx.is_none(),
-            std::process::Stdio::null(),
         )?;
-        #[cfg(not(windows))]
-        let mut child = crate::process::spawn_process(
-            &self.program,
-            [].into_iter(),
-            workdir.as_ref().map(|x| &x.dir),
-            &identifier.log_filter,
-            self.log_tx.is_none(),
-            std::process::Stdio::null(),
-        )?;
-
-        #[cfg(windows)]
-        server.connect().await?;
-        tracing::debug!("connecting to pipe");
-
-        #[cfg(windows)]
-        let (read, write) = tokio::io::split(server);
-        #[cfg(not(windows))]
-        let (read, write) = server.into_split();
-        #[cfg(not(windows))]
-        unsafe {
-            libc::dup2(backup_reserve_fd, 4);
-            libc::close(backup_reserve_fd);
-        }
 
         let (mut rpc_system, bootstrap, disconnector, api) =
             crate::keystone::init_rpc_system(read, write, host.client.clone(), args.get_config()?)?;

@@ -3,9 +3,6 @@ use std::rc::Rc;
 
 use tokio::sync::{oneshot, watch};
 
-#[cfg(not(windows))]
-use tokio::net::UnixListener;
-
 use crate::capnp;
 use crate::keystone::CapnpResult;
 use crate::sqlite::SqliteDatabase;
@@ -63,20 +60,6 @@ fn native_command(
         cmd.current_dir(workdir);
     }
     cmd
-}
-
-#[cfg(not(windows))]
-pub fn create_ipc() -> std::io::Result<(UnixListener, String, tempfile::TempDir)> {
-    let random = rand::random::<u8>() as char; //TODO security and better name
-    let dir = tempfile::tempdir()?;
-    let pipe_name = dir
-        .path()
-        .join(random.to_string().as_str())
-        .to_str()
-        .unwrap()
-        .to_owned();
-    let server = UnixListener::bind(pipe_name.clone())?;
-    Ok((server, pipe_name, dir))
 }
 
 pub fn spawn_process<'i, I>(

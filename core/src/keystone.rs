@@ -20,6 +20,7 @@ use futures_util::FutureExt;
 use futures_util::stream::FuturesUnordered;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 use std::{cell::RefCell, collections::HashMap, path::Path, rc::Rc};
 use tokio::sync::mpsc::UnboundedSender;
@@ -83,6 +84,10 @@ pub enum Error {
     ModuleNotFound(u64),
     #[error("Module with name {0} couldn't be found.")]
     ModuleNameNotFound(String),
+    #[error("Module failed to start because of {0}")]
+    ModuleStartFailure(capnp::Error),
+    #[error("Unknown database error {0}")]
+    DatabaseError(String),
     #[error("Couldn't find {0} field")]
     MissingFieldTOML(String),
     #[error("Couldn't find {0} in {1}")]
@@ -113,6 +118,8 @@ pub enum Error {
     InvalidConfig(String),
     #[error("Bootstrap interface for {0} is either missing or it was already closed!")]
     MissingBootstrap(String),
+    #[error("Attempting to initialize Module with name {0} while it was {1}")]
+    ModuleAlreadyStarted(String, ModuleState),
 }
 
 enum FutureStaging {
@@ -259,10 +266,9 @@ impl Keystone {
             &module.api.inner,
             Ok(api.pipeline.get_api().as_cap()),
         );
-        module.state.store(
-            ModuleState::Ready as u8,
-            std::sync::atomic::Ordering::Release,
-        );
+        module
+            .state
+            .store(ModuleState::Ready as u8, Ordering::Release);
         module.bootstrap = Some(bootstrap);
         //module.process =
         let fut = async move { rpc_system.await.wrap_err(module_name) };
@@ -624,19 +630,18 @@ impl Keystone {
         modules: &HashMap<u64, ModuleInstance>,
         id: u64,
         e: capnp::Error,
-    ) -> Result<Pin<Box<dyn Future<Output = eyre::Result<()>>>>> {
+    ) -> Result<Pin<Box<dyn Future<Output = eyre::Result<()>>>>, Error> {
         let module = modules.get(&id).ok_or(Error::ModuleNotFound(id))?;
-        module.state.store(
-            ModuleState::StartFailure as u8,
-            std::sync::atomic::Ordering::Release,
-        );
+        module
+            .state
+            .store(ModuleState::StartFailure as u8, Ordering::Release);
         capnp_rpc::queued::ClientInner::resolve(&module.api.inner, Err(e.clone()));
         tracing::error!(
             "Module {} failed to start with error {}",
             module.name,
             e.to_string()
         );
-        Err(e.into())
+        Err(Error::ModuleStartFailure(e))
     }
 
     pub async fn init_module(
@@ -646,16 +651,26 @@ impl Keystone {
         config_dir: &Path,
         cap_table: capnp::struct_list::Reader<'_, cap_expr::Owned>,
         finish: oneshot::Receiver<crate::ModulePair>,
-    ) -> Result<Pin<Box<dyn Future<Output = eyre::Result<()>>>>> {
-        let instance_id = id.id(&self.root.db)?;
-        self.instances
-            .get(&instance_id)
-            .ok_or(Error::ModuleNotFound(instance_id))?
-            .state
-            .store(
-                ModuleState::Initialized as u8,
-                std::sync::atomic::Ordering::Release,
-            );
+    ) -> Result<Pin<Box<dyn Future<Output = eyre::Result<()>>>>, Error> {
+        let instance_id = id
+            .id(&self.root.db)
+            .map_err(|e| Error::DatabaseError(e.to_string()))?;
+        {
+            let module = self
+                .instances
+                .get(&instance_id)
+                .ok_or(Error::ModuleNotFound(instance_id))?;
+
+            if !module.halted() {
+                Err(Error::ModuleAlreadyStarted(
+                    module.name.clone(),
+                    ModuleState::try_from(module.state.load(Ordering::Acquire)).unwrap(),
+                ))?;
+            }
+            module
+                .state
+                .store(ModuleState::Initialized as u8, Ordering::Release);
+        }
 
         let span = tracing::debug_span!(
             "Initializing",
@@ -723,7 +738,8 @@ impl Keystone {
         if let Err(e) = anybuild.set_as(replacement) {
             return Self::failed_start(&self.instances, instance_id, e);
         }
-        pair.set_aux(dirclient)?;
+        pair.set_aux(dirclient)
+            .map_err(|e| Error::ModuleStartFailure(e))?;
 
         tracing::debug!("Sending spawn request inside {}", workpath.display());
         let response = spawn_request.send().promise.await;
@@ -746,12 +762,13 @@ impl Keystone {
             Ok(p.pipeline.get_api().as_cap()),
         );
 
-        let (bootstrap, rpc_future) = finish.await?;
+        let (bootstrap, rpc_future) = finish
+            .await
+            .map_err(|e| Error::ModuleStartFailure(capnp::Error::failed(e.to_string())))?;
         module.bootstrap = Some(bootstrap);
-        module.state.store(
-            ModuleState::Ready as u8,
-            std::sync::atomic::Ordering::Release,
-        );
+        module
+            .state
+            .store(ModuleState::Ready as u8, Ordering::Release);
 
         Ok(rpc_future)
     }
@@ -846,8 +863,7 @@ impl Keystone {
             .instances
             .values_mut()
             .filter_map(|v| {
-                if v.state.load(std::sync::atomic::Ordering::Acquire) != ModuleState::Closing as u8
-                {
+                if v.state.load(Ordering::Acquire) != ModuleState::Closing as u8 {
                     Some(v.stop(self.timeout))
                 } else {
                     None

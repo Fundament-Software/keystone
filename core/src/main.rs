@@ -988,6 +988,47 @@ impl Tui<'_> {
         Err(keystone::Error::ModuleNotFound(id).into())
     }
 
+    async fn start_module(
+        instance: &mut Keystone,
+        dir: &Path,
+        config: &keystone_config::Reader<'_>,
+        s: keystone_config::module_config::Reader<'_, any_pointer>,
+        instance_id: u64,
+        rpc_tx: &UnboundedSender<Pin<Box<dyn Future<Output = Result<()>>>>>,
+        name: String,
+        trace: String,
+    ) -> Result<()> {
+        let (finisher, finish) = tokio::sync::oneshot::channel();
+
+        let fut = match instance
+            .init_module(
+                instance.postgen_id(name, trace, finisher)?,
+                s,
+                dir,
+                config.get_cap_table().unwrap(),
+                finish,
+            )
+            .await
+        {
+            Err(keystone::Error::ModuleAlreadyStarted(_, _)) => return Ok(()),
+            v => v,
+        };
+
+        if let Err(t) = rpc_tx.send(fut?) {
+            tokio::try_join!(
+                instance
+                    .instances
+                    .get_mut(&instance_id)
+                    .unwrap()
+                    .stop(instance.timeout),
+                t.0
+            )
+            .expect("Failed to recover from failed module start");
+        }
+
+        Ok(())
+    }
+
     async fn key(
         &mut self,
         key: KeyEvent,
@@ -1031,33 +1072,17 @@ impl Tui<'_> {
                                             id,
                                         )?;
 
-                                        let (finisher, finish) = tokio::sync::oneshot::channel();
-
-                                        if let Err(t) = rpc_tx.send(
-                                            self.instance
-                                                .init_module(
-                                                    self.instance.postgen_id(
-                                                        m.name.clone(),
-                                                        m.trace.as_str().to_ascii_lowercase(),
-                                                        finisher,
-                                                    )?,
-                                                    s,
-                                                    self.dir,
-                                                    self.config.get_cap_table()?,
-                                                    finish,
-                                                )
-                                                .await?,
-                                        ) {
-                                            tokio::try_join!(
-                                                self.instance
-                                                    .instances
-                                                    .get_mut(&m.id)
-                                                    .unwrap()
-                                                    .stop(self.instance.timeout),
-                                                t.0
-                                            )
-                                            .expect("Failed to recover from failed module start");
-                                        }
+                                        Self::start_module(
+                                            self.instance,
+                                            self.dir,
+                                            &self.config,
+                                            s,
+                                            m.id,
+                                            &rpc_tx,
+                                            m.name.clone(),
+                                            m.trace.as_str().to_ascii_lowercase(),
+                                        )
+                                        .await?;
                                     }
                                     1 => m.trace = m.rotate_trace(),
                                     _ => (),
@@ -1093,32 +1118,17 @@ impl Tui<'_> {
                                             id,
                                         )?;
 
-                                        let (finisher, finish) = tokio::sync::oneshot::channel();
-                                        if let Err(t) = rpc_tx.send(
-                                            self.instance
-                                                .init_module(
-                                                    self.instance.postgen_id(
-                                                        m.name.clone(),
-                                                        log_state,
-                                                        finisher,
-                                                    )?,
-                                                    s,
-                                                    self.dir,
-                                                    self.config.get_cap_table()?,
-                                                    finish,
-                                                )
-                                                .await?,
-                                        ) {
-                                            tokio::try_join!(
-                                                self.instance
-                                                    .instances
-                                                    .get_mut(&m.id)
-                                                    .unwrap()
-                                                    .stop(self.instance.timeout),
-                                                t.0
-                                            )
-                                            .expect("Failed to recover from failed module start");
-                                        }
+                                        Self::start_module(
+                                            self.instance,
+                                            self.dir,
+                                            &self.config,
+                                            s,
+                                            m.id,
+                                            &rpc_tx,
+                                            m.name.clone(),
+                                            log_state,
+                                        )
+                                        .await?;
                                     }
                                     3 => self.tab = TabPage::Interface,
                                     4 => m.trace = m.rotate_trace(),
@@ -1152,32 +1162,18 @@ impl Tui<'_> {
                                             &self.instance,
                                             id,
                                         )?;
-                                        let (finisher, finish) = tokio::sync::oneshot::channel();
-                                        if let Err(t) = rpc_tx.send(
-                                            self.instance
-                                                .init_module(
-                                                    self.instance.postgen_id(
-                                                        m.name.clone(),
-                                                        log_state,
-                                                        finisher,
-                                                    )?,
-                                                    s,
-                                                    self.dir,
-                                                    self.config.get_cap_table()?,
-                                                    finish,
-                                                )
-                                                .await?,
-                                        ) {
-                                            tokio::try_join!(
-                                                self.instance
-                                                    .instances
-                                                    .get_mut(&m.id)
-                                                    .unwrap()
-                                                    .stop(self.instance.timeout),
-                                                t.0
-                                            )
-                                            .expect("Failed to recover from failed module start");
-                                        }
+
+                                        Self::start_module(
+                                            self.instance,
+                                            self.dir,
+                                            &self.config,
+                                            s,
+                                            m.id,
+                                            &rpc_tx,
+                                            m.name.clone(),
+                                            log_state,
+                                        )
+                                        .await?;
                                     }
                                     3 => self.tab = TabPage::Interface,
                                     4 => m.trace = m.rotate_trace(),
@@ -1944,7 +1940,7 @@ async fn event_loop<B: ratatui::prelude::Backend>(
                 }
 
                 for (id, m) in &mut app.instance.instances {
-                    match ModuleState::try_from(m.state.load(Ordering::Relaxed)).unwrap() {
+                    match ModuleState::try_from(m.state.load(Ordering::Acquire)).unwrap() {
                         ModuleState::Ready | ModuleState::Paused => app.keystone.loaded += 1,
                         ModuleState::Initialized
                             if app.keystone.state == ModuleState::NotStarted =>
@@ -1956,7 +1952,7 @@ async fn event_loop<B: ratatui::prelude::Backend>(
                     if let Some(module) = app.modules.get_mut(id) {
                         module.name = m.name.clone();
                         module.state =
-                            ModuleState::try_from(m.state.load(Ordering::Relaxed)).unwrap();
+                            ModuleState::try_from(m.state.load(Ordering::Acquire)).unwrap();
                     } else {
                         app.modules.insert(
                             *id,
@@ -1965,7 +1961,7 @@ async fn event_loop<B: ratatui::prelude::Backend>(
                                 cpu: CircularBuffer::new(),
                                 ram: CircularBuffer::new(),
                                 name: m.name.clone(),
-                                state: ModuleState::try_from(m.state.load(Ordering::Relaxed))
+                                state: ModuleState::try_from(m.state.load(Ordering::Acquire))
                                     .unwrap(),
                                 selected: None,
                                 trace: tracing::Level::WARN,
@@ -2065,6 +2061,9 @@ async fn run_interface(
 
 #[allow(unused)]
 fn main() -> Result<()> {
+    #[cfg(not(windows))]
+    keystone::reserve_fd_4();
+
     // Setup eyre
     color_eyre::install()?;
 
@@ -2137,25 +2136,6 @@ fn main() -> Result<()> {
             config,
             interactive,
         } => {
-            #[cfg(not(windows))]
-            unsafe {
-                let fd_a = libc::open(
-                    std::ffi::CString::new("/dev/null").unwrap().as_ptr(),
-                    libc::O_RDONLY,
-                );
-                if fd_a < 0 {
-                    panic!("How did we fail to open /dev/null");
-                } else if fd_a != 4 {
-                    let fd_b = libc::fcntl(fd_a, libc::F_DUPFD, 4);
-                    libc::close(fd_a);
-                    if fd_b < 0 {
-                        panic!("fcntl(fd_a, F_DUPFD, 4) failed");
-                    } else if fd_b != 4 {
-                        libc::close(fd_b);
-                        panic!("fd 4 already in use");
-                    }
-                }
-            }
             if let Some(p) = toml {
                 let path = Path::new(&p);
                 let mut f = std::fs::File::open(path)?;

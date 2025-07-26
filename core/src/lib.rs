@@ -271,6 +271,28 @@ pub async fn main<
     Ok(())
 }
 
+#[cfg(not(windows))]
+pub fn reserve_fd_4() {
+    unsafe {
+        let fd_a = libc::open(
+            std::ffi::CString::new("/dev/null").unwrap().as_ptr(),
+            libc::O_RDONLY,
+        );
+        if fd_a < 0 {
+            panic!("How did we fail to open /dev/null");
+        } else if fd_a != 4 {
+            let fd_b = libc::fcntl(fd_a, libc::F_DUPFD, 4);
+            libc::close(fd_a);
+            if fd_b < 0 {
+                panic!("fcntl(fd_a, F_DUPFD, 4) failed");
+            } else if fd_b != 4 {
+                libc::close(fd_b);
+                panic!("fd 4 already in use");
+            }
+        }
+    }
+}
+
 use tempfile::TempPath;
 
 pub fn build_temp_config(
@@ -315,10 +337,26 @@ pub async fn test_create_keystone(
     Ok((instance, rpc_systems))
 }
 
+static LAZY_TEST_INIT: std::sync::OnceLock<Result<(), Error>> = std::sync::OnceLock::new();
+
 pub fn test_harness<F: Future<Output = eyre::Result<()>> + 'static>(
     config: &str,
     f: impl FnOnce(capnp::message::Builder<capnp::message::HeapAllocator>) -> F + 'static,
 ) -> eyre::Result<()> {
+    LAZY_TEST_INIT
+        .get_or_init(|| {
+            #[cfg(not(windows))]
+            reserve_fd_4();
+            Ok(())
+        })
+        .as_ref()
+        .unwrap();
+
+    let _ = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::DEBUG)
+        .with_ansi(true)
+        .try_init();
+
     let mut message = capnp::message::Builder::new_default();
     let mut msg = message.init_root::<keystone_config::Builder>();
 
@@ -382,6 +420,77 @@ pub fn test_module_harness<
     module: &str,
     f: impl for<'a> FnOnce(API::Reader<'a>) -> F + 'static,
 ) -> eyre::Result<()> {
+    let _ = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::DEBUG)
+        .with_ansi(true)
+        .try_init();
+
+    let temp_db = NamedTempFile::new().unwrap().into_temp_path();
+    let temp_log = NamedTempFile::new().unwrap().into_temp_path();
+    let temp_prefix = NamedTempFile::new().unwrap().into_temp_path();
+    let mut source = build_temp_config(&temp_db, &temp_log, &temp_prefix);
+
+    source.push_str(config);
+
+    let (client_writer, server_reader) = async_byte_channel::channel();
+    let (server_writer, client_reader) = async_byte_channel::channel();
+
+    let pool = tokio::task::LocalSet::new();
+    let a = pool.run_until(pool.spawn_local(start::<
+        Config,
+        Impl,
+        API,
+        async_byte_channel::Receiver,
+        async_byte_channel::Sender,
+    >(client_reader, client_writer)));
+
+    let module = module.to_string();
+    let b = pool.run_until(pool.spawn_local(async move {
+        let (mut instance, api, mut rpc_systems): (Keystone, API::Reader<'_>, RpcSystemSet) =
+            Keystone::init_single_module(&source, &module, server_reader, server_writer, None)
+                .await
+                .unwrap();
+
+        tokio::select! {
+            r = drive_stream(&mut rpc_systems) => r,
+            r = f(api) => r.wrap_err(module),
+        }?;
+        test_shutdown(&mut instance, &mut rpc_systems).await
+    }));
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    let result = runtime.block_on(async move {
+        tokio::select! {
+            r = a => r,
+            r = b => r,
+            r = tokio::signal::ctrl_c() => Ok(Ok(r.expect("failed to capture ctrl-c"))),
+        }
+    });
+
+    runtime.shutdown_timeout(std::time::Duration::from_millis(1));
+    result.unwrap().unwrap();
+
+    Ok(())
+}
+
+#[allow(clippy::unit_arg)]
+pub fn test_module_harness_pipe<
+    Config: 'static + capnp::traits::Owned + Unpin,
+    Impl: 'static + Module<Config>,
+    API: 'static + for<'c> capnp::traits::Owned<Reader<'c>: capnp::capability::FromServer<Impl>> + Unpin,
+    F: Future<Output = eyre::Result<()>> + 'static,
+>(
+    config: &str,
+    module: &str,
+    f: impl for<'a> FnOnce(API::Reader<'a>) -> F + 'static,
+) -> eyre::Result<()> {
+    let _ = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::DEBUG)
+        .with_ansi(true)
+        .try_init();
+
     let temp_db = NamedTempFile::new().unwrap().into_temp_path();
     let temp_log = NamedTempFile::new().unwrap().into_temp_path();
     let temp_prefix = NamedTempFile::new().unwrap().into_temp_path();

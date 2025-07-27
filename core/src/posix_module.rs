@@ -99,6 +99,9 @@ impl<Fut: Future<Output = capnp::Result<ExitStatus>>>
 
 use crate::cap_std_capnp::dir;
 
+#[cfg(not(windows))]
+static GLOBAL_PROCESS_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 pub struct PosixModuleProgramImpl {
     program: cap_std::fs::File,
     file_server: Rc<RefCell<crate::cap_std_capnproto::AmbientAuthorityImpl>>,
@@ -106,20 +109,6 @@ pub struct PosixModuleProgramImpl {
     db: Rc<SqliteDatabase>,
     log_tx: Option<UnboundedSender<(u64, String)>>,
 }
-
-#[cfg(not(windows))]
-type SyncResult = (
-    tokio::net::unix::OwnedReadHalf,
-    tokio::net::unix::OwnedWriteHalf,
-    tokio::process::Child,
-);
-
-#[cfg(windows)]
-type SyncResult = (
-    tokio::io::split::ReadHalf,
-    tokio::io::split::WriteHalf,
-    tokio::process::Child,
-);
 
 impl PosixModuleProgramImpl {
     pub fn new(
@@ -139,16 +128,18 @@ impl PosixModuleProgramImpl {
     }
 
     /// This whole process spawn section must be syncronous so we can lock it with a mutex.
+    #[cfg(not(windows))]
     fn spawn_sync(
         source: &cap_std::fs::File,
         dir: Option<&cap_std::fs::Dir>,
         log_filter: &str,
         inherit_output: bool,
-    ) -> capnp::Result<SyncResult> {
-        // TODO: Right now, this function being syncronous ensures nothing else runs while it does, but
-        // once we multithread the async system this will need to have a mutex lock
-
-        #[cfg(not(windows))]
+    ) -> capnp::Result<(
+        tokio::net::unix::OwnedReadHalf,
+        tokio::net::unix::OwnedWriteHalf,
+        tokio::process::Child,
+    )> {
+        let _guard = GLOBAL_PROCESS_LOCK.lock().unwrap();
         let (server, backup_reserve_fd) = unsafe {
             use std::os::fd::FromRawFd;
 
@@ -177,20 +168,8 @@ impl PosixModuleProgramImpl {
                     .unwrap();
             (server, backup_reserve_fd)
         };
-        #[cfg(windows)]
-        let (server, pipe_name) = crate::process::create_ipc()?;
 
         // Create the child process
-        #[cfg(windows)]
-        let child = crate::process::spawn_process(
-            source,
-            [Ok::<&str, capnp::Error>(pipe_name.as_str())].into_iter(),
-            dir,
-            log_filter,
-            inherit_output,
-            std::process::Stdio::null(),
-        )?;
-        #[cfg(not(windows))]
         let child = crate::process::spawn_process(
             source,
             [].into_iter(),
@@ -200,15 +179,7 @@ impl PosixModuleProgramImpl {
             std::process::Stdio::null(),
         )?;
 
-        #[cfg(windows)]
-        server.connect().await?;
-        tracing::debug!("connecting to pipe");
-
-        #[cfg(windows)]
-        let (read, write) = tokio::io::split(server);
-        #[cfg(not(windows))]
         let (read, write) = server.into_split();
-        #[cfg(not(windows))]
         unsafe {
             libc::dup2(backup_reserve_fd, 4);
             libc::close(backup_reserve_fd);
@@ -304,12 +275,34 @@ impl
             None
         };
 
+        #[cfg(windows)]
+        let (server, pipe_name) = crate::process::create_ipc()?;
+
+        // Create the child process
+        #[cfg(windows)]
+        let mut child = crate::process::spawn_process(
+            &self.program,
+            [Ok::<&str, capnp::Error>(pipe_name.as_str())].into_iter(),
+            workdir.as_ref().map(|x| &x.dir),
+            &identifier.log_filter,
+            self.log_tx.is_none(),
+            std::process::Stdio::null(),
+        )?;
+
+        #[cfg(windows)]
+        server.connect().await?;
+        tracing::debug!("connecting to pipe");
+
+        #[cfg(not(windows))]
         let (read, write, mut child) = Self::spawn_sync(
             &self.program,
             workdir.as_ref().map(|x| &x.dir),
             &identifier.log_filter,
             self.log_tx.is_none(),
         )?;
+
+        #[cfg(windows)]
+        let (read, write) = tokio::io::split(server);
 
         let (mut rpc_system, bootstrap, disconnector, api) =
             crate::keystone::init_rpc_system(read, write, host.client.clone(), args.get_config()?)?;

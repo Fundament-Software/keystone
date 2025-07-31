@@ -3,11 +3,6 @@ use keystone::{capnp, tokio};
 
 #[test]
 fn test_hello_world_init() -> eyre::Result<()> {
-    #[cfg(feature = "tracing")]
-    tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::DEBUG)
-        .with_ansi(true)
-        .init();
     /*
     use std::path::PathBuf;
     use std::str::FromStr;
@@ -81,6 +76,7 @@ fn test_hello_world_empty() -> eyre::Result<()> {
                 message
                     .get_root_as_reader::<keystone::keystone_capnp::keystone_config::Reader>()?,
                 false,
+                None,
             )?;
 
             instance
@@ -90,7 +86,6 @@ fn test_hello_world_empty() -> eyre::Result<()> {
                         .get_root_as_reader::<keystone::keystone_capnp::keystone_config::Reader>(
                         )?,
                     &rpc_systems,
-                    keystone::Keystone::passthrough_stderr,
                 )
                 .await?;
 

@@ -11,7 +11,9 @@ use std::{marker::PhantomData, rc::Rc};
 
 #[derive(Clone)]
 pub struct HostImpl<State> {
-    module_id: u64,
+    // All module instances are (usually) named, so this instance_id actually corresponds to the string index for
+    // a particular module instance's name.
+    instance_id: u64,
     db: Rc<SqliteDatabase>,
     phantom: PhantomData<State>,
 }
@@ -20,9 +22,9 @@ impl<State> HostImpl<State>
 where
     State: capnp::traits::Owned,
 {
-    pub fn new(module_id: u64, db: Rc<SqliteDatabase>) -> Self {
+    pub fn new(instance_id: u64, db: Rc<SqliteDatabase>) -> Self {
         Self {
-            module_id,
+            instance_id,
             db,
             phantom: PhantomData,
         }
@@ -70,7 +72,7 @@ where
         mut results: save::SaveResults<capnp::any_pointer::Owned>,
     ) -> Result<(), capnp::Error> {
         let sturdyref = crate::sturdyref::SturdyRefImpl::init(
-            self.module_id,
+            self.instance_id,
             params.get()?.get_data()?,
             self.db.clone(),
         )
@@ -97,11 +99,11 @@ where
         _: host::GetStateParams<State>,
         mut results: host::GetStateResults<State>,
     ) -> Result<(), capnp::Error> {
-        let span = tracing::debug_span!("host", id = self.module_id);
+        let span = tracing::debug_span!("host", id = self.instance_id);
         let _enter = span.enter();
         tracing::debug!("get_state()");
         self.db
-            .get_state(self.module_id as i64, results.get().init_state().into())
+            .get_state(self.instance_id as i64, results.get().init_state().into())
             .to_capnp()?;
 
         Ok(())
@@ -112,11 +114,11 @@ where
         params: host::SetStateParams<State>,
         _: host::SetStateResults<State>,
     ) -> Result<(), capnp::Error> {
-        let span = tracing::debug_span!("host", id = self.module_id);
+        let span = tracing::debug_span!("host", id = self.instance_id);
         let _enter = span.enter();
         tracing::debug!("set_state()");
         self.db
-            .set_state(self.module_id as i64, params.get()?.get_state()?)
+            .set_state(self.instance_id as i64, params.get()?.get_state()?)
             .await
             .to_capnp()?;
         Ok(())
@@ -131,7 +133,7 @@ where
         let params = params.get()?;
         let obj: capnp::dynamic_value::Reader = params.get_obj()?.into();
         let level = params.get_level()?;
-        let span = dyn_span!(level, "[REMOTE]", id = self.module_id);
+        let span = dyn_span!(level, "[REMOTE]", id = self.instance_id);
         let _enter = span.enter();
         dyn_event!(level, "{:?}", obj);
 

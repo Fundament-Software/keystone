@@ -656,6 +656,7 @@ mod tests {
     use std::collections::HashMap;
     use std::rc::Rc;
     use std::sync::atomic::AtomicI32;
+    use std::sync::atomic::Ordering;
     use tokio::sync::mpsc;
     use tokio::sync::oneshot;
     use tokio::time::Instant;
@@ -670,9 +671,7 @@ mod tests {
     #[capnproto_rpc(action)]
     impl action::Server for TestActionImpl {
         async fn run(self: Rc<Self>) -> capnp::Result<()> {
-            let prev = self
-                .count
-                .fetch_sub(1, std::sync::atomic::Ordering::Release);
+            let prev = self.count.fetch_sub(1, Ordering::AcqRel);
             tracing::info!("{}::run({})", self.key, prev);
 
             if prev == 1 {
@@ -718,10 +717,10 @@ mod tests {
 
             // After our final expected call of run(), send will be empty, and us calling save() on it is not a bug, so we can't detect it here.
             if let Some(send) = self.send.take() {
-                self.parent.actions.borrow_mut().insert(
-                    self.key.clone(),
-                    (self.count.load(std::sync::atomic::Ordering::Relaxed), send),
-                );
+                self.parent
+                    .actions
+                    .borrow_mut()
+                    .insert(self.key.clone(), (self.count.load(Ordering::Acquire), send));
             }
             Ok(())
         }
@@ -1117,7 +1116,7 @@ mod tests {
         })
         .await?;
 
-        if let Some(e) = super::LAST_ERROR.take(std::sync::atomic::Ordering::AcqRel) {
+        if let Some(e) = super::LAST_ERROR.take(Ordering::AcqRel) {
             Err(*e)
         } else {
             Ok(())
@@ -1176,7 +1175,7 @@ mod tests {
         })
         .await?;
 
-        if let Some(e) = super::LAST_ERROR.take(std::sync::atomic::Ordering::AcqRel) {
+        if let Some(e) = super::LAST_ERROR.take(Ordering::AcqRel) {
             Err(*e)
         } else {
             Ok(())
@@ -1236,7 +1235,7 @@ mod tests {
         })
         .await?;
 
-        if let Some(e) = super::LAST_ERROR.take(std::sync::atomic::Ordering::AcqRel) {
+        if let Some(e) = super::LAST_ERROR.take(Ordering::AcqRel) {
             Err(*e)
         } else {
             Ok(())
@@ -1297,7 +1296,7 @@ mod tests {
         })
         .await?;
 
-        if let Some(e) = super::LAST_ERROR.take(std::sync::atomic::Ordering::AcqRel) {
+        if let Some(e) = super::LAST_ERROR.take(Ordering::AcqRel) {
             Err(*e)
         } else {
             Ok(())

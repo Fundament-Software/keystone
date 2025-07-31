@@ -2,13 +2,6 @@ use scheduler_usage::scheduler_usage_capnp::root;
 
 #[test]
 fn test_scheduler_sync() -> eyre::Result<()> {
-    #[cfg(feature = "tracing")]
-    tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::DEBUG)
-        .with_writer(std::io::stderr)
-        .with_ansi(true)
-        .init();
-
     keystone::test_module_harness::<
         scheduler_usage::scheduler_usage_capnp::config::Owned,
         scheduler_usage::scheduler_usage::SchedulerUsageImpl,

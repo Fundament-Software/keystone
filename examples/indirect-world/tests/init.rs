@@ -2,13 +2,6 @@ use indirect_world::indirect_world_capnp::root;
 
 #[test]
 fn test_indirect_init() -> eyre::Result<()> {
-    #[cfg(feature = "tracing")]
-    tracing_subscriber::fmt()
-        .with_max_level(Level::DEBUG)
-        .with_writer(std::io::stderr)
-        .with_ansi(true)
-        .init();
-
     let mut source = String::new();
 
     source.push_str(&keystone::build_module_config(

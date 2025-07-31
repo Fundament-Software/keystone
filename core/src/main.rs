@@ -1,5 +1,5 @@
-use crate::capnp::any_pointer::Owned as any_pointer;
-use crate::capnp::{self, dynamic_struct, dynamic_value};
+use caplog::capnp::any_pointer::Owned as any_pointer;
+use caplog::capnp::{self, dynamic_struct, dynamic_value};
 use circular_buffer::CircularBuffer;
 use clap::{Parser, Subcommand, ValueEnum};
 use crossterm::event::KeyCode::Char;
@@ -8,7 +8,6 @@ use eyre::Result;
 use futures_util::{FutureExt, StreamExt};
 use keystone::CapnpType;
 use keystone::Keystone;
-use keystone::LogCapture;
 use keystone::ModuleState;
 use keystone::RpcSystemSet;
 use keystone::byte_stream::ByteStreamBufferImpl;
@@ -21,8 +20,9 @@ use std::future::Future;
 use std::io::Write;
 use std::path::Path;
 use std::pin::Pin;
+use std::sync::atomic::Ordering;
 use std::{convert::Into, fs, io::Read};
-use tokio::io::AsyncReadExt;
+use tokio::io::AsyncRead;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio_util::sync::CancellationToken;
 
@@ -178,40 +178,24 @@ fn keystone_startup(
     interactive: bool,
 ) -> Result<()> {
     let pool = tokio::task::LocalSet::new();
-    let (mut instance, mut rpc_systems) = Keystone::new(message, false)?;
+    let (log_tx, log_rx) = if interactive {
+        let (tx, rx) = mpsc::unbounded_channel::<(u64, String)>();
+        (Some(tx), Some(rx))
+    } else {
+        (None, None)
+    };
+
+    let (mut instance, mut rpc_systems) = Keystone::new(message, false, log_tx)?;
 
     let fut = pool.run_until(async move {
         // TODO: Eventually the terminal interface should be factored out into a module using a monitoring capability.
-        if interactive {
-            let (log_tx, log_rx) = mpsc::unbounded_channel::<(u64, String)>();
-            let log_tx_copy = log_tx.clone();
-            instance
-                .init_custom(dir, message.reborrow(), &rpc_systems, move |id| {
-                    let tx = log_tx_copy.clone();
-                    log_capture(id, tx)
-                })
-                .await?;
-            if let Err(e) = run_interface(
-                &mut instance,
-                &mut rpc_systems,
-                dir,
-                message,
-                log_rx,
-                log_tx,
-            )
-            .await
-            {
+        if let Some(rx) = log_rx {
+            instance.init(dir, message.reborrow(), &rpc_systems).await?;
+            if let Err(e) = run_interface(&mut instance, &mut rpc_systems, dir, message, rx).await {
                 eprintln!("{}", e.to_string());
             }
         } else {
-            instance
-                .init(
-                    dir,
-                    message.reborrow(),
-                    &rpc_systems,
-                    keystone::Keystone::passthrough_stderr,
-                )
-                .await?;
+            instance.init(dir, message.reborrow(), &rpc_systems).await?;
             tokio::select! {
                 _ = drive_stream_with_error("Module crashed!", &mut rpc_systems) => (),
                 r = tokio::signal::ctrl_c() => r.expect("failed to listen to shutdown signal"),
@@ -321,7 +305,6 @@ struct Tui<'a> {
     dir: &'a Path,
     config: keystone_config::Reader<'a>,
     list_state: ListState,
-    log_tx: UnboundedSender<(u64, String)>,
     holding: Vec<ParamResultType>,
     input: RowCol,
     buffer: String, //TODO optimize input stuff
@@ -777,7 +760,7 @@ impl ratatui::widgets::Widget for &mut Tui<'_> {
                     if desc.type_id == 0 {
                         inner.push(Cell::from(desc.function_name.clone()));
                         widths.push(Constraint::Max(desc.function_name.len() as u16));
-                        if let ModuleOrCap::ModuleId(id) = &desc.module_or_cap {
+                        if let ModuleOrCap::InstanceId(id) = &desc.module_or_cap {
                             if let Some(m) = self.modules.get(id) {
                                 match m.state {
                                     ModuleState::NotStarted => {
@@ -1005,6 +988,47 @@ impl Tui<'_> {
         Err(keystone::Error::ModuleNotFound(id).into())
     }
 
+    async fn start_module(
+        instance: &mut Keystone,
+        dir: &Path,
+        config: &keystone_config::Reader<'_>,
+        s: keystone_config::module_config::Reader<'_, any_pointer>,
+        instance_id: u64,
+        rpc_tx: &UnboundedSender<Pin<Box<dyn Future<Output = Result<()>>>>>,
+        name: String,
+        trace: String,
+    ) -> Result<()> {
+        let (finisher, finish) = tokio::sync::oneshot::channel();
+
+        let fut = match instance
+            .init_module(
+                instance.postgen_id(name, trace, finisher)?,
+                s,
+                dir,
+                config.get_cap_table().unwrap(),
+                finish,
+            )
+            .await
+        {
+            Err(keystone::Error::ModuleAlreadyStarted(_, _)) => return Ok(()),
+            v => v,
+        };
+
+        if let Err(t) = rpc_tx.send(fut?) {
+            tokio::try_join!(
+                instance
+                    .instances
+                    .get_mut(&instance_id)
+                    .unwrap()
+                    .stop(instance.timeout),
+                t.0
+            )
+            .expect("Failed to recover from failed module start");
+        }
+
+        Ok(())
+    }
+
     async fn key(
         &mut self,
         key: KeyEvent,
@@ -1042,35 +1066,23 @@ impl Tui<'_> {
                                 match m.selected.unwrap() {
                                     0 => {
                                         let id = m.id;
-                                        let tx = self.log_tx.clone();
                                         let s = Self::find_module_config(
                                             &self.config,
                                             &self.instance,
                                             id,
                                         )?;
 
-                                        if let Err(t) = rpc_tx.send(
-                                            self.instance
-                                                .init_module(
-                                                    id,
-                                                    s,
-                                                    self.dir,
-                                                    self.config.get_cap_table()?,
-                                                    m.trace.as_str().to_ascii_lowercase(),
-                                                    log_capture(id, tx),
-                                                )
-                                                .await?,
-                                        ) {
-                                            tokio::try_join!(
-                                                self.instance
-                                                    .modules
-                                                    .get_mut(&m.id)
-                                                    .unwrap()
-                                                    .stop(self.instance.timeout),
-                                                t.0
-                                            )
-                                            .expect("Failed to recover from failed module start");
-                                        }
+                                        Self::start_module(
+                                            self.instance,
+                                            self.dir,
+                                            &self.config,
+                                            s,
+                                            m.id,
+                                            &rpc_tx,
+                                            m.name.clone(),
+                                            m.trace.as_str().to_ascii_lowercase(),
+                                        )
+                                        .await?;
                                     }
                                     1 => m.trace = m.rotate_trace(),
                                     _ => (),
@@ -1081,22 +1093,21 @@ impl Tui<'_> {
                             {
                                 match m.selected.unwrap() {
                                     0 => {
-                                        if let Some(x) = self.instance.modules.get_mut(&m.id) {
+                                        if let Some(x) = self.instance.instances.get_mut(&m.id) {
                                             x.stop(self.instance.timeout).await?;
                                             self.instance.cap_functions = Vec::new();
                                             self.input = RowCol { row: 0, col: 0 };
                                         }
                                     }
                                     1 => {
-                                        if let Some(x) = self.instance.modules.get_mut(&m.id) {
+                                        if let Some(x) = self.instance.instances.get_mut(&m.id) {
                                             x.pause(true).await?;
                                         }
                                     }
                                     2 => {
                                         let id = m.id;
-                                        let tx = self.log_tx.clone();
                                         let log_state = m.trace.as_str().to_ascii_lowercase();
-                                        if let Some(x) = self.instance.modules.get_mut(&id) {
+                                        if let Some(x) = self.instance.instances.get_mut(&id) {
                                             x.stop(self.instance.timeout).await?;
                                             self.instance.cap_functions = Vec::new();
                                             self.input = RowCol { row: 0, col: 0 };
@@ -1106,28 +1117,18 @@ impl Tui<'_> {
                                             &self.instance,
                                             id,
                                         )?;
-                                        if let Err(t) = rpc_tx.send(
-                                            self.instance
-                                                .init_module(
-                                                    id,
-                                                    s,
-                                                    self.dir,
-                                                    self.config.get_cap_table()?,
-                                                    log_state,
-                                                    log_capture(id, tx),
-                                                )
-                                                .await?,
-                                        ) {
-                                            tokio::try_join!(
-                                                self.instance
-                                                    .modules
-                                                    .get_mut(&m.id)
-                                                    .unwrap()
-                                                    .stop(self.instance.timeout),
-                                                t.0
-                                            )
-                                            .expect("Failed to recover from failed module start");
-                                        }
+
+                                        Self::start_module(
+                                            self.instance,
+                                            self.dir,
+                                            &self.config,
+                                            s,
+                                            m.id,
+                                            &rpc_tx,
+                                            m.name.clone(),
+                                            log_state,
+                                        )
+                                        .await?;
                                     }
                                     3 => self.tab = TabPage::Interface,
                                     4 => m.trace = m.rotate_trace(),
@@ -1137,22 +1138,21 @@ impl Tui<'_> {
                             ModuleState::Paused if m.selected.is_some() => {
                                 match m.selected.unwrap() {
                                     0 => {
-                                        if let Some(x) = self.instance.modules.get_mut(&m.id) {
+                                        if let Some(x) = self.instance.instances.get_mut(&m.id) {
                                             x.stop(self.instance.timeout).await?;
                                             self.instance.cap_functions = Vec::new();
                                             self.input = RowCol { row: 0, col: 0 };
                                         }
                                     }
                                     1 => {
-                                        if let Some(x) = self.instance.modules.get_mut(&m.id) {
+                                        if let Some(x) = self.instance.instances.get_mut(&m.id) {
                                             x.pause(false).await?;
                                         }
                                     }
                                     2 => {
                                         let id = m.id;
-                                        let tx = self.log_tx.clone();
                                         let log_state = m.trace.as_str().to_ascii_lowercase();
-                                        if let Some(x) = self.instance.modules.get_mut(&id) {
+                                        if let Some(x) = self.instance.instances.get_mut(&id) {
                                             x.stop(self.instance.timeout).await?;
                                             self.instance.cap_functions = Vec::new();
                                             self.input = RowCol { row: 0, col: 0 };
@@ -1162,28 +1162,18 @@ impl Tui<'_> {
                                             &self.instance,
                                             id,
                                         )?;
-                                        if let Err(t) = rpc_tx.send(
-                                            self.instance
-                                                .init_module(
-                                                    id,
-                                                    s,
-                                                    self.dir,
-                                                    self.config.get_cap_table()?,
-                                                    log_state,
-                                                    log_capture(id, tx),
-                                                )
-                                                .await?,
-                                        ) {
-                                            tokio::try_join!(
-                                                self.instance
-                                                    .modules
-                                                    .get_mut(&m.id)
-                                                    .unwrap()
-                                                    .stop(self.instance.timeout),
-                                                t.0
-                                            )
-                                            .expect("Failed to recover from failed module start");
-                                        }
+
+                                        Self::start_module(
+                                            self.instance,
+                                            self.dir,
+                                            &self.config,
+                                            s,
+                                            m.id,
+                                            &rpc_tx,
+                                            m.name.clone(),
+                                            log_state,
+                                        )
+                                        .await?;
                                     }
                                     3 => self.tab = TabPage::Interface,
                                     4 => m.trace = m.rotate_trace(),
@@ -1193,7 +1183,7 @@ impl Tui<'_> {
                             ModuleState::Closing if m.selected.is_some() => {
                                 match m.selected.unwrap() {
                                     0 => {
-                                        if let Some(x) = self.instance.modules.get_mut(&m.id) {
+                                        if let Some(x) = self.instance.instances.get_mut(&m.id) {
                                             x.kill().await;
                                             self.instance.cap_functions = Vec::new();
                                             self.input = RowCol { row: 0, col: 0 };
@@ -1214,6 +1204,8 @@ impl Tui<'_> {
                     }
                 }
                 TabPage::Interface => {
+                    use caplog::capnp::private::capability::ClientHook;
+
                     if let Some(row) = self.keystone.table_state.selected() {
                         let desc = &mut self.instance.cap_functions[row as usize];
 
@@ -1223,31 +1215,23 @@ impl Tui<'_> {
                                     return Ok(());
                                 }
                                 let client = match &desc.module_or_cap {
-                                    ModuleOrCap::ModuleId(id) => self
+                                    ModuleOrCap::InstanceId(id) => self
                                         .instance
-                                        .modules
+                                        .instances
                                         .get(&id)
                                         .as_ref()
                                         .unwrap()
                                         .api
-                                        .as_ref()
-                                        .unwrap()
-                                        .pipeline
-                                        .get_api()
-                                        .as_cap(),
+                                        .add_ref(),
                                     ModuleOrCap::Cap(c) => c.cap.clone(),
                                 };
-                                let module_id = match &desc.module_or_cap {
-                                    ModuleOrCap::ModuleId(id) => id,
-                                    ModuleOrCap::Cap(c) => &c.module_id,
+                                let instance_id = match &desc.module_or_cap {
+                                    ModuleOrCap::InstanceId(id) => *id,
+                                    ModuleOrCap::Cap(c) => c.instance_id,
                                 };
-                                if let Some(dyn_schema) = &self
-                                    .instance
-                                    .modules
-                                    .get(&module_id)
-                                    .as_ref()
-                                    .unwrap()
-                                    .dyn_schema
+                                let path = &self.instance.instances[&instance_id].source;
+                                if let Some(dyn_schema) =
+                                    &self.instance.modules.get(path).map(|x| &x.dyn_schema)
                                 {
                                     let mut call =
                                         client.new_call(desc.type_id, desc.method_id, None);
@@ -1319,14 +1303,14 @@ impl Tui<'_> {
                                                 .clone()
                                             {
                                                 let parent_id = match &desc.module_or_cap {
-                                                    ModuleOrCap::Cap(c) => c.module_id.clone(),
-                                                    ModuleOrCap::ModuleId(id) => id.clone(),
+                                                    ModuleOrCap::Cap(c) => c.instance_id,
+                                                    ModuleOrCap::InstanceId(id) => *id,
                                                 };
                                                 if let Some(h) = &cap.hook {
                                                     let module_or_cap =
                                                         ModuleOrCap::Cap(CapnpHook {
                                                             cap: h.clone(),
-                                                            module_id: parent_id,
+                                                            instance_id: parent_id,
                                                         });
                                                     let func = FunctionDescription {
                                                         module_or_cap: module_or_cap.clone(),
@@ -1352,14 +1336,11 @@ impl Tui<'_> {
                                                     else {
                                                         todo!();
                                                     };
-                                                    let dyn_schema = self
-                                                        .instance
-                                                        .modules
-                                                        .get(&parent_id)
-                                                        .unwrap()
-                                                        .dyn_schema
-                                                        .as_ref()
-                                                        .unwrap();
+                                                    let parent_path =
+                                                        &self.instance.instances[&parent_id].source;
+                                                    let dyn_schema = &self.instance.modules
+                                                        [parent_path]
+                                                        .dyn_schema;
                                                     keystone::fill_function_descriptions(
                                                         &mut self.instance.cap_functions,
                                                         dyn_schema,
@@ -1884,14 +1865,13 @@ async fn event_loop<B: ratatui::prelude::Backend>(
     mut event_rx: UnboundedReceiver<TerminalEvent>,
     rpc_tx: UnboundedSender<Pin<Box<dyn Future<Output = Result<()>>>>>,
     mut log_rx: UnboundedReceiver<(u64, String)>,
-    log_tx: UnboundedSender<(u64, String)>,
     cancellation_token: CancellationToken,
     dir: &Path,
     config: keystone_config::Reader<'_>,
 ) -> Result<()> {
     use sysinfo::{CpuRefreshKind, MemoryRefreshKind, RefreshKind, System};
 
-    let count = instance.modules.len() as u32;
+    let count = instance.instances.len() as u32;
     let mut app = Tui {
         tab: TabPage::Keystone,
         keystone: TuiKeystone {
@@ -1911,7 +1891,6 @@ async fn event_loop<B: ratatui::prelude::Backend>(
         dir,
         config,
         list_state: ListState::default(),
-        log_tx,
         holding: Vec::new(),
         input: RowCol { row: 0, col: 0 },
         buffer: String::new(),
@@ -1948,7 +1927,7 @@ async fn event_loop<B: ratatui::prelude::Backend>(
                     .modules
                     .iter()
                     .filter_map(|(id, _)| {
-                        if app.instance.modules.contains_key(id) {
+                        if app.instance.instances.contains_key(id) {
                             None
                         } else {
                             Some(*id)
@@ -1960,8 +1939,8 @@ async fn event_loop<B: ratatui::prelude::Backend>(
                     app.modules.remove(&id);
                 }
 
-                for (id, m) in &mut app.instance.modules {
-                    match m.state {
+                for (id, m) in &mut app.instance.instances {
+                    match ModuleState::try_from(m.state.load(Ordering::Acquire)).unwrap() {
                         ModuleState::Ready | ModuleState::Paused => app.keystone.loaded += 1,
                         ModuleState::Initialized
                             if app.keystone.state == ModuleState::NotStarted =>
@@ -1972,7 +1951,8 @@ async fn event_loop<B: ratatui::prelude::Backend>(
                     }
                     if let Some(module) = app.modules.get_mut(id) {
                         module.name = m.name.clone();
-                        module.state = m.state;
+                        module.state =
+                            ModuleState::try_from(m.state.load(Ordering::Acquire)).unwrap();
                     } else {
                         app.modules.insert(
                             *id,
@@ -1981,7 +1961,8 @@ async fn event_loop<B: ratatui::prelude::Backend>(
                                 cpu: CircularBuffer::new(),
                                 ram: CircularBuffer::new(),
                                 name: m.name.clone(),
-                                state: m.state,
+                                state: ModuleState::try_from(m.state.load(Ordering::Acquire))
+                                    .unwrap(),
                                 selected: None,
                                 trace: tracing::Level::WARN,
                                 log: CircularBuffer::new(),
@@ -2044,49 +2025,12 @@ async fn event_stream(
     Ok(())
 }
 
-fn log_capture(id: u64, log_tx: UnboundedSender<(u64, String)>) -> impl LogCapture {
-    move |mut input: ByteStreamBufferImpl| {
-        let send = log_tx.clone();
-        async move {
-            let mut buf = [0u8; 1024];
-            loop {
-                let mut line = String::new();
-                loop {
-                    let len = input.read(&mut buf).await?;
-
-                    if len == 0 {
-                        break;
-                    }
-
-                    // If we find a newline, write up to the newline, shift the buffer over, then break
-                    if let Some(n) = memchr::memchr(b'\n', &buf[..len]) {
-                        if let Ok(s) = std::str::from_utf8(&buf[..n]) {
-                            line += s;
-                        }
-                        buf.copy_within(n..len, 0);
-                        break;
-                    } else if let Ok(s) = std::str::from_utf8(&buf[..len]) {
-                        line += s;
-                    }
-                }
-                // This IS the log function so we can't really do anything if this errors
-                if line.is_empty() {
-                    break;
-                }
-                let _ = send.send((id, line));
-            }
-            Ok::<(), eyre::Report>(())
-        }
-    }
-}
-
 async fn run_interface(
     instance: &mut Keystone,
     rpc_systems: &mut keystone::RpcSystemSet,
     dir: &Path,
     config: keystone_config::Reader<'_>,
     log_rx: UnboundedReceiver<(u64, String)>,
-    log_tx: UnboundedSender<(u64, String)>,
 ) -> Result<()> {
     let mut terminal = ratatui::init();
     terminal.clear()?;
@@ -2105,7 +2049,6 @@ async fn run_interface(
             event_rx,
             rpc_tx,
             log_rx,
-            log_tx,
             cancellation_token.clone(),
             dir,
             config
@@ -2118,6 +2061,9 @@ async fn run_interface(
 
 #[allow(unused)]
 fn main() -> Result<()> {
+    #[cfg(not(windows))]
+    keystone::reserve_fd_4();
+
     // Setup eyre
     color_eyre::install()?;
 
@@ -2190,25 +2136,6 @@ fn main() -> Result<()> {
             config,
             interactive,
         } => {
-            #[cfg(not(windows))]
-            unsafe {
-                let fd_a = libc::open(
-                    std::ffi::CString::new("/dev/null").unwrap().as_ptr(),
-                    libc::O_RDONLY,
-                );
-                if fd_a < 0 {
-                    panic!("How did we fail to open /dev/null");
-                } else if fd_a != 4 {
-                    let fd_b = libc::fcntl(fd_a, libc::F_DUPFD, 4);
-                    libc::close(fd_a);
-                    if fd_b < 0 {
-                        panic!("fcntl(fd_a, F_DUPFD, 4) failed");
-                    } else if fd_b != 4 {
-                        libc::close(fd_b);
-                        panic!("fd 4 already in use");
-                    }
-                }
-            }
             if let Some(p) = toml {
                 let path = Path::new(&p);
                 let mut f = std::fs::File::open(path)?;

@@ -140,7 +140,7 @@ dependencies = [
 [[package]]
 name = "async-byte-channel"
 version = "0.0.1"
-source = "git+https://github.com/Fundament-Software/capstone-rs#a42f4ca153b79e93990ae7765315a9a8850360b8"
+source = "git+https://github.com/Fundament-Software/capstone-rs#1196221ddbe4709df8881a3875c65c31c9582f88"
 dependencies = [
  "tokio",
 ]
@@ -323,7 +323,7 @@ dependencies = [
 [[package]]
 name = "caplog"
 version = "0.1.0"
-source = "git+https://github.com/Fundament-Software/caplog#75a23e65638212e85e9cdba3af90ee9721c1121e"
+source = "git+https://github.com/Fundament-Software/caplog#a374e07e74bb14f017513420d8bff19c3eff4f60"
 dependencies = [
  "bitfield-struct",
  "capstone",
@@ -335,7 +335,7 @@ dependencies = [
  "eyre",
  "memmap2",
  "num",
- "rand 0.9.1",
+ "rand 0.9.2",
  "tempfile",
  "thiserror 2.0.12",
 ]
@@ -355,7 +355,7 @@ dependencies = [
 [[package]]
 name = "capstone"
 version = "0.18.0"
-source = "git+https://github.com/Fundament-Software/capstone-rs#a42f4ca153b79e93990ae7765315a9a8850360b8"
+source = "git+https://github.com/Fundament-Software/capstone-rs#1196221ddbe4709df8881a3875c65c31c9582f88"
 dependencies = [
  "embedded-io",
  "flurry",
@@ -365,7 +365,7 @@ dependencies = [
 [[package]]
 name = "capstone-futures"
 version = "0.18.0"
-source = "git+https://github.com/Fundament-Software/capstone-rs#a42f4ca153b79e93990ae7765315a9a8850360b8"
+source = "git+https://github.com/Fundament-Software/capstone-rs#1196221ddbe4709df8881a3875c65c31c9582f88"
 dependencies = [
  "capstone",
  "futures-util",
@@ -376,7 +376,7 @@ dependencies = [
 [[package]]
 name = "capstone-gen"
 version = "0.18.0"
-source = "git+https://github.com/Fundament-Software/capstone-rs#a42f4ca153b79e93990ae7765315a9a8850360b8"
+source = "git+https://github.com/Fundament-Software/capstone-rs#1196221ddbe4709df8881a3875c65c31c9582f88"
 dependencies = [
  "capnp-sys",
  "capstone",
@@ -388,7 +388,7 @@ dependencies = [
 [[package]]
 name = "capstone-macros"
 version = "0.18.0"
-source = "git+https://github.com/Fundament-Software/capstone-rs#a42f4ca153b79e93990ae7765315a9a8850360b8"
+source = "git+https://github.com/Fundament-Software/capstone-rs#1196221ddbe4709df8881a3875c65c31c9582f88"
 dependencies = [
  "capstone",
  "capstone-gen",
@@ -402,7 +402,7 @@ dependencies = [
 [[package]]
 name = "capstone-rpc"
 version = "0.18.0"
-source = "git+https://github.com/Fundament-Software/capstone-rs#a42f4ca153b79e93990ae7765315a9a8850360b8"
+source = "git+https://github.com/Fundament-Software/capstone-rs#1196221ddbe4709df8881a3875c65c31c9582f88"
 dependencies = [
  "capstone",
  "capstone-futures",
@@ -789,9 +789,9 @@ checksum = "a74858bcfe44b22016cb49337d7b6f04618c58e5dbfdef61b06b8c434324a0bc"
 
 [[package]]
 name = "cxx"
-version = "1.0.160"
+version = "1.0.161"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "be1149bab7a5580cb267215751389597c021bfad13c0bb00c54e19559333764c"
+checksum = "a3523cc02ad831111491dd64b27ad999f1ae189986728e477604e61b81f828df"
 dependencies = [
  "cc",
  "cxxbridge-cmd",
@@ -803,9 +803,9 @@ dependencies = [
 
 [[package]]
 name = "cxx-build"
-version = "1.0.160"
+version = "1.0.161"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6aeeaf1aefae8e0f5141920a7ecbc64a22ab038d4b4ac59f2d19e0effafd5b53"
+checksum = "212b754247a6f07b10fa626628c157593f0abf640a3dd04cce2760eca970f909"
 dependencies = [
  "cc",
  "codespan-reporting",
@@ -818,9 +818,9 @@ dependencies = [
 
 [[package]]
 name = "cxxbridge-cmd"
-version = "1.0.160"
+version = "1.0.161"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c36ac1f9a72064b1f41fd7b49a4c1b3bf33b9ccb1274874dda6d264f57c55964"
+checksum = "f426a20413ec2e742520ba6837c9324b55ffac24ead47491a6e29f933c5b135a"
 dependencies = [
  "clap",
  "codespan-reporting",
@@ -832,15 +832,15 @@ dependencies = [
 
 [[package]]
 name = "cxxbridge-flags"
-version = "1.0.160"
+version = "1.0.161"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "170c6ff5d009663866857a91ebee55b98ea4d4b34e7d7aba6dc4a4c95cc7b748"
+checksum = "a258b6069020b4e5da6415df94a50ee4f586a6c38b037a180e940a43d06a070d"
 
 [[package]]
 name = "cxxbridge-macro"
-version = "1.0.160"
+version = "1.0.161"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4984a142211026786011a7e79fa22faa1eca1e9cbf0e60bffecfd57fd3db88f1"
+checksum = "e8dec184b52be5008d6eaf7e62fc1802caf1ad1227d11b3b7df2c409c7ffc3f4"
 dependencies = [
  "indexmap",
  "proc-macro2",
@@ -1382,9 +1382,9 @@ dependencies = [
 
 [[package]]
 name = "hyper-util"
-version = "0.1.15"
+version = "0.1.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f66d5bd4c6f02bf0542fad85d626775bab9258cf795a4256dcaf3161114d1df"
+checksum = "8d9b05277c7e8da2c93a568989bb6207bef0112e8d17df7a6eda4a3cf143bc5e"
 dependencies = [
  "base64",
  "bytes",
@@ -1398,7 +1398,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2",
+ "socket2 0.6.0",
  "system-configuration",
  "tokio",
  "tower-service",
@@ -1599,9 +1599,9 @@ checksum = "f4c7245a08504955605670dbf141fceab975f15ca21570696aebe9d2e71576bd"
 
 [[package]]
 name = "instability"
-version = "0.3.7"
+version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0bf9fed6d91cfb734e7476a06bde8300a1b94e217e1b523b6f0cd1a01998c71d"
+checksum = "435d80800b936787d62688c927b6490e887c7ef5ff9ce922c6c6050fca75eb9a"
 dependencies = [
  "darling",
  "indoc",
@@ -1628,9 +1628,9 @@ checksum = "06432fb54d3be7964ecd3649233cddf80db2832f47fec34c01f65b3d9d774983"
 
 [[package]]
 name = "io-uring"
-version = "0.7.8"
+version = "0.7.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b86e202f00093dcba4275d4636b93ef9dd75d025ae560d2521b45ea28ab49013"
+checksum = "d93587f37623a1a17d94ef2bc9ada592f5465fe7732084ab7beefabe5c77c0c4"
 dependencies = [
  "bitflags",
  "cfg-if",
@@ -1707,6 +1707,7 @@ dependencies = [
  "color-eyre",
  "convert_case 0.8.0",
  "crossterm 0.29.0",
+ "derive_more",
  "eyre",
  "futures-util",
  "gethostname",
@@ -1718,8 +1719,9 @@ dependencies = [
  "libc",
  "memchr",
  "num_enum",
+ "parking_lot",
  "predicates",
- "rand 0.9.1",
+ "rand 0.9.2",
  "ratatui",
  "rusqlite",
  "serde",
@@ -1784,9 +1786,9 @@ checksum = "1171693293099992e19cddea4e8b849964e9846f4acee11b3948bcc337be8776"
 
 [[package]]
 name = "libredox"
-version = "0.1.4"
+version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1580801010e535496706ba011c15f8532df6b42297d2e471fec38ceadd8c0638"
+checksum = "4488594b9328dee448adb906d8b126d9b7deb7cf5c22161ee591610bb1be83c0"
 dependencies = [
  "bitflags",
  "libc",
@@ -1832,9 +1834,9 @@ checksum = "241eaef5fd12c88705a01fc1066c48c4b36e0dd4377dcdc7ec3942cea7a69956"
 
 [[package]]
 name = "litrs"
-version = "0.4.1"
+version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b4ce301924b7887e9d637144fdade93f9dfff9b60981d4ac161db09720d39aa5"
+checksum = "f5e54036fe321fd421e10d732f155734c4e4afd610dd556d9a82833ab3ee0bed"
 
 [[package]]
 name = "lock_api"
@@ -2375,9 +2377,9 @@ dependencies = [
 
 [[package]]
 name = "rand"
-version = "0.9.1"
+version = "0.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9fbfd9d094a40bf3ae768db9361049ace4c0e04a4fd6b359518bd7b73a73dd97"
+checksum = "6db2770f06117d490610c7488547d543617b21bfa07796d7a12f6f1bd53850d1"
 dependencies = [
  "rand_chacha 0.9.0",
  "rand_core 0.9.3",
@@ -2444,9 +2446,9 @@ dependencies = [
 
 [[package]]
 name = "redox_syscall"
-version = "0.5.13"
+version = "0.5.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d04b7d0ee6b4a0207a0a7adb104d23ecb0b47d6beae7152d0fa34b692b29fd6"
+checksum = "7e8af0dde094006011e6a740d4879319439489813bd0bcdc7d821beaeeff48ec"
 dependencies = [
  "bitflags",
 ]
@@ -2681,9 +2683,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.140"
+version = "1.0.141"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "20068b6e96dc6c9bd23e01df8827e6c7e1f2fddd43c21810382803c136b99373"
+checksum = "30b9eff21ebe718216c6ec64e1d9ac57087aad11efc64e32002bce4a0d4c03d3"
 dependencies = [
  "itoa",
  "memchr",
@@ -2782,6 +2784,16 @@ checksum = "e22376abed350d73dd1cd119b57ffccad95b4e585a7cda43e286245ce23c0678"
 dependencies = [
  "libc",
  "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "socket2"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "233504af464074f9d066d7b5416c5f9b894a5862a6506e306f7b816cdd6f1807"
+dependencies = [
+ "libc",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2887,9 +2899,9 @@ dependencies = [
 
 [[package]]
 name = "sysinfo"
-version = "0.36.0"
+version = "0.36.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aab138f5c1bb35231de19049060a87977ad23e04f2303e953bc5c2947ac7dec4"
+checksum = "252800745060e7b9ffb7b2badbd8b31cfa4aa2e61af879d0a3bf2a317c20217d"
 dependencies = [
  "libc",
  "memchr",
@@ -3074,7 +3086,7 @@ dependencies = [
  "pin-project-lite",
  "signal-hook-registry",
  "slab",
- "socket2",
+ "socket2 0.5.10",
  "tokio-macros",
  "tracing",
  "windows-sys 0.52.0",

@@ -4,7 +4,7 @@ use bytes::BytesMut;
 use capnp_macros::capnproto_rpc;
 use futures_util::FutureExt;
 use std::future::Future;
-use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::Poll;
 use std::task::Waker;
 use std::{cell::RefCell, rc::Rc};
@@ -122,7 +122,7 @@ impl std::future::Future for ByteStreamBufferImpl {
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Self::Output> {
         let mut this = self.0.borrow_mut();
-        if this.pending.load(std::sync::atomic::Ordering::Relaxed) == 0 {
+        if this.pending.load(Ordering::Acquire) == 0 {
             Poll::Ready(())
         } else {
             this.write_waker = Some(cx.waker().clone());
@@ -141,8 +141,7 @@ impl Server for RefCell<ByteStreamBufferInternal> {
             ByteStreamBufferImpl(copy).await;
             let mut this = self.borrow_mut();
             this.buf = bytes.to_owned();
-            this.pending
-                .store(this.buf.len(), std::sync::atomic::Ordering::Release);
+            this.pending.store(this.buf.len(), Ordering::Release);
             if let Some(w) = this.read_waker.take() {
                 w.wake();
             }
@@ -171,13 +170,12 @@ impl AsyncRead for ByteStreamBufferImpl {
         buf: &mut tokio::io::ReadBuf<'_>,
     ) -> Poll<std::io::Result<()>> {
         let mut this = self.0.borrow_mut();
-        let pending = this.pending.load(std::sync::atomic::Ordering::Acquire);
+        let pending = this.pending.load(Ordering::Acquire);
         if pending > 0 {
             let start = this.buf.len() - pending;
             let len = std::cmp::min(pending, buf.remaining());
             buf.put_slice(&this.buf[start..(start + len)]);
-            this.pending
-                .fetch_sub(len, std::sync::atomic::Ordering::Release);
+            this.pending.fetch_sub(len, Ordering::Release);
             if let Some(w) = this.write_waker.take() {
                 w.wake()
             }

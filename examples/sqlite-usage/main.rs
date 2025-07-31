@@ -170,13 +170,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn test_sqlite_usage() -> eyre::Result<()> {
     //console_subscriber::init();
 
-    #[cfg(feature = "tracing")]
-    tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::DEBUG)
-        .with_writer(std::io::stderr)
-        .with_ansi(true)
-        .init();
-
     keystone::test_module_harness::<
         sqlite_usage::sqlite_usage_capnp::config::Owned,
         SqliteUsageImpl,

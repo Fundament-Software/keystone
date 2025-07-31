@@ -1,18 +1,20 @@
-use crate::capnp::capability::RemotePromise;
 use crate::capnp::{self, dynamic_list, dynamic_value};
 use crate::capnp::{any_pointer::Owned as any_pointer, dynamic_struct};
 use crate::capnp_rpc::queued;
 use eyre::Result;
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use crate::{
-    keystone::{Error, SpawnProcess, SpawnProgram},
+    keystone::{Error, ModuleProgram},
     module_capnp::module_error,
     module_capnp::module_start,
 };
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, derive_more::TryFrom)]
+#[try_from(repr)]
+#[repr(u8)]
 pub enum ModuleState {
     NotStarted,
     Initialized, // Started but waiting for bootstrap capability to return
@@ -42,19 +44,22 @@ impl std::fmt::Display for ModuleState {
 }
 #[derive(Clone)]
 pub enum ModuleOrCap {
-    ModuleId(u64),
+    InstanceId(u64),
     Cap(CapnpHook),
 }
+
 #[derive(Clone)]
 pub struct CapnpHook {
     pub cap: Box<dyn capnp::private::capability::ClientHook>,
-    pub module_id: u64, //For getting schema
+    pub instance_id: u64,
 }
+
 #[derive(Clone)]
 pub struct ParamResultType {
     pub name: String,
     pub capnp_type: CapnpType,
 }
+
 impl TryInto<CapnpType> for dynamic_value::Reader<'_> {
     type Error = core::str::Utf8Error;
 
@@ -220,22 +225,26 @@ pub enum CapnpType {
     Capability(CapnpCap),
     None,
 }
+
 #[derive(Clone)]
 pub struct CapnpCap {
     pub hook: Option<Box<dyn capnp::private::capability::ClientHook>>,
     pub schema: capnp::schema::CapabilitySchema,
 }
+
 #[derive(Clone)]
 pub struct CapnpEnum {
     pub value: Option<u16>,
     pub schema: capnp::schema::EnumSchema,
     pub enumerant_name: Option<String>,
 }
+
 #[derive(Clone)]
 pub struct CapnpStruct {
     pub fields: Vec<ParamResultType>,
     pub schema: capnp::schema::StructSchema,
 }
+
 impl CapnpStruct {
     pub fn init(&mut self) {
         if self.fields.len() == 1 {
@@ -389,7 +398,7 @@ pub struct FunctionDescription {
 //TODO potentially doesn't work for multiple of the same module
 impl std::hash::Hash for FunctionDescription {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        if let ModuleOrCap::ModuleId(id) = self.module_or_cap {
+        if let ModuleOrCap::InstanceId(id) = self.module_or_cap {
             id.hash(state);
         }
         self.function_name.hash(state);
@@ -403,25 +412,25 @@ impl PartialEq for FunctionDescription {
 }
 impl Eq for FunctionDescription {}
 
-// This can't be a rust generic because we do not know the type parameters at compile time.
+// Defines something that can spawn a ModuleInstance, which is usually a ModuleProgram
+pub struct ModuleSource {
+    pub schema_id: u64,
+    pub(crate) program: ModuleProgram,
+    pub dyn_schema: capnp::schema::DynamicSchema,
+}
+
+// Defines a particular module instance being tracked by Keystone
 pub struct ModuleInstance {
-    pub module_id: u64,
-    pub name: String,
-    pub(crate) program: Option<SpawnProgram>,
-    pub(crate) process: Option<SpawnProcess>,
+    //pub id: spawn_capnp::identifier::Client,
+    pub source: std::path::PathBuf,
+    //pub instance_id: u64,
+    pub name: String, // Simply stores id.to_string() so we don't need access to the id_set.
+    // A module isn't always a process, but if it does have a process we need the ability to kill it
+    pub(crate) process: Option<crate::ModuleProcess>,
     pub(crate) bootstrap: Option<module_start::Client<any_pointer, any_pointer>>,
-    pub pause: tokio::sync::mpsc::Sender<bool>,
-    pub api: Option<
-        RemotePromise<
-            crate::spawn_capnp::process::get_api_results::Owned<
-                any_pointer,
-                module_error::Owned<any_pointer>,
-            >,
-        >,
-    >,
-    pub state: ModuleState,
-    pub queue: queued::Client,
-    pub dyn_schema: Option<capnp::schema::DynamicSchema>,
+    pub pause: tokio::sync::watch::Sender<bool>,
+    pub state: std::sync::atomic::AtomicU8,
+    pub api: queued::Client,
 }
 
 impl ModuleInstance {
@@ -448,7 +457,7 @@ impl ModuleInstance {
         let moderr: module_error::Reader<any_pointer> = r.get()?.get_result()?;
         Ok(match moderr.which()? {
             module_error::Which::Backing(e) => {
-                let e: crate::posix_spawn_capnp::posix_error::Reader = e?.get_as()?;
+                let e: crate::posix_capnp::posix_error::Reader = e?.get_as()?;
                 if e.get_error_code() != 0 {
                     tracing::error!(
                         "{} process returned error code: {}",
@@ -465,28 +474,28 @@ impl ModuleInstance {
     }
 
     fn reset(&mut self) {
-        self.api = None;
-        self.bootstrap = None;
         self.process = None;
-        self.program = None;
-        self.queue = queued::Client::new(None);
-        let (empty_send, _) = tokio::sync::mpsc::channel(1);
-        self.pause = empty_send;
+        self.bootstrap = None;
+        self.api = queued::Client::new(None);
+        self.pause.send_replace(false);
     }
 
     pub async fn stop(&mut self, timeout: Duration) -> Result<()> {
         if self.halted() {
             return Ok(());
         }
-        let _ = self.pause.send(false).await; // Ignore a failure here
-        self.state = ModuleState::Closing;
+        self.pause.send_replace(false);
+        self.state
+            .store(ModuleState::Closing as u8, Ordering::Release);
 
         // Send the stop request to the bootstrap interface
-        let Some(bootstrap) = self.bootstrap.as_ref() else {
-            return Err(Error::MissingBootstrap(self.name.clone()).into());
-        };
+        let stop_request = {
+            let Some(bootstrap) = self.bootstrap.as_ref() else {
+                return Err(Error::MissingBootstrap(self.name.clone()).into());
+            };
 
-        let stop_request = bootstrap.stop_request().send();
+            bootstrap.stop_request().send()
+        };
 
         tracing::debug!("Sent a stop_request to {}", &self.name);
 
@@ -495,7 +504,6 @@ impl ModuleInstance {
             // Force kill the module.
             tracing::warn!("{} timed out when requesting stop!", &self.name);
             self.kill().await;
-            self.reset();
             Ok(())
         } else {
             tracing::debug!("Got stop_request reply back from {}", &self.name);
@@ -505,22 +513,29 @@ impl ModuleInstance {
                 match tokio::time::timeout(timeout, p.join_request().send().promise).await {
                     Ok(result) => {
                         tracing::debug!("Joined process for {}", &self.name);
-                        self.state = match Self::check_error(&self.name, result) {
-                            Ok(v) => v,
+                        let end_state = match Self::check_error(&self.name, result) {
+                            Ok(v) => v as u8,
                             Err(e) => {
                                 tracing::error!(
                                     "Failure during {} error lookup: {}",
                                     &self.name,
                                     e.to_string()
                                 );
-                                ModuleState::CloseFailure
+                                ModuleState::CloseFailure as u8
                             }
                         };
+
+                        self.reset(); // Always reset BEFORE setting the state to prevent race conditions
+                        self.state.store(end_state, Ordering::Release)
                     }
                     Err(_) => self.kill().await,
                 }
+            } else {
+                self.reset();
+                self.state
+                    .store(ModuleState::Closed as u8, Ordering::Release);
             }
-            self.reset();
+
             Ok(())
         }
     }
@@ -529,31 +544,36 @@ impl ModuleInstance {
         if let Some(p) = self.process.as_ref() {
             tracing::warn!("Force killing {}", &self.name);
             let _ = p.kill_request().send().promise.await;
+        } else {
+            panic!("Tried to kill a module that doesn't have a process!")
         }
 
-        self.state = ModuleState::Aborted;
+        self.reset();
+        self.state
+            .store(ModuleState::Aborted as u8, Ordering::Release);
     }
 
     pub async fn pause(&mut self, pause: bool) -> Result<()> {
         // Only change pause state if we're in a Ready or Paused state.
-        if pause && self.state == ModuleState::Ready {
-            self.pause.send(true).await?;
-            self.state = ModuleState::Paused;
-        } else if !pause && self.state == ModuleState::Paused {
-            self.pause.send(false).await?;
-            self.state = ModuleState::Ready;
+        if pause && self.state.load(Ordering::Acquire) == ModuleState::Ready as u8 {
+            self.pause.send_replace(true);
+            self.state
+                .store(ModuleState::Paused as u8, Ordering::Release);
+        } else if !pause && self.state.load(Ordering::Acquire) == ModuleState::Paused as u8 {
+            self.pause.send_replace(false);
+            self.state
+                .store(ModuleState::Ready as u8, Ordering::Release);
         }
         Ok(())
     }
 
-    fn halted(&self) -> bool {
-        matches!(
-            self.state,
-            ModuleState::NotStarted
-                | ModuleState::Closed
-                | ModuleState::Aborted
-                | ModuleState::StartFailure
-                | ModuleState::CloseFailure
-        )
+    pub(crate) fn halted(&self) -> bool {
+        let v = self.state.load(Ordering::Acquire);
+
+        v == ModuleState::NotStarted as u8
+            || v == ModuleState::Closed as u8
+            || v == ModuleState::Aborted as u8
+            || v == ModuleState::StartFailure as u8
+            || v == ModuleState::CloseFailure as u8
     }
 }

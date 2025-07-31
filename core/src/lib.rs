@@ -12,9 +12,10 @@ pub mod host;
 pub mod http;
 mod keystone;
 pub mod module;
+mod posix;
 mod posix_module;
 mod posix_process;
-mod posix_spawn;
+mod process;
 pub mod proxy;
 pub mod scheduler;
 pub mod sqlite;
@@ -31,10 +32,10 @@ use caplog::capnp::capability::FromServer;
 use caplog::capnp::traits::Owned;
 #[cfg(windows)]
 use caplog::capnp_rpc::tokio::io::{ReadHalf, WriteHalf};
+#[cfg(not(windows))]
+use caplog::capnp_rpc::tokio::net::UnixStream;
 #[cfg(windows)]
 use caplog::capnp_rpc::tokio::net::windows::named_pipe::{ClientOptions, NamedPipeClient};
-#[cfg(not(windows))]
-use caplog::capnp_rpc::tokio::net::{UnixListener, UnixStream};
 use caplog::capnp_rpc::tokio::sync::oneshot;
 use caplog::capnp_rpc::{RpcSystem, rpc_twoparty_capnp, twoparty};
 use capnp_macros::capnproto_rpc;
@@ -51,16 +52,8 @@ use std::os::fd::FromRawFd;
 use std::rc::Rc;
 use tempfile::NamedTempFile;
 use tokio::sync::OnceCell;
-use tracing_subscriber::filter::LevelFilter;
 
 include!(concat!(env!("OUT_DIR"), "/capnproto.rs"));
-
-pub fn fmt(filter: impl Into<LevelFilter>) -> impl Into<tracing::Dispatch> {
-    tracing_subscriber::fmt()
-        .with_max_level(filter)
-        .with_writer(std::io::stderr)
-        .with_ansi(true)
-}
 
 /// Trait that describes a keystone module
 #[allow(async_fn_in_trait)]
@@ -78,17 +71,12 @@ pub trait Module<Config: capnp::traits::Owned>: Sized {
 }
 
 #[allow(clippy::type_complexity)]
-pub struct ModuleImpl<
-    Config: 'static + capnp::traits::Owned,
-    Impl: 'static + Module<Config>,
-    API: 'static + for<'c> capnp::traits::Owned<Reader<'c>: FromServer<Impl>>,
-> {
-    bootstrap: std::cell::OnceCell<keystone_capnp::host::Client<any_pointer>>,
+pub struct ModuleImpl<Config: 'static + capnp::traits::Owned, Impl: 'static + Module<Config>> {
+    bootstrap: capnp_rpc::queued::Client,
     disconnector: AtomicTake<oneshot::Sender<()>>,
-    inner: OnceCell<Rc<Impl>>,
+    startsignal: AtomicTake<oneshot::Sender<()>>,
+    inner_impl: OnceCell<Rc<Impl>>,
     phantom: PhantomData<Config>,
-    phantomapi: PhantomData<API>,
-    sender: AtomicTake<oneshot::Sender<()>>,
 }
 
 #[capnproto_rpc(module_start)]
@@ -96,35 +84,39 @@ impl<
     Config: 'static + capnp::traits::Owned,
     Impl: 'static + Module<Config>,
     API: 'static + for<'c> capnp::traits::Owned<Reader<'c>: capnp::capability::FromServer<Impl>>,
-> module_start::Server<Config, API> for ModuleImpl<Config, Impl, API>
+> module_start::Server<Config, API> for ModuleImpl<Config, Impl>
 {
     async fn start(self: Rc<Self>, config: Reader) -> capnp::Result<()> {
-        if let Some(sender) = self.sender.take() {
+        use capnp::capability::FromClientHook;
+        use capnp::private::capability::ClientHook;
+
+        if let Some(sender) = self.startsignal.take() {
             let _ = sender.send(());
         }
+
         tracing::debug!("Constructing module implementation");
-        let bootstrap_ref = self.bootstrap.get();
-        if let Some(bootstrap) = bootstrap_ref {
-            let inner = self
-                .inner
-                .get_or_try_init(|| async {
-                    Ok::<Rc<Impl>, capnp::Error>(Rc::new(
-                        Impl::new(config, bootstrap.clone()).await?,
-                    ))
-                })
-                .await?;
-            let api: API::Reader<'_> = capnp::capability::FromClientHook::new(Box::new(
-                capnp_rpc::local::Client::new(API::Reader::from_rc(inner.clone())),
-            ));
-            results.get().set_api(api)
-        } else {
-            Err(capnp::Error::failed("Bootstrap API did not exist?! Was start() called before the RPC connection was fully established?".into()))
-        }
+        let inner = self
+            .inner_impl
+            .get_or_try_init(|| async {
+                Ok::<Rc<Impl>, capnp::Error>(Rc::new(
+                    Impl::new(
+                        config,
+                        keystone_capnp::host::Client::<any_pointer>::new(self.bootstrap.add_ref()),
+                    )
+                    .await?,
+                ))
+            })
+            .await?;
+        let api: API::Reader<'_> = capnp::capability::FromClientHook::new(Box::new(
+            capnp_rpc::local::Client::new(API::Reader::from_rc(inner.clone())),
+        ));
+        tracing::debug!("Finished start()");
+        results.get().set_api(api)
     }
     async fn stop(self: Rc<Self>) -> capnp::Result<()> {
         tracing::debug!("Module recieved stop request");
         if let Some(tx) = self.disconnector.take() {
-            if let Some(inner) = self.inner.get() {
+            if let Some(inner) = self.inner_impl.get() {
                 inner.stop().await?;
             }
 
@@ -133,12 +125,6 @@ impl<
         } else {
             Err(capnp::Error::from_kind(capnp::ErrorKind::Disconnected))
         }
-    }
-}
-
-impl std::fmt::Debug for keystone_capnp::host::Client<capnp::any_pointer::Owned> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        write!(f, "[{}]", self.client.hook.get_ptr())
     }
 }
 
@@ -157,12 +143,11 @@ pub async fn start<
     let (tx, rx) = oneshot::channel::<()>();
 
     let module_impl = Rc::new(ModuleImpl {
-        bootstrap: Default::default(),
+        bootstrap: capnp_rpc::queued::Client::new(None),
         disconnector: AtomicTake::new(tx),
-        inner: Default::default(),
+        startsignal: AtomicTake::new(sender),
+        inner_impl: Default::default(),
         phantom: PhantomData,
-        phantomapi: PhantomData,
-        sender: AtomicTake::new(sender),
     });
 
     let module_client: module_start::Client<Config, API> =
@@ -177,11 +162,15 @@ pub async fn start<
     let mut rpc_system = RpcSystem::new(Box::new(network), Some(module_client.clone().client));
     let disconnector = rpc_system.get_disconnector();
 
-    let borrow = module_impl.as_ref();
-    borrow
-        .bootstrap
-        .set(rpc_system.bootstrap(rpc_twoparty_capnp::Side::Client))
-        .unwrap();
+    capnp_rpc::queued::ClientInner::resolve(
+        &module_impl.bootstrap.inner,
+        Ok(rpc_system
+            .bootstrap::<keystone_capnp::host::Client<any_pointer>>(
+                rpc_twoparty_capnp::Side::Client,
+            )
+            .client
+            .hook),
+    );
 
     tokio::task::spawn_local(async move {
         if tokio::time::timeout(tokio::time::Duration::from_secs(5), recv)
@@ -234,7 +223,6 @@ pub async fn main<
             .with_env_filter(tracing_subscriber::EnvFilter::from_env(
                 "KEYSTONE_MODULE_LOG",
             ))
-            .with_writer(std::io::stderr)
             .with_ansi(true)
             .init();
     }
@@ -283,6 +271,28 @@ pub async fn main<
     Ok(())
 }
 
+#[cfg(not(windows))]
+pub fn reserve_fd_4() {
+    unsafe {
+        let fd_a = libc::open(
+            std::ffi::CString::new("/dev/null").unwrap().as_ptr(),
+            libc::O_RDONLY,
+        );
+        if fd_a < 0 {
+            panic!("How did we fail to open /dev/null");
+        } else if fd_a != 4 {
+            let fd_b = libc::fcntl(fd_a, libc::F_DUPFD, 4);
+            libc::close(fd_a);
+            if fd_b < 0 {
+                panic!("fcntl(fd_a, F_DUPFD, 4) failed");
+            } else if fd_b != 4 {
+                libc::close(fd_b);
+                panic!("fd 4 already in use");
+            }
+        }
+    }
+}
+
 use tempfile::TempPath;
 
 pub fn build_temp_config(
@@ -312,24 +322,41 @@ pub async fn test_create_keystone(
     let (mut instance, rpc_systems) = Keystone::new(
         message.get_root_as_reader::<keystone_config::Reader>()?,
         false,
+        None,
     )?;
 
+    let curdir = std::env::current_dir()?;
     instance
         .init(
-            &std::env::current_dir()?,
+            &curdir,
             message.get_root_as_reader::<keystone_config::Reader>()?,
             &rpc_systems,
-            Keystone::passthrough_stderr,
         )
         .await?;
 
     Ok((instance, rpc_systems))
 }
 
+static LAZY_TEST_INIT: std::sync::OnceLock<Result<(), Error>> = std::sync::OnceLock::new();
+
 pub fn test_harness<F: Future<Output = eyre::Result<()>> + 'static>(
     config: &str,
     f: impl FnOnce(capnp::message::Builder<capnp::message::HeapAllocator>) -> F + 'static,
 ) -> eyre::Result<()> {
+    LAZY_TEST_INIT
+        .get_or_init(|| {
+            #[cfg(not(windows))]
+            reserve_fd_4();
+            Ok(())
+        })
+        .as_ref()
+        .unwrap();
+
+    let _ = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::DEBUG)
+        .with_ansi(true)
+        .try_init();
+
     let mut message = capnp::message::Builder::new_default();
     let mut msg = message.init_root::<keystone_config::Builder>();
 
@@ -393,6 +420,11 @@ pub fn test_module_harness<
     module: &str,
     f: impl for<'a> FnOnce(API::Reader<'a>) -> F + 'static,
 ) -> eyre::Result<()> {
+    let _ = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::DEBUG)
+        .with_ansi(true)
+        .try_init();
+
     let temp_db = NamedTempFile::new().unwrap().into_temp_path();
     let temp_log = NamedTempFile::new().unwrap().into_temp_path();
     let temp_prefix = NamedTempFile::new().unwrap().into_temp_path();
@@ -415,7 +447,73 @@ pub fn test_module_harness<
     let module = module.to_string();
     let b = pool.run_until(pool.spawn_local(async move {
         let (mut instance, api, mut rpc_systems): (Keystone, API::Reader<'_>, RpcSystemSet) =
-            Keystone::init_single_module(&source, &module, server_reader, server_writer)
+            Keystone::init_single_module(&source, &module, server_reader, server_writer, None)
+                .await
+                .unwrap();
+
+        tokio::select! {
+            r = drive_stream(&mut rpc_systems) => r,
+            r = f(api) => r.wrap_err(module),
+        }?;
+        test_shutdown(&mut instance, &mut rpc_systems).await
+    }));
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    let result = runtime.block_on(async move {
+        tokio::select! {
+            r = a => r,
+            r = b => r,
+            r = tokio::signal::ctrl_c() => Ok(Ok(r.expect("failed to capture ctrl-c"))),
+        }
+    });
+
+    runtime.shutdown_timeout(std::time::Duration::from_millis(1));
+    result.unwrap().unwrap();
+
+    Ok(())
+}
+
+#[allow(clippy::unit_arg)]
+pub fn test_module_harness_pipe<
+    Config: 'static + capnp::traits::Owned + Unpin,
+    Impl: 'static + Module<Config>,
+    API: 'static + for<'c> capnp::traits::Owned<Reader<'c>: capnp::capability::FromServer<Impl>> + Unpin,
+    F: Future<Output = eyre::Result<()>> + 'static,
+>(
+    config: &str,
+    module: &str,
+    f: impl for<'a> FnOnce(API::Reader<'a>) -> F + 'static,
+) -> eyre::Result<()> {
+    let _ = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::DEBUG)
+        .with_ansi(true)
+        .try_init();
+
+    let temp_db = NamedTempFile::new().unwrap().into_temp_path();
+    let temp_log = NamedTempFile::new().unwrap().into_temp_path();
+    let temp_prefix = NamedTempFile::new().unwrap().into_temp_path();
+    let mut source = build_temp_config(&temp_db, &temp_log, &temp_prefix);
+
+    source.push_str(config);
+
+    let (client_writer, server_reader) = async_byte_channel::channel();
+    let (server_writer, client_reader) = async_byte_channel::channel();
+
+    let pool = tokio::task::LocalSet::new();
+    let a = pool.run_until(pool.spawn_local(start::<
+        Config,
+        Impl,
+        API,
+        async_byte_channel::Receiver,
+        async_byte_channel::Sender,
+    >(client_reader, client_writer)));
+
+    let module = module.to_string();
+    let b = pool.run_until(pool.spawn_local(async move {
+        let (mut instance, api, mut rpc_systems): (Keystone, API::Reader<'_>, RpcSystemSet) =
+            Keystone::init_single_module(&source, &module, server_reader, server_writer, None)
                 .await
                 .unwrap();
 

@@ -123,7 +123,6 @@ impl SqliteDatabase {
         clients: Rc<RefCell<HashMap<u64, Box<dyn capnp::private::capability::ClientHook>>>>,
     ) -> capnp::Result<Self> {
         let connection = Connection::open_with_flags(path, flags).unwrap(); //.map_err(convert_rusqlite_error)?;
-        //TODO maybe put crsqlite behind a cfg
         unsafe {
             connection
                 .load_extension_enable()
@@ -990,9 +989,8 @@ impl SqliteDatabase {
 
 impl std::ops::Drop for SqliteDatabase {
     fn drop(&mut self) {
-        //TODO not sure if we wanna do something with the results of finalize or have this somewhere else than drop
         let mut stmt = self.connection.prepare("SELECT crsql_finalize()").unwrap();
-        let _ = stmt.execute([]); //.unwrap(); TODO expect
+        stmt.execute([]).or_else(|err| if err == rusqlite::Error::ExecuteReturnedResults {Ok(0)} else {Err(err)}).unwrap();
     }
 }
 
@@ -1602,9 +1600,7 @@ fn create_table_helper(
     if crr_table {
         let mut stat = format!("SELECT crsql_as_crr('table{table_name}')");
         let mut stmt = db.connection.prepare(stat.as_str()).unwrap();
-        let _ = stmt.execute([]);
-        //.query([])
-        //.unwrap();
+        let _ = stmt.execute([]).or_else(|err| if err == rusqlite::Error::ExecuteReturnedResults {Ok(0)} else {Err(err)}).map_err(convert_rusqlite_error)?;
     }
     Ok(())
 }
@@ -1770,9 +1766,7 @@ impl add_d_b::Server for SqliteDatabase {
         if server.access == AccessLevel::Admin {
             let mut stat = format!("SELECT crsql_as_crr('table{}')", server.table_name);
             let mut stmt = self.connection.prepare(stat.as_str()).unwrap();
-            let _ = stmt.execute([]);
-            //.query([])
-            //.unwrap();
+            let _ = stmt.execute([]).or_else(|err| if err == rusqlite::Error::ExecuteReturnedResults {Ok(0)} else {Err(err)}).map_err(convert_rusqlite_error)?;
         } else {
             return Err(capnp::Error::failed(
                 "Insufficient table ref access level to upgrade table to crr".into(),

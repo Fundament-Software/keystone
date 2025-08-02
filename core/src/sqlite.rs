@@ -1598,8 +1598,7 @@ fn create_table_helper(
         .execute(statement.as_str(), ())
         .map_err(convert_rusqlite_error)?;
     if crr_table {
-        let mut stat = format!("SELECT crsql_as_crr('table{table_name}')");
-        let mut stmt = db.connection.prepare(stat.as_str()).unwrap();
+        let mut stmt = db.connection.prepare(format!("SELECT crsql_as_crr('table{table_name}')").as_str()).map_err(convert_rusqlite_error)?;
         let _ = stmt.execute([]).or_else(|err| if err == rusqlite::Error::ExecuteReturnedResults {Ok(0)} else {Err(err)}).map_err(convert_rusqlite_error)?;
     }
     Ok(())
@@ -1764,8 +1763,7 @@ impl add_d_b::Server for SqliteDatabase {
             ));
         };
         if server.access == AccessLevel::Admin {
-            let mut stat = format!("SELECT crsql_as_crr('table{}')", server.table_name);
-            let mut stmt = self.connection.prepare(stat.as_str()).unwrap();
+            let mut stmt = self.connection.prepare(format!("SELECT crsql_as_crr('table{}')", server.table_name).as_str()).map_err(convert_rusqlite_error)?;
             let _ = stmt.execute([]).or_else(|err| if err == rusqlite::Error::ExecuteReturnedResults {Ok(0)} else {Err(err)}).map_err(convert_rusqlite_error)?;
         } else {
             return Err(capnp::Error::failed(

@@ -992,7 +992,7 @@ impl std::ops::Drop for SqliteDatabase {
     fn drop(&mut self) {
         //TODO not sure if we wanna do something with the results of finalize or have this somewhere else than drop
         let mut stmt = self.connection.prepare("SELECT crsql_finalize()").unwrap();
-        let _ = stmt.execute([]).unwrap();
+        let _ = stmt.execute([]); //.unwrap(); TODO expect
     }
 }
 

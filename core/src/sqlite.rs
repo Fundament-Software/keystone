@@ -122,21 +122,10 @@ impl SqliteDatabase {
         table_ref_set: Rc<RefCell<CapabilityServerSet<TableRefImpl, table::Client>>>,
         clients: Rc<RefCell<HashMap<u64, Box<dyn capnp::private::capability::ClientHook>>>>,
     ) -> capnp::Result<Self> {
-        let connection = Connection::open_with_flags(path, flags).map_err(convert_rusqlite_error)?;
-        unsafe {
-            connection
-                .load_extension_enable()
-                .map_err(convert_rusqlite_error)?;
-            connection
-                .load_extension(
-                    "I:\\Coding_stuff\\latest\\keystone\\core\\src\\crsqlite",
-                    Some("sqlite3_crsqlite_init"),
-                )
-                .map_err(convert_rusqlite_error)?; //TODO path
-            connection
-                .load_extension_disable()
-                .map_err(convert_rusqlite_error)?;
-        }
+        let cr_result = cr_sqlite_sys::init_cr_sqlite_ext();
+        assert_eq!(cr_result, 0);
+        let connection =
+            Connection::open_with_flags(path, flags).map_err(convert_rusqlite_error)?;
         let column_set = RefCell::new(create_column_set(&connection)?);
         Ok(Self {
             connection,
@@ -990,7 +979,15 @@ impl SqliteDatabase {
 impl std::ops::Drop for SqliteDatabase {
     fn drop(&mut self) {
         let mut stmt = self.connection.prepare("SELECT crsql_finalize()").unwrap();
-        stmt.execute([]).or_else(|err| if err == rusqlite::Error::ExecuteReturnedResults {Ok(0)} else {Err(err)}).unwrap();
+        stmt.execute([])
+            .or_else(|err| {
+                if err == rusqlite::Error::ExecuteReturnedResults {
+                    Ok(0)
+                } else {
+                    Err(err)
+                }
+            })
+            .unwrap();
     }
 }
 
@@ -1566,11 +1563,8 @@ fn create_table_helper(
 ) -> capnp::Result<()> {
     let mut statement = String::new();
     statement.push_str(
-        format!(
-            "CREATE TABLE {}{} (id INTEGER PRIMARY KEY NOT NULL, ",
-            TABLE_PREFIX, table_name
-        )
-        .as_str(),
+        format!("CREATE TABLE {TABLE_PREFIX}{table_name} (id INTEGER PRIMARY KEY NOT NULL, ",)
+            .as_str(),
     );
     db.column_set.borrow_mut().insert("id".to_string());
     db.column_set.borrow_mut().insert("*".to_string());
@@ -1598,8 +1592,20 @@ fn create_table_helper(
         .execute(statement.as_str(), ())
         .map_err(convert_rusqlite_error)?;
     if crr_table {
-        let mut stmt = db.connection.prepare(format!("SELECT crsql_as_crr('table{table_name}')").as_str()).map_err(convert_rusqlite_error)?;
-        let _ = stmt.execute([]).or_else(|err| if err == rusqlite::Error::ExecuteReturnedResults {Ok(0)} else {Err(err)}).map_err(convert_rusqlite_error)?;
+        let mut stmt = db
+            .connection
+            .prepare(format!("SELECT crsql_as_crr('table{table_name}')").as_str())
+            .map_err(convert_rusqlite_error)?;
+        let _ = stmt
+            .execute([])
+            .or_else(|err| {
+                if err == rusqlite::Error::ExecuteReturnedResults {
+                    Ok(0)
+                } else {
+                    Err(err)
+                }
+            })
+            .map_err(convert_rusqlite_error)?;
     }
     Ok(())
 }
@@ -1763,8 +1769,20 @@ impl add_d_b::Server for SqliteDatabase {
             ));
         };
         if server.access == AccessLevel::Admin {
-            let mut stmt = self.connection.prepare(format!("SELECT crsql_as_crr('table{}')", server.table_name).as_str()).map_err(convert_rusqlite_error)?;
-            let _ = stmt.execute([]).or_else(|err| if err == rusqlite::Error::ExecuteReturnedResults {Ok(0)} else {Err(err)}).map_err(convert_rusqlite_error)?;
+            let mut stmt = self
+                .connection
+                .prepare(format!("SELECT crsql_as_crr('table{}')", server.table_name).as_str())
+                .map_err(convert_rusqlite_error)?;
+            let _ = stmt
+                .execute([])
+                .or_else(|err| {
+                    if err == rusqlite::Error::ExecuteReturnedResults {
+                        Ok(0)
+                    } else {
+                        Err(err)
+                    }
+                })
+                .map_err(convert_rusqlite_error)?;
         } else {
             return Err(capnp::Error::failed(
                 "Insufficient table ref access level to upgrade table to crr".into(),

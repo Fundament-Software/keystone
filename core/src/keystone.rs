@@ -738,8 +738,7 @@ impl Keystone {
         if let Err(e) = anybuild.set_as(replacement) {
             return Self::failed_start(&self.instances, instance_id, e);
         }
-        pair.set_aux(dirclient)
-            .map_err(|e| Error::ModuleStartFailure(e))?;
+        pair.set_aux(dirclient).map_err(Error::ModuleStartFailure)?;
 
         tracing::debug!("Sending spawn request inside {}", workpath.display());
         let response = spawn_request.send().promise.await;

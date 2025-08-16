@@ -23,6 +23,7 @@ use tokio_util::sync::CancellationToken;
 #[cfg(not(windows))]
 use tokio::net::UnixStream;
 
+#[allow(dead_code)]
 pub struct PosixModuleProcessImpl<Fut: Future<Output = capnp::Result<ExitStatus>>> {
     process: Shared<Fut>,
     exit: OnceCell<ExitStatus>,

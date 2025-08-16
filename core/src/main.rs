@@ -6,7 +6,6 @@ use crossterm::event::KeyCode::Char;
 use crossterm::event::{Event, KeyEvent};
 use eyre::Result;
 use futures_util::{FutureExt, StreamExt};
-use keystone::CapnpType;
 use keystone::Keystone;
 use keystone::ModuleState;
 use keystone::RpcSystemSet;
@@ -14,8 +13,10 @@ use keystone::byte_stream::ByteStreamBufferImpl;
 use keystone::config;
 use keystone::keystone_capnp::keystone_config;
 use keystone::module::*;
+use keystone::{CapnpType, service};
 use ratatui::widgets::{ListState, TableState};
 use std::collections::BTreeMap;
+use std::ffi::OsString;
 use std::future::Future;
 use std::io::Write;
 use std::path::Path;
@@ -100,11 +101,13 @@ enum Commands {
     },
     /// Installs a new keystone daemon using the given compiled config.
     Install {
+        #[arg(short = 't')]
+        toml: Option<String>,
         /// If not specified, assumes the config lives in "./keystone.config"
         #[arg(short = 'c')]
         config: Option<String>,
         /// If specified, copies the entire directory next to the keystone executable. Will eventually be replaced with a proper content store.
-        #[arg(short = 't')]
+        #[arg(short = 'a')]
         store: Option<String>,
         /// If any modules are specified in both the old and new configs, preserve their state and internal configuration.
         #[arg(short = 'u')]
@@ -143,6 +146,16 @@ enum Commands {
         /// Disable standard include paths
         #[arg(short = 'n', long = "no-std")]
         no_std: bool,
+    },
+    /// Start keystone as a windows service or systemd module
+    Service {
+        /// Flag passed by start to run the service, blocking the thread. Should generally not be used directly.
+        #[arg(short = 'r')]
+        run: bool,
+        #[arg(short = 't')]
+        toml: Option<String>,
+        #[arg(short = 'c')]
+        config: Option<String>,
     },
 }
 
@@ -2068,7 +2081,6 @@ fn main() -> Result<()> {
     color_eyre::install()?;
 
     let cli = Cli::parse();
-
     tracing_subscriber::fmt()
         .with_max_level(cli.log.unwrap_or(LogLevel::Warn))
         //.with_max_level(cli.log.unwrap_or(LogLevel::Trace))
@@ -2170,6 +2182,47 @@ fn main() -> Result<()> {
         }
         Commands::Id {} => {
             println!("0x{:x}", capnpc::generate_random_id());
+        }
+        Commands::Install {
+            //TODO extra options
+            toml,
+            config,
+            store,
+            update,
+            overwrite,
+            stop,
+            force,
+        } => {
+            let mut launch_arguments = vec![OsString::from("service"), OsString::from("-r")];
+            if let Some(p) = toml {
+                launch_arguments.push(OsString::from("-t"));
+                launch_arguments.push(Path::new(&p).canonicalize()?.into_os_string());
+            } else if let Some(p) = config {
+                launch_arguments.push(OsString::from("-c"));
+                launch_arguments.push(Path::new(&p).canonicalize()?.into_os_string());
+            } else {
+                launch_arguments.push(OsString::from("-c"));
+                launch_arguments.push(
+                    Path::new("./keystone.config")
+                        .canonicalize()?
+                        .into_os_string(),
+                );
+            }
+            keystone::service::install(launch_arguments)?;
+            keystone::service::start_service(&[])?;
+        }
+        Commands::Uninstall { stop, force } => {
+            keystone::service::uninstall()?;
+        }
+        Commands::Service { run, toml, config } => {
+            //The service extracts these command line arguments inside it's own main function, config paths need to be absolute paths
+            if run {
+                keystone::service::run();
+            } else {
+                //If you pass service without the -r flag it will ignore the other args and pass in the ones that were used with install
+                #[cfg(windows)]
+                keystone::service::windows::start_service(&[]);
+            }
         }
         _ => todo!(),
     }

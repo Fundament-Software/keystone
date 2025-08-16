@@ -122,7 +122,8 @@ impl SqliteDatabase {
         table_ref_set: Rc<RefCell<CapabilityServerSet<TableRefImpl, table::Client>>>,
         clients: Rc<RefCell<HashMap<u64, Box<dyn capnp::private::capability::ClientHook>>>>,
     ) -> capnp::Result<Self> {
-        let connection = Connection::open_with_flags(path, flags).map_err(convert_rusqlite_error)?;
+        let connection =
+            Connection::open_with_flags(path, flags).map_err(convert_rusqlite_error)?;
         unsafe {
             connection
                 .load_extension_enable()
@@ -990,7 +991,15 @@ impl SqliteDatabase {
 impl std::ops::Drop for SqliteDatabase {
     fn drop(&mut self) {
         let mut stmt = self.connection.prepare("SELECT crsql_finalize()").unwrap();
-        stmt.execute([]).or_else(|err| if err == rusqlite::Error::ExecuteReturnedResults {Ok(0)} else {Err(err)}).unwrap();
+        stmt.execute([])
+            .or_else(|err| {
+                if err == rusqlite::Error::ExecuteReturnedResults {
+                    Ok(0)
+                } else {
+                    Err(err)
+                }
+            })
+            .unwrap();
     }
 }
 
@@ -1598,8 +1607,20 @@ fn create_table_helper(
         .execute(statement.as_str(), ())
         .map_err(convert_rusqlite_error)?;
     if crr_table {
-        let mut stmt = db.connection.prepare(format!("SELECT crsql_as_crr('table{table_name}')").as_str()).map_err(convert_rusqlite_error)?;
-        let _ = stmt.execute([]).or_else(|err| if err == rusqlite::Error::ExecuteReturnedResults {Ok(0)} else {Err(err)}).map_err(convert_rusqlite_error)?;
+        let mut stmt = db
+            .connection
+            .prepare(format!("SELECT crsql_as_crr('table{table_name}')").as_str())
+            .map_err(convert_rusqlite_error)?;
+        let _ = stmt
+            .execute([])
+            .or_else(|err| {
+                if err == rusqlite::Error::ExecuteReturnedResults {
+                    Ok(0)
+                } else {
+                    Err(err)
+                }
+            })
+            .map_err(convert_rusqlite_error)?;
     }
     Ok(())
 }
@@ -1763,8 +1784,20 @@ impl add_d_b::Server for SqliteDatabase {
             ));
         };
         if server.access == AccessLevel::Admin {
-            let mut stmt = self.connection.prepare(format!("SELECT crsql_as_crr('table{}')", server.table_name).as_str()).map_err(convert_rusqlite_error)?;
-            let _ = stmt.execute([]).or_else(|err| if err == rusqlite::Error::ExecuteReturnedResults {Ok(0)} else {Err(err)}).map_err(convert_rusqlite_error)?;
+            let mut stmt = self
+                .connection
+                .prepare(format!("SELECT crsql_as_crr('table{}')", server.table_name).as_str())
+                .map_err(convert_rusqlite_error)?;
+            let _ = stmt
+                .execute([])
+                .or_else(|err| {
+                    if err == rusqlite::Error::ExecuteReturnedResults {
+                        Ok(0)
+                    } else {
+                        Err(err)
+                    }
+                })
+                .map_err(convert_rusqlite_error)?;
         } else {
             return Err(capnp::Error::failed(
                 "Insufficient table ref access level to upgrade table to crr".into(),

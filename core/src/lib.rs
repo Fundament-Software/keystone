@@ -18,6 +18,7 @@ mod posix_process;
 mod process;
 pub mod proxy;
 pub mod scheduler;
+pub mod service;
 pub mod sqlite;
 mod sturdyref;
 mod util;

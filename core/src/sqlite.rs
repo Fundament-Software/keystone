@@ -122,7 +122,7 @@ impl SqliteDatabase {
         table_ref_set: Rc<RefCell<CapabilityServerSet<TableRefImpl, table::Client>>>,
         clients: Rc<RefCell<HashMap<u64, Box<dyn capnp::private::capability::ClientHook>>>>,
     ) -> capnp::Result<Self> {
-        let cr_result = cr_sqlite_sys::init_cr_sqlite_ext();
+        let cr_result = crsql_bundle::init_cr_sqlite_ext();
         assert_eq!(cr_result, 0);
         let connection =
             Connection::open_with_flags(path, flags).map_err(convert_rusqlite_error)?;

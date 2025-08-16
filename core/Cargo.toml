@@ -82,7 +82,7 @@ memchr = "2.7"
 libc = "0.2"
 parking_lot = "0.12"
 derive_more = { version = "2.0.1", features = ["try_from"] }
-cr-sqlite-sys = { git = "https://github.com/Fundament-Software/cr-sqlite.git" }
+crsql_bundle = { git = "https://github.com/Fundament-Software/cr-sqlite.git" }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2"

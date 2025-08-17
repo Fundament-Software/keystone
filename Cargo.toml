@@ -52,8 +52,6 @@ rusqlite = { version = "0.37", features = [
   "i128_blob",
   "uuid",
   "array",
-  "load_extension",
-  "functions"
 ] }
 keystone-build = { path = "build" }
 keystone = { path = "core" }

@@ -122,22 +122,10 @@ impl SqliteDatabase {
         table_ref_set: Rc<RefCell<CapabilityServerSet<TableRefImpl, table::Client>>>,
         clients: Rc<RefCell<HashMap<u64, Box<dyn capnp::private::capability::ClientHook>>>>,
     ) -> capnp::Result<Self> {
+        let cr_result = crsql_bundle::init_cr_sqlite_ext();
+        assert_eq!(cr_result, 0);
         let connection =
             Connection::open_with_flags(path, flags).map_err(convert_rusqlite_error)?;
-        unsafe {
-            connection
-                .load_extension_enable()
-                .map_err(convert_rusqlite_error)?;
-            connection
-                .load_extension(
-                    "I:\\Coding_stuff\\latest\\keystone\\core\\src\\crsqlite",
-                    Some("sqlite3_crsqlite_init"),
-                )
-                .map_err(convert_rusqlite_error)?; //TODO path
-            connection
-                .load_extension_disable()
-                .map_err(convert_rusqlite_error)?;
-        }
         let column_set = RefCell::new(create_column_set(&connection)?);
         Ok(Self {
             connection,
@@ -1575,11 +1563,8 @@ fn create_table_helper(
 ) -> capnp::Result<()> {
     let mut statement = String::new();
     statement.push_str(
-        format!(
-            "CREATE TABLE {}{} (id INTEGER PRIMARY KEY NOT NULL, ",
-            TABLE_PREFIX, table_name
-        )
-        .as_str(),
+        format!("CREATE TABLE {TABLE_PREFIX}{table_name} (id INTEGER PRIMARY KEY NOT NULL, ",)
+            .as_str(),
     );
     db.column_set.borrow_mut().insert("id".to_string());
     db.column_set.borrow_mut().insert("*".to_string());
@@ -3032,8 +3017,9 @@ mod tests {
     #[tokio::test]
     async fn test_crr() -> eyre::Result<()> {
         let db_path = NamedTempFile::new().unwrap().into_temp_path();
+
         let db = Rc::new(SqliteDatabase::new(
-            db_path,
+            db_path.to_path_buf(),
             OpenFlags::default(),
             Default::default(),
             Default::default(),
@@ -3315,10 +3301,10 @@ mod tests {
 
 fn convert_rusqlite_error(err: rusqlite::Error) -> capnp::Error {
     // When we are testing things, output the actual sqlite error
-    #[cfg(feature = "testing")]
+    #[cfg(any(feature = "testing", test))]
     return capnp::Error::failed(err.to_string());
 
-    #[cfg(not(feature = "testing"))]
+    #[cfg(not(any(feature = "testing", test)))]
     match err {
         rusqlite::Error::SqliteFailure(_, _) => {
             capnp::Error::failed("Error from underlying sqlite call".to_string())

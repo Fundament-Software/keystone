@@ -14,6 +14,7 @@ use keystone::config;
 use keystone::keystone_capnp::keystone_config;
 use keystone::module::*;
 use keystone::{CapnpType, service};
+use keystone::{Cli, Commands, LogLevel};
 use ratatui::widgets::{ListState, TableState};
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -31,133 +32,6 @@ use tokio_util::sync::CancellationToken;
 use crossterm::event::{KeyboardEnhancementFlags, PushKeyboardEnhancementFlags};
 
 include!(concat!(env!("OUT_DIR"), "/capnproto.rs"));
-
-#[derive(Parser)]
-#[command(author, version, about, long_about = None)]
-#[command(propagate_version = true)]
-struct Cli {
-    #[command(subcommand)]
-    command: Commands,
-
-    /// Default log level to use
-    #[arg(short = 'l')]
-    log: Option<LogLevel>,
-}
-
-#[derive(ValueEnum, Copy, Clone, Debug, PartialEq, Eq)]
-enum LogLevel {
-    /// Designates very low priority, often extremely verbose, information.
-    Trace,
-    /// Designates lower priority information.
-    Debug,
-    /// Designates useful information.
-    Info,
-    /// Designates hazardous situations.
-    Warn,
-    /// Designates very serious errors.
-    Error,
-}
-
-impl From<LogLevel> for tracing_subscriber::filter::LevelFilter {
-    fn from(val: LogLevel) -> Self {
-        match val {
-            LogLevel::Trace => tracing_subscriber::filter::LevelFilter::TRACE,
-            LogLevel::Debug => tracing_subscriber::filter::LevelFilter::DEBUG,
-            LogLevel::Info => tracing_subscriber::filter::LevelFilter::INFO,
-            LogLevel::Warn => tracing_subscriber::filter::LevelFilter::WARN,
-            LogLevel::Error => tracing_subscriber::filter::LevelFilter::ERROR,
-        }
-    }
-}
-
-#[derive(Subcommand)]
-enum Commands {
-    /// Builds a configuration as a capnproto message. If no input is given, assumes stdin, and if no output is given, assumes stdout.
-    Build {
-        #[arg(short = 't')]
-        toml: Option<String>,
-        //#[arg(short = 'n')]
-        //nickel: Option<String>,
-        #[arg(short = 'o')]
-        output: Option<String>,
-    },
-    /// Given any compiled capnproto message, converts it to a textual format. If no input is given, assumes stdin, and if no output is given, assumes stdout.
-    Inspect {
-        #[arg(short = 'm')]
-        message: Option<String>,
-        #[arg(short = 'o')]
-        output: Option<String>,
-    },
-    /// Starts a new keystone session with the given compiled or textual config. If none are specified, loads "./keystone.config"
-    Session {
-        #[arg(short = 't')]
-        toml: Option<String>,
-        //#[arg(short = 'n')]
-        //nickel: Option<String>,
-        #[arg(short = 'c')]
-        config: Option<String>,
-        #[arg(short = 'i')]
-        interactive: bool,
-    },
-    /// Installs a new keystone daemon using the given compiled config.
-    Install {
-        #[arg(short = 't')]
-        toml: Option<String>,
-        /// If not specified, assumes the config lives in "./keystone.config"
-        #[arg(short = 'c')]
-        config: Option<String>,
-        /// If specified, copies the entire directory next to the keystone executable. Will eventually be replaced with a proper content store.
-        #[arg(short = 'a')]
-        store: Option<String>,
-        /// If any modules are specified in both the old and new configs, preserve their state and internal configuration.
-        #[arg(short = 'u')]
-        update: bool,
-        /// If a keystone daemon is already installed, overwrite it completely.
-        #[arg(short = 'o')]
-        overwrite: bool,
-        /// If a keystone daemon is already running, try to gracefully close it first.
-        #[arg(short = 's')]
-        stop: bool,
-        /// WARNING: MAY CAUSE DATA LOSS. If a keystone daemon is already running, forcibly kill it before updating.
-        #[arg(short = 'f')]
-        force: bool,
-    },
-    /// If a keystone daemon is installed, uninstall it.
-    Uninstall {
-        /// If a keystone daemon is already running, try to gracefully close it first.
-        #[arg(short = 's')]
-        stop: bool,
-        /// WARNING: MAY CAUSE DATA LOSS. If a keystone daemon is already running, forcibly kill it before updating.
-        #[arg(short = 'f')]
-        force: bool,
-    },
-    /// Generates a random file ID.
-    Id {},
-    /// Compiles a capnproto schema as a keystone module, automatically including the keystone standard schemas.
-    Compile {
-        /// List of files to compile
-        files: Vec<String>,
-        /// List of include directories to compile with
-        #[arg(short = 'i')]
-        include: Vec<String>,
-        /// List of source prefixes to compile with
-        #[arg(short = 'p')]
-        prefix: Vec<String>,
-        /// Disable standard include paths
-        #[arg(short = 'n', long = "no-std")]
-        no_std: bool,
-    },
-    /// Start keystone as a windows service or systemd module
-    Service {
-        /// Flag passed by start to run the service, blocking the thread. Should generally not be used directly.
-        #[arg(short = 'r')]
-        run: bool,
-        #[arg(short = 't')]
-        toml: Option<String>,
-        #[arg(short = 'c')]
-        config: Option<String>,
-    },
-}
 
 fn inspect<R: Read>(
     reader: R,
@@ -2209,6 +2083,7 @@ fn main() -> Result<()> {
                 );
             }
             keystone::service::install(launch_arguments)?;
+            //Start the service after installing it, maybe put behind a flag?
             keystone::service::start_service(&[])?;
         }
         Commands::Uninstall { stop, force } => {
@@ -2216,13 +2091,8 @@ fn main() -> Result<()> {
         }
         Commands::Service { run, toml, config } => {
             //The service extracts these command line arguments inside it's own main function, config paths need to be absolute paths
-            if run {
-                keystone::service::run();
-            } else {
-                //If you pass service without the -r flag it will ignore the other args and pass in the ones that were used with install
-                #[cfg(windows)]
-                keystone::service::windows::start_service(&[]);
-            }
+            //If you pass service without the -r flag it will ignore the other args and pass in the ones that were used with install
+            keystone::service::run();
         }
         _ => todo!(),
     }

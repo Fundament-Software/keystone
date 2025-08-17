@@ -3,11 +3,13 @@ use std::ffi::OsString;
 const SERVICE_NAME: &str = "Keystone";
 
 #[cfg(windows)]
-pub mod windows {
+mod windows {
     use crate::config;
     use crate::keystone::Keystone;
     use crate::keystone_capnp::keystone_config;
     use crate::service::SERVICE_NAME;
+    use crate::{Cli, Commands};
+    use clap::{Parser};
     use eyre::eyre;
     use futures_util::StreamExt;
     use std::ffi::OsString;
@@ -43,12 +45,12 @@ pub mod windows {
     fn service_main(arguments: Vec<OsString>) {
         // The entry point where execution will start on a background thread after a call to service_dispatcher::start
         if let Err(_e) = run_service(arguments) {
-            // Handle errors in some way.
+            // Log the errors/report them as windows events
         }
     }
 
     pub(crate) fn run_service(arguments: Vec<OsString>) -> eyre::Result<()> {
-        let (shutdown_tx, mut shutdown_rx) = mpsc::channel(1);
+        let (shutdown_tx, shutdown_rx) = mpsc::channel(1);
         let event_handler = move |control_event| -> ServiceControlHandlerResult {
             match control_event {
                 ServiceControl::Interrogate => ServiceControlHandlerResult::NoError,
@@ -59,16 +61,20 @@ pub mod windows {
                 _ => ServiceControlHandlerResult::NotImplemented,
             }
         };
-        let status_handle = service_control_handler::register(SERVICE_NAME, event_handler)?;
-        let args = std::env::args();
-        let path = args.last().unwrap();
-        let path = Path::new(&path);
-        let dir = path.parent().unwrap_or(Path::new(""));
-        let Some(ext) = path.extension() else {
-            return Err(eyre!("")); //TODO
+        let cli = Cli::parse();
+        let Commands::Service { run, toml, config } = cli.command else {
+            todo!();
         };
+        if !run {
+            //If someone passes service from command line without the run flag, start the service normally with the args provided by install
+            start_service(&[])?;
+            return Ok(());
+        }
+        let status_handle = service_control_handler::register(SERVICE_NAME, event_handler)?;
 
-        if ext == "toml" {
+        if let Some(p) = toml {
+            let path = Path::new(&p);
+            let dir = path.parent().unwrap_or(Path::new(""));
             let mut f = std::fs::File::open(path)?;
             let mut buf = String::new();
             f.read_to_string(&mut buf)?;
@@ -81,15 +87,18 @@ pub mod windows {
                 &status_handle,
                 shutdown_rx,
             )?;
-        } else if ext == "config" {
+        } else if let Some(p) = config {
+            let path = Path::new(&p);
             run_keystone(
-                dir,
+                path.parent().unwrap_or(Path::new("")),
                 config::message_from_file(path)?.get_root::<keystone_config::Reader>()?,
                 &status_handle,
                 shutdown_rx,
             )?;
         } else {
-            return Err(eyre!("")); //TODO
+            return Err(eyre!(
+                "No config passed for keystone initialization inside windows service"
+            ));
         }
 
         status_handle.set_service_status(ServiceStatus {
@@ -184,7 +193,7 @@ pub mod windows {
         }
         Ok(())
     }
-    pub fn start_service(start_params: &[OsString]) -> Result<(), windows_service::Error> {
+    pub(crate) fn start_service(start_params: &[OsString]) -> Result<(), windows_service::Error> {
         let service_manager =
             ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)?;
         let service = service_manager.open_service("Keystone", ServiceAccess::START)?;
@@ -201,6 +210,9 @@ mod systemd {
         todo!()
     }
     pub(crate) fn uninstall() -> eyre::Result<()> {
+        todo!()
+    }
+    pub(crate) fn start_service() -> eyre::Result<()> {
         todo!()
     }
 }
@@ -226,5 +238,13 @@ pub fn run() -> eyre::Result<()> {
     windows::run()?;
     #[cfg(not(windows))]
     systemd::run()?;
+    Ok(())
+}
+
+pub fn start_service(start_params: &[OsString]) -> eyre::Result<()> {
+    #[cfg(windows)]
+    windows::start_service(start_params)?;
+    #[cfg(not(windows))]
+    systemd::start_service()?;
     Ok(())
 }

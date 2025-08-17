@@ -53,6 +53,7 @@ rusqlite = { version = "0.37", features = [
   "uuid",
   "array",
 ] }
+clap = { version = "4.5", features = ["derive"] }
 keystone-build = { path = "build" }
 keystone = { path = "core" }
 hello-world = { path = "examples/hello-world" }

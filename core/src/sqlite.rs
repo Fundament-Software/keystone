@@ -10,10 +10,10 @@ use crate::sqlite_capnp::join_clause::join_operation;
 use crate::sqlite_capnp::select::{limit_operation, merge_operation, ordering_term};
 use crate::sqlite_capnp::update::assignment;
 use crate::sqlite_capnp::{
-    add_d_b, d_b_any, database, delete, expr, function_invocation, index, indexed_column, insert,
-    join_clause, prepared_statement, r_a_table_ref, r_o_database, r_o_table_ref, result_stream,
-    select, select_core, sql_function, statement_results, table, table_field, table_function_ref,
-    table_or_subquery, table_ref, update,
+    add_d_b, crr_table, d_b_any, database, delete, expr, function_invocation, index,
+    indexed_column, insert, join_clause, prepared_statement, r_a_table_ref, r_o_database,
+    r_o_table_ref, result_stream, select, select_core, sql_function, statement_results, table,
+    table_field, table_function_ref, table_or_subquery, table_ref, update,
 };
 use crate::storage_capnp::{saveable, sturdy_ref};
 use crate::sturdyref::SturdyRefImpl;
@@ -122,6 +122,8 @@ impl SqliteDatabase {
         table_ref_set: Rc<RefCell<CapabilityServerSet<TableRefImpl, table::Client>>>,
         clients: Rc<RefCell<HashMap<u64, Box<dyn capnp::private::capability::ClientHook>>>>,
     ) -> capnp::Result<Self> {
+        let cr_result = crsql_bundle::init_cr_sqlite_ext();
+        assert_eq!(cr_result, 0);
         let connection =
             Connection::open_with_flags(path, flags).map_err(convert_rusqlite_error)?;
         let column_set = RefCell::new(create_column_set(&connection)?);
@@ -974,6 +976,21 @@ impl SqliteDatabase {
     }
 }
 
+impl std::ops::Drop for SqliteDatabase {
+    fn drop(&mut self) {
+        let mut stmt = self.connection.prepare("SELECT crsql_finalize()").unwrap();
+        stmt.execute([])
+            .or_else(|err| {
+                if err == rusqlite::Error::ExecuteReturnedResults {
+                    Ok(0)
+                } else {
+                    Err(err)
+                }
+            })
+            .unwrap();
+    }
+}
+
 fn create_column_set(conn: &Connection) -> capnp::Result<HashSet<String>> {
     let mut columns = HashSet::new();
     columns.insert("id".to_string());
@@ -1496,6 +1513,7 @@ impl table::Server for TableRefImpl {
         Ok(())
     }
 }
+impl crr_table::Server for TableRefImpl {}
 struct IndexImpl {
     name: u64,
     db: Rc<SqliteDatabase>,
@@ -1534,50 +1552,74 @@ impl saveable::Server<index::Owned> for IndexImpl {
         Ok(())
     }
 }
-
+fn create_table_helper(
+    db: Rc<SqliteDatabase>,
+    table_name: u64,
+    crr_table: bool,
+    def: capnp::traits::ListIter<
+        capnp::struct_list::Reader<'_, table_field::Owned>,
+        table_field::Reader,
+    >,
+) -> capnp::Result<()> {
+    let mut statement = String::new();
+    statement.push_str(
+        format!("CREATE TABLE {TABLE_PREFIX}{table_name} (id INTEGER PRIMARY KEY NOT NULL, ",)
+            .as_str(),
+    );
+    db.column_set.borrow_mut().insert("id".to_string());
+    db.column_set.borrow_mut().insert("*".to_string());
+    for field in def {
+        let field_name = field.get_name()?.to_string()?;
+        statement.push_str(field_name.as_str());
+        db.column_set.borrow_mut().insert(field_name);
+        match field.get_base_type()? {
+            table_field::Type::Integer => statement.push_str(" INTEGER"),
+            table_field::Type::Real => statement.push_str(" REAL"),
+            table_field::Type::Text => statement.push_str(" TEXT"),
+            table_field::Type::Blob => statement.push_str(" BLOB"),
+            table_field::Type::Pointer => statement.push_str(" INTEGER"),
+        }
+        if !field.get_nullable() {
+            statement.push_str(" NOT NULL");
+        }
+        statement.push_str(", ");
+    }
+    if statement.as_bytes()[statement.len() - 2] == b',' {
+        statement.truncate(statement.len() - 2);
+    }
+    statement.push(')');
+    db.connection
+        .execute(statement.as_str(), ())
+        .map_err(convert_rusqlite_error)?;
+    if crr_table {
+        let mut stmt = db
+            .connection
+            .prepare(format!("SELECT crsql_as_crr('table{table_name}')").as_str())
+            .map_err(convert_rusqlite_error)?;
+        let _ = stmt
+            .execute([])
+            .or_else(|err| {
+                if err == rusqlite::Error::ExecuteReturnedResults {
+                    Ok(0)
+                } else {
+                    Err(err)
+                }
+            })
+            .map_err(convert_rusqlite_error)?;
+    }
+    Ok(())
+}
 #[capnproto_rpc(add_d_b)]
 impl add_d_b::Server for SqliteDatabase {
     async fn create_table(self: Rc<Self>, def: List) {
         let table = generate_table_name(AccessLevel::Admin, self.clone());
-        let mut statement = String::new();
-        statement.push_str(
-            format!(
-                "CREATE TABLE {}{} (id INTEGER PRIMARY KEY, ",
-                TABLE_PREFIX, table.table_name
-            )
-            .as_str(),
-        );
-        self.column_set.borrow_mut().insert("id".to_string());
-        self.column_set.borrow_mut().insert("*".to_string());
-
-        for field in def.iter() {
-            let field_name = field.get_name()?.to_string()?;
-            statement.push_str(field_name.as_str());
-            self.column_set.borrow_mut().insert(field_name);
-            match field.get_base_type()? {
-                table_field::Type::Integer => statement.push_str(" INTEGER"),
-                table_field::Type::Real => statement.push_str(" REAL"),
-                table_field::Type::Text => statement.push_str(" TEXT"),
-                table_field::Type::Blob => statement.push_str(" BLOB"),
-                table_field::Type::Pointer => statement.push_str(" INTEGER"),
-            }
-            if !field.get_nullable() {
-                statement.push_str(" NOT NULL");
-            }
-            statement.push_str(", ");
-        }
-        if statement.as_bytes()[statement.len() - 2] == b',' {
-            statement.truncate(statement.len() - 2);
-        }
-        statement.push(')');
-        self.connection
-            .execute(statement.as_str(), ())
-            .map_err(convert_rusqlite_error)?;
+        let table_name = table.table_name;
         let table_client: table::Client = self
             .table_ref_set
             .as_ref()
             .borrow_mut()
             .new_generic_client(table);
+        create_table_helper(self, table_name, false, def.iter())?;
         results.get().set_res(table_client);
         Ok(())
     }
@@ -1702,6 +1744,51 @@ impl add_d_b::Server for SqliteDatabase {
         results
             .get()
             .set_res(self.index_set.borrow_mut().new_client(index_name));
+        Ok(())
+    }
+    async fn create_crr_table(self: Rc<Self>, def: List) {
+        let table = generate_table_name(AccessLevel::Admin, self.clone());
+        let table_name = table.table_name;
+        let table_client: crr_table::Client = self
+            .table_ref_set
+            .as_ref()
+            .borrow_mut()
+            .new_generic_client(table);
+        create_table_helper(self, table_name, true, def.iter())?;
+        results.get().set_res(table_client);
+        Ok(())
+    }
+    async fn upgrade_to_crr_table(self: Rc<Self>, table: Table) {
+        let Some(server) = self
+            .table_ref_set
+            .borrow()
+            .get_local_server_of_resolved(&table)
+        else {
+            return Err(capnp::Error::failed(
+                "Table ref invalid for this database".to_string(),
+            ));
+        };
+        if server.access == AccessLevel::Admin {
+            let mut stmt = self
+                .connection
+                .prepare(format!("SELECT crsql_as_crr('table{}')", server.table_name).as_str())
+                .map_err(convert_rusqlite_error)?;
+            let _ = stmt
+                .execute([])
+                .or_else(|err| {
+                    if err == rusqlite::Error::ExecuteReturnedResults {
+                        Ok(0)
+                    } else {
+                        Err(err)
+                    }
+                })
+                .map_err(convert_rusqlite_error)?;
+        } else {
+            return Err(capnp::Error::failed(
+                "Insufficient table ref access level to upgrade table to crr".into(),
+            ));
+        }
+        results.get().set_res(table.cast_to());
         Ok(())
     }
 }
@@ -2928,6 +3015,109 @@ mod tests {
         Ok(())
     }
     #[tokio::test]
+    async fn test_crr() -> eyre::Result<()> {
+        let db_path = NamedTempFile::new().unwrap().into_temp_path();
+
+        let db = Rc::new(SqliteDatabase::new(
+            db_path.to_path_buf(),
+            OpenFlags::default(),
+            Default::default(),
+            Default::default(),
+        )?);
+        let client: add_d_b::Client = capnp_rpc::new_client_from_rc(db.clone());
+
+        let create_table_request = client.build_create_table_request(vec![
+            table_field::TableField {
+                _name: "a",
+                _base_type: table_field::Type::Integer,
+                _nullable: true,
+            },
+            table_field::TableField {
+                _name: "b",
+                _base_type: table_field::Type::Integer,
+                _nullable: true,
+            },
+        ]);
+        let table_cap = create_table_request
+            .send()
+            .promise
+            .await?
+            .get()?
+            .get_res()?;
+        let upgrade_request = client.build_upgrade_to_crr_table_request(table_cap);
+        let crr_table1 = upgrade_request.send().promise.await?.get()?.get_res()?;
+
+        let crr_table_request = client.build_create_crr_table_request(vec![
+            table_field::TableField {
+                _name: "a",
+                _base_type: table_field::Type::Text,
+                _nullable: true,
+            },
+            table_field::TableField {
+                _name: "b",
+                _base_type: table_field::Type::Text,
+                _nullable: true,
+            },
+            table_field::TableField {
+                _name: "c",
+                _base_type: table_field::Type::Text,
+                _nullable: true,
+            },
+            table_field::TableField {
+                _name: "d",
+                _base_type: table_field::Type::Text,
+                _nullable: true,
+            },
+        ]);
+        let crr_table2 = crr_table_request.send().promise.await?.get()?.get_res()?;
+
+        let _ = client
+            .send_request_from_sql(
+                "INSERT OR ABORT INTO ?0 (a, b) VALUES (1, 2)",
+                &[Bindings::RATableref(crr_table1.clone().cast_to())],
+            )?
+            .promise
+            .await?;
+
+        let _ = client
+            .send_request_from_sql(
+                "INSERT OR ABORT INTO ?0 (a, b, c, d) VALUES (a, woo, doo, daa)",
+                &[Bindings::RATableref(crr_table2.clone().cast_to())],
+            )?
+            .promise
+            .await?;
+
+        let mut stmt = db
+            .connection
+            .prepare("SELECT * FROM crsql_changes")
+            .map_err(convert_rusqlite_error)?;
+        let mut rows = stmt.query([]).map_err(convert_rusqlite_error)?;
+        while let Ok(Some(row)) = rows.next() {
+            let mut i = 0;
+            while let Ok(value) = row.get_ref(i) {
+                match value {
+                    rusqlite::types::ValueRef::Null => {
+                        print!("Null ");
+                    }
+                    rusqlite::types::ValueRef::Integer(int) => {
+                        print!("{int} ");
+                    }
+                    rusqlite::types::ValueRef::Real(r) => print!("{r} "),
+                    rusqlite::types::ValueRef::Text(t) => {
+                        print!("{:?} ", std::str::from_utf8(t));
+                    }
+                    rusqlite::types::ValueRef::Blob(b) => {
+                        print!("{:?}", b);
+                    }
+                }
+                i += 1;
+            }
+            println!();
+        }
+
+        Ok(())
+    }
+    #[tokio::test]
     async fn test_parsing_sql() -> eyre::Result<()> {
         let db_path = NamedTempFile::new().unwrap().into_temp_path();
         let hook = capnp_rpc::local::Client::new(crate::sqlite_capnp::root::Client::from_server(
@@ -3111,10 +3301,10 @@ mod tests {
 
 fn convert_rusqlite_error(err: rusqlite::Error) -> capnp::Error {
     // When we are testing things, output the actual sqlite error
-    #[cfg(feature = "testing")]
+    #[cfg(any(feature = "testing", test))]
     return capnp::Error::failed(err.to_string());
 
-    #[cfg(not(feature = "testing"))]
+    #[cfg(not(any(feature = "testing", test)))]
     match err {
         rusqlite::Error::SqliteFailure(_, _) => {
             capnp::Error::failed("Error from underlying sqlite call".to_string())

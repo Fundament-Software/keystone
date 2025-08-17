@@ -41,6 +41,9 @@ interface Table extends(TableRef, ST.Saveable(Table)) {
   adminless @0 () -> (res :TableRef);
 }
 
+interface CrrTable extends(Table) {
+}
+
 struct Storage {
 	id @0 :UInt8;
 	data @1 :UInt64;
@@ -79,6 +82,8 @@ interface AddDB extends(Database)  {
 	# this can be used to share a subset of a data table in a secure manner.
 
 	createIndex @3 (base :TableRef, cols :List(IndexedColumn), sqlWhere :List(Expr)) -> (res :Index);
+	createCrrTable @4 (def :List(TableField)) -> (res :CrrTable);
+	upgradeToCrrTable @5 (table :Table) -> (res :CrrTable);
 }
 
 interface Database extends(RODatabase) {

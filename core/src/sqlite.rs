@@ -3301,13 +3301,13 @@ mod tests {
 
 fn convert_rusqlite_error(err: rusqlite::Error) -> capnp::Error {
     // When we are testing things, output the actual sqlite error
-    #[cfg(feature = "testing")]
+    #[cfg(any(feature = "testing", test))]
     return capnp::Error::failed(err.to_string());
 
-    #[cfg(not(feature = "testing"))]
+    #[cfg(not(any(feature = "testing", test)))]
     match err {
-        rusqlite::Error::SqliteFailure(e, s) => {
-            capnp::Error::failed(format!("Error from underlying sqlite call {e} {s:?}"))
+        rusqlite::Error::SqliteFailure(_, _) => {
+            capnp::Error::failed("Error from underlying sqlite call".to_string())
         }
         rusqlite::Error::SqliteSingleThreadedMode => capnp::Error::failed(
             "Attempting to open multiple connection when sqlite is in single threaded mode"
@@ -3316,8 +3316,8 @@ fn convert_rusqlite_error(err: rusqlite::Error) -> capnp::Error {
         rusqlite::Error::FromSqlConversionFailure(_, _, _) => {
             capnp::Error::failed("Error converting sql type to rust type".to_string())
         }
-        rusqlite::Error::IntegralValueOutOfRange(_, i) => {
-            capnp::Error::failed(format!("Integral value {i} out of range"))
+        rusqlite::Error::IntegralValueOutOfRange(_, _) => {
+            capnp::Error::failed("Integral value out of range".to_string())
         }
         rusqlite::Error::Utf8Error(e) => {
             capnp::Error::from_kind(capnp::ErrorKind::TextContainsNonUtf8Data(e))
@@ -3326,8 +3326,8 @@ fn convert_rusqlite_error(err: rusqlite::Error) -> capnp::Error {
             "Error converting string to c-compatible strting, because it contains an embeded null"
                 .to_string(),
         ),
-        rusqlite::Error::InvalidParameterName(s) => {
-            capnp::Error::failed(format!("Invalid parameter name"))
+        rusqlite::Error::InvalidParameterName(_) => {
+            capnp::Error::failed("Invalid parameter name".to_string())
         }
         rusqlite::Error::InvalidPath(_) => capnp::Error::failed("Invalid path".to_string()),
         rusqlite::Error::ExecuteReturnedResults => {
@@ -3336,17 +3336,17 @@ fn convert_rusqlite_error(err: rusqlite::Error) -> capnp::Error {
         rusqlite::Error::QueryReturnedNoRows => capnp::Error::failed(
             "Query that was expected to return rows returned no rows".to_string(),
         ),
-        rusqlite::Error::InvalidColumnIndex(i) => {
-            capnp::Error::failed(format!("Invalid column index {i}"))
+        rusqlite::Error::InvalidColumnIndex(_) => {
+            capnp::Error::failed("Invalid column index".to_string())
         }
-        rusqlite::Error::InvalidColumnName(s) => {
-            capnp::Error::failed(format!("Invalid column name {s}"))
+        rusqlite::Error::InvalidColumnName(_) => {
+            capnp::Error::failed("Invalid column name".to_string())
         }
         rusqlite::Error::InvalidColumnType(_, _, _) => {
             capnp::Error::failed("Invalid column type".to_string())
         }
-        rusqlite::Error::StatementChangedRows(i) => {
-            capnp::Error::failed(format!("Query changed more/less rows ({i}) than expected"))
+        rusqlite::Error::StatementChangedRows(_) => {
+            capnp::Error::failed("Query changed more/less rows than expected".to_string())
         }
         rusqlite::Error::ToSqlConversionFailure(_) => {
             capnp::Error::failed("Failed to convert type to sql type".to_string())

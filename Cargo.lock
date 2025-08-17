@@ -768,7 +768,7 @@ dependencies = [
 [[package]]
 name = "crsql_bundle"
 version = "0.1.0"
-source = "git+https://github.com/Fundament-Software/cr-sqlite.git#5d41abc1e2a4917dc23ab3f9988cb0dbda6ddc01"
+source = "git+https://github.com/Fundament-Software/cr-sqlite.git#8c00145dcdaccc7b44501d2d14f638308c479363"
 dependencies = [
  "crsql_core",
  "crsql_fractindex_core",
@@ -778,7 +778,7 @@ dependencies = [
 [[package]]
 name = "crsql_core"
 version = "0.1.0"
-source = "git+https://github.com/Fundament-Software/cr-sqlite.git#5d41abc1e2a4917dc23ab3f9988cb0dbda6ddc01"
+source = "git+https://github.com/Fundament-Software/cr-sqlite.git#8c00145dcdaccc7b44501d2d14f638308c479363"
 dependencies = [
  "bytes",
  "cc",
@@ -791,7 +791,7 @@ dependencies = [
 [[package]]
 name = "crsql_fractindex_core"
 version = "0.1.0"
-source = "git+https://github.com/Fundament-Software/cr-sqlite.git#5d41abc1e2a4917dc23ab3f9988cb0dbda6ddc01"
+source = "git+https://github.com/Fundament-Software/cr-sqlite.git#8c00145dcdaccc7b44501d2d14f638308c479363"
 dependencies = [
  "sqlite_nostd",
 ]
@@ -2855,7 +2855,7 @@ dependencies = [
 [[package]]
 name = "sqlite_nostd"
 version = "0.1.0"
-source = "git+https://github.com/Fundament-Software/cr-sqlite.git#5d41abc1e2a4917dc23ab3f9988cb0dbda6ddc01"
+source = "git+https://github.com/Fundament-Software/cr-sqlite.git#8c00145dcdaccc7b44501d2d14f638308c479363"
 dependencies = [
  "libsqlite3-sys",
  "num-derive",

@@ -1,6 +1,6 @@
 use std::ffi::OsString;
 
-const SERVICE_NAME: &str = "Keystone";
+const SERVICE_NAME: &str = "Keystone Service";
 
 #[cfg(windows)]
 mod windows {
@@ -13,6 +13,7 @@ mod windows {
     use eyre::eyre;
     use futures_util::StreamExt;
     use std::ffi::OsString;
+    use std::process::Command;
     use std::{io::Read, path::Path, time::Duration};
     use tokio::sync::mpsc;
     use windows_service::service_control_handler::ServiceStatusHandle;
@@ -179,16 +180,21 @@ mod windows {
         service.set_description("Keystone service")?; //TODO description
         Ok(())
     }
-    pub(crate) fn uninstall() -> Result<(), windows_service::Error> {
+    pub(crate) fn uninstall(force: bool) -> eyre::Result<()> {
         let manager_access = ServiceManagerAccess::CONNECT;
         let service_manager = ServiceManager::local_computer(None::<&str>, manager_access)?;
 
         let service_access =
             ServiceAccess::QUERY_STATUS | ServiceAccess::STOP | ServiceAccess::DELETE;
         let service = service_manager.open_service(SERVICE_NAME, service_access)?;
-
         service.delete()?;
-        if service.query_status()?.current_state != ServiceState::Stopped {
+        let service_status = service.query_status()?;
+        if force {
+            let Some(pid) = service_status.process_id else {
+                return Err(eyre!("Service process id needed for force kill missing or process already stopped"));
+            };
+            std::process::Command::new("taskkill").args(&["/PID", pid.to_string().as_str(), "/F"]).output()?;
+        } else if service_status.current_state != ServiceState::Stopped {
             service.stop()?;
         }
         Ok(())
@@ -196,7 +202,7 @@ mod windows {
     pub(crate) fn start_service(start_params: &[OsString]) -> Result<(), windows_service::Error> {
         let service_manager =
             ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)?;
-        let service = service_manager.open_service("Keystone", ServiceAccess::START)?;
+        let service = service_manager.open_service(SERVICE_NAME, ServiceAccess::START)?;
         service.start(start_params)
     }
 }
@@ -225,9 +231,9 @@ pub fn install(launch_arguments: Vec<OsString>) -> eyre::Result<()> {
     Ok(())
 }
 
-pub fn uninstall() -> eyre::Result<()> {
+pub fn uninstall(force: bool) -> eyre::Result<()> {
     #[cfg(windows)]
-    windows::uninstall()?;
+    windows::uninstall(force)?;
     #[cfg(not(windows))]
     systemd::uninstall()?;
     Ok(())

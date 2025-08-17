@@ -2087,7 +2087,7 @@ fn main() -> Result<()> {
             keystone::service::start_service(&[])?;
         }
         Commands::Uninstall { stop, force } => {
-            keystone::service::uninstall()?;
+            keystone::service::uninstall(force)?;
         }
         Commands::Service { run, toml, config } => {
             //The service extracts these command line arguments inside it's own main function, config paths need to be absolute paths

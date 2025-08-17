@@ -13,7 +13,6 @@ mod windows {
     use eyre::eyre;
     use futures_util::StreamExt;
     use std::ffi::OsString;
-    use std::process::Command;
     use std::{io::Read, path::Path, time::Duration};
     use tokio::sync::mpsc;
     use windows_service::service_control_handler::ServiceStatusHandle;

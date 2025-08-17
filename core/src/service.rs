@@ -9,7 +9,7 @@ mod windows {
     use crate::keystone_capnp::keystone_config;
     use crate::service::SERVICE_NAME;
     use crate::{Cli, Commands};
-    use clap::{Parser};
+    use clap::Parser;
     use eyre::eyre;
     use futures_util::StreamExt;
     use std::ffi::OsString;
@@ -191,9 +191,13 @@ mod windows {
         let service_status = service.query_status()?;
         if force {
             let Some(pid) = service_status.process_id else {
-                return Err(eyre!("Service process id needed for force kill missing or process already stopped"));
+                return Err(eyre!(
+                    "Service process id needed for force kill missing or process already stopped"
+                ));
             };
-            std::process::Command::new("taskkill").args(&["/PID", pid.to_string().as_str(), "/F"]).output()?;
+            std::process::Command::new("taskkill")
+                .args(&["/PID", pid.to_string().as_str(), "/F"])
+                .output()?;
         } else if service_status.current_state != ServiceState::Stopped {
             service.stop()?;
         }
